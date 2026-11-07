@@ -1,5 +1,6 @@
 (ns awp-v2.live.http
   (:require [awp-v2.session.api :as session]
+            [awp-v2.knowledge.api :as knowledge]
             [awp-v2.tasking.api :as tasking]
             [awp-v2.tasking.lifecycle :as task-life]
             [awp-v2.tasking.commands :as task-commands]
@@ -36,7 +37,7 @@
       (if (zero? (alength body)) {}
           (json/read-str (String. body "UTF-8") :key-fn keyword)))))
 
-(defn- run-operation [system owner op data]
+(defn- run-operation [system knowledge-system owner op data]
   (case op
     :fresh (session/fresh! system owner (:command-id data))
     :resume (session/resume! system owner (:command-id data) (:conversation-id data))
@@ -54,8 +55,15 @@
                                               (:messages data))})
     :observe (session/observe! system owner (:turn-id data)
                                (update (:observation data) :kind keyword))
-    :settle (session/settle! system owner (:turn-id data)
-                             (some-> (:status data) keyword) (:answer data))
+    :settle (let [result (session/settle! system owner (:turn-id data)
+                                          (some-> (:status data) keyword) (:answer data))]
+              (when (and knowledge-system (= :completed (:status result)))
+                (try
+                  (knowledge/ingest-session-turn! knowledge-system system owner (:turn-id data))
+                  (catch Throwable _
+                    ;; An intake outage cannot rewrite the settled conversation answer.
+                    nil)))
+              result)
     :stop (session/stop! system owner (:turn-id data))
     :compact (session/compact! system owner (:command-id data) data)
     :attach (session/attach! system owner (:task-id data))
@@ -93,7 +101,7 @@
       "interrupt" (tasking/interrupt! task-system task-id)
       {:error "not-found"})))
 
-(defn start! [{:keys [system task-system token port host] :or {port 0 host "127.0.0.1"}}]
+(defn start! [{:keys [system task-system knowledge-system token port host] :or {port 0 host "127.0.0.1"}}]
   (when-not (and system (string? token) (not (str/blank? token)))
     (throw (ex-info "system and token required" {})))
   (let [server (HttpServer/create (InetSocketAddress. ^String host (int port)) 0)]
@@ -110,7 +118,7 @@
                 (or (str/blank? owner) (> (count owner) 256))
                 (send! exchange 400 {:error "invalid owner"})
                 (nil? op) (send! exchange 404 {:error "not-found"})
-                :else (let [result (run-operation system owner op (parse-body exchange))]
+                :else (let [result (run-operation system knowledge-system owner op (parse-body exchange))]
                         (send! exchange (status result) result))))
             (catch Throwable e
               (send! exchange (or (:status (ex-data e)) 400)
@@ -138,6 +146,48 @@
                                             :else 200) result))))
               (catch Throwable _
                 (send! exchange 400 {:error "invalid request"})))))))
+    (when knowledge-system
+      (.createContext server "/internal/knowledge"
+        (reify HttpHandler
+          (handle [_ exchange]
+            (try
+              (let [auth (.getFirst (.getRequestHeaders exchange) "Authorization")
+                    owner (.getFirst (.getRequestHeaders exchange) "X-AWP-Owner")
+                    op (last (str/split (.getPath (.getRequestURI exchange)) #"/"))]
+                (cond
+                  (not= auth (str "Bearer " token)) (send! exchange 401 {:error "unauthorized"})
+                  (or (str/blank? owner) (> (count owner) 256)) (send! exchange 400 {:error "invalid owner"})
+                  :else
+                  (let [data (parse-body exchange)
+                        result (case op
+                                 "tasks" (knowledge/tasks knowledge-system owner (:source-id data))
+                                 "suggestions" (knowledge/suggestions knowledge-system owner)
+                                 "item" (knowledge/item knowledge-system owner (:item-id data))
+                                 "profile" (knowledge/profile knowledge-system owner)
+                                 "review" (knowledge/review! knowledge-system owner (:item-id data)
+                                                              (-> (select-keys data [:action-id :expected-revision :text])
+                                                                  (assoc :decision (get {"accept" :accepted "correct" :corrected
+                                                                                 "reject" :rejected "accepted" :accepted
+                                                                                 "corrected" :corrected "rejected" :rejected}
+                                                                                (:decision data)))))
+                                 "accounts" (knowledge/accounts knowledge-system owner)
+                                 "account" (knowledge/account knowledge-system owner (:account-id data))
+                                 "daily-request" (knowledge/daily-request! knowledge-system owner
+                                                                            {:journal-date (:journal-date data)
+                                                                             :time-zone (:time-zone data)
+                                                                             :sources (mapv #(update % :speaker keyword) (:sources data))})
+                                 "daily-result" (knowledge/daily-result! knowledge-system owner (:account-id data)
+                                                                          {:title (:title data) :story (:story data)
+                                                                           :reason (:reason data)
+                                                                           :sources (mapv #(update % :speaker keyword) (:sources data))})
+                                 "outcome" (knowledge/outcome! knowledge-system owner (:source-id data)
+                                                               (some-> (:mode data) keyword)
+                                                               (some-> (:status data) keyword)
+                                                               {:task-id (:task-id data) :reason (:reason data)
+                                                                :suggestions (mapv #(update % :kind keyword) (:suggestions data))})
+                                 {:error :not-found})]
+                    (send! exchange (status result) result))))
+              (catch Throwable _ (send! exchange 400 {:error "invalid request"})))))))
     (.setExecutor server (java.util.concurrent.Executors/newVirtualThreadPerTaskExecutor))
     (.start server)
     server))

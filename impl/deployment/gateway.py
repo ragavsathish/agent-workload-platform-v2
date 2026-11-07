@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import os
 import uuid
+import urllib.request
+import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
@@ -49,6 +51,52 @@ class GatewayHandler(BaseHTTPRequestHandler):
             raise ValueError("invalid body")
         return value
 
+    def _knowledge(self, parts: list[str], body: dict) -> None:
+        operation = None
+        payload: dict = {}
+        if parts == ["v1", "knowledge", "suggestions"] and self.command == "GET":
+            operation = "suggestions"
+        elif parts == ["v1", "knowledge", "profile"] and self.command == "GET":
+            operation = "profile"
+        elif len(parts) == 4 and parts[:3] == ["v1", "knowledge", "items"] and self.command == "GET":
+            operation, payload = "item", {"item-id": parts[3]}
+        elif len(parts) == 5 and parts[:3] == ["v1", "knowledge", "items"] and parts[4] == "review" and self.command == "POST":
+            operation = "review"
+            payload = {"item-id": parts[3], "action-id": body.get("actionId"),
+                       "expected-revision": body.get("expectedRevision"),
+                       "decision": body.get("decision"), "text": body.get("text")}
+        elif parts == ["v1", "knowledge", "daily-accounts"] and self.command == "GET":
+            operation = "accounts"
+        elif parts == ["v1", "knowledge", "daily-accounts"] and self.command == "POST":
+            operation = "daily-request"
+            payload = {"journal-date": body.get("journalDate"), "time-zone": body.get("timeZone"),
+                       "sources": [{"source-ref": item.get("sourceRef"), "speaker": item.get("speaker"),
+                                    "captured-at": item.get("capturedAt"), "transcript": item.get("transcript")}
+                                   for item in body.get("sources", [])]}
+        elif len(parts) == 4 and parts[:3] == ["v1", "knowledge", "daily-accounts"] and self.command == "GET":
+            operation, payload = "account", {"account-id": parts[3]}
+        elif len(parts) == 5 and parts[:3] == ["v1", "knowledge", "sources"] and parts[4] == "tasks" and self.command == "GET":
+            operation, payload = "tasks", {"source-id": parts[3]}
+        if operation is None:
+            self._send(404, {"detail": "not found"})
+            return
+        request = urllib.request.Request(
+            f"{self.server.grain.base_url}/internal/knowledge/{operation}",
+            data=json.dumps(payload).encode(), method="POST",
+            headers={"Authorization": f"Bearer {self.server.grain.token}",
+                     "X-AWP-Owner": self.server.owner, "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                self._send(response.status, json.load(response))
+        except urllib.error.HTTPError as error:
+            try:
+                value = json.load(error)
+            except (ValueError, OSError):
+                value = {"detail": "knowledge request failed"}
+            self._send(error.code, value)
+        except OSError:
+            self._send(503, {"detail": "knowledge authority unavailable"})
+
     def _handle(self) -> None:
         if self.path == "/health":
             self._send(200, {"status": "ready"})
@@ -58,7 +106,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
             return
         parsed = urlsplit(self.path)
         parts = parsed.path.strip("/").split("/")
-        if parts[0] != "v1" or len(parts) < 2 or parts[1] != "tasks":
+        if parts[0] != "v1" or len(parts) < 2 or parts[1] not in {"tasks", "knowledge"}:
             self._send(404, {"detail": "not found"})
             return
         query = parse_qs(parsed.query)
@@ -66,6 +114,9 @@ class GatewayHandler(BaseHTTPRequestHandler):
         identity = body.get("identity") or query.get("identity", [None])[0]
         if identity != self.server.owner:
             self._send(403, {"detail": "owner denied"})
+            return
+        if parts[1] == "knowledge":
+            self._knowledge(parts, body)
             return
         client = self.server.grain
         if len(parts) == 2 and self.command == "POST":

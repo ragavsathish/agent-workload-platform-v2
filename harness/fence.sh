@@ -21,6 +21,12 @@ git -C "$TARGET" remote remove origin
 git -C "$TARGET" reflog expire --expire=now --all
 git -C "$TARGET" gc -q --prune=now --aggressive
 [[ ! -e "$TARGET/impl" ]] || { echo "FENCE FAILED: implementation remains" >&2; exit 1; }
+[[ -f "$TARGET/docs/plan/07-personal-knowledge/spec.feature" ]] || {
+  echo "FENCE FAILED: slice 07 contract missing" >&2; exit 1;
+}
+[[ -f "$TARGET/raw/v1/c3-personal-knowledge.feature" ]] || {
+  echo "FENCE FAILED: pinned knowledge evidence missing" >&2; exit 1;
+}
 [[ "$(git -C "$TARGET" rev-list --all --count)" == 1 ]] || {
   echo "FENCE FAILED: prior history remains" >&2; exit 1
 }

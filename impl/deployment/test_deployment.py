@@ -12,6 +12,7 @@ import time
 import urllib.request
 import unittest
 from pathlib import Path
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from deployment import (OwnerIngress, MediaProof, ServiceSpec, ServiceSupervisor,
                         GrainTaskClient, TaskScheduler, ScheduledExecutor, VersionStore, readiness)
@@ -122,6 +123,49 @@ class DeploymentAcceptance(unittest.TestCase):
             submit("foreign@example.test")
         self.assertEqual(denied.exception.code, 403)
         denied.exception.close()
+
+
+    def test_knowledge_owner_route_forwards_review_and_refuses_foreign(self):
+        seen = []
+        class InternalHandler(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_POST(self):
+                size = int(self.headers.get("Content-Length", "0"))
+                seen.append((self.path, json.loads(self.rfile.read(size)),
+                             self.headers.get("X-AWP-Owner"), self.headers.get("Authorization")))
+                value = json.dumps({"status": "accepted", "revision": 1}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(value)))
+                self.end_headers()
+                self.wfile.write(value)
+        internal = ThreadingHTTPServer(("127.0.0.1", 0), InternalHandler)
+        internal_thread = threading.Thread(target=internal.serve_forever, daemon=True)
+        internal_thread.start()
+        self.addCleanup(lambda: (internal.shutdown(), internal.server_close(), internal_thread.join()))
+        grain = GrainTaskClient(f"http://127.0.0.1:{internal.server_port}", "inner-token", "owner@example.test")
+        gateway = GatewayServer(("127.0.0.1", 0), grain, "outer-token", "owner@example.test")
+        gateway_thread = threading.Thread(target=gateway.serve_forever, daemon=True)
+        gateway_thread.start()
+        self.addCleanup(lambda: (gateway.shutdown(), gateway.server_close(), gateway_thread.join()))
+        url = f"http://127.0.0.1:{gateway.server_port}/v1/knowledge/items/item-1/review"
+        def review(identity):
+            request = urllib.request.Request(url, method="POST", data=json.dumps({
+                "identity": identity, "actionId": "review-1", "expectedRevision": 0,
+                "decision": "accept"}).encode(), headers={"Authorization": "Bearer outer-token",
+                                                    "Content-Type": "application/json"})
+            return urllib.request.urlopen(request, timeout=10)
+        with review("owner@example.test") as response:
+            self.assertEqual(json.load(response)["status"], "accepted")
+        self.assertEqual(seen[0], ("/internal/knowledge/review",
+                                   {"item-id": "item-1", "action-id": "review-1",
+                                    "expected-revision": 0, "decision": "accept", "text": None},
+                                   "owner@example.test", "Bearer inner-token"))
+        with self.assertRaises(urllib.error.HTTPError) as denied:
+            review("foreign@example.test")
+        self.assertEqual(denied.exception.code, 403)
+        denied.exception.close()
+        self.assertEqual(len(seen), 1)
 
     def test_deploy_007_interrupted_claim_recovery(self):
         class Grain:

@@ -49,4 +49,5 @@ if command -v docker >/dev/null 2>&1; then
 fi
 "$ROOT/harness/probe.sh"
 "$ROOT/harness/session-probe.sh"
+"$ROOT/harness/knowledge-probe.sh"
 echo "verify OK: documentation, source hashes, behavior, runtime topology, and public module probe"

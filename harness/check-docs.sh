@@ -38,4 +38,11 @@ for id in $(rg -o '@session-[0-9]+' docs/plan/03-session-orchestration/spec.feat
   fi
 done
 
+for id in $(rg -o '@knowledge-[0-9]+' docs/plan/07-personal-knowledge/spec.feature | tr -d '@'); do
+  if ! rg -q "$id" impl/test/awp_v2/knowledge_acceptance_test.clj; then
+    echo "Acceptance scenario $id has no named test" >&2
+    exit 1
+  fi
+done
+
 echo "documentation gate OK"

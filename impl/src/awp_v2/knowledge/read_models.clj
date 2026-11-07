@@ -1,0 +1,54 @@
+(ns awp-v2.knowledge.read-models
+  (:require [ai.obney.grain.read-model-processor-v2.interface :as rmp :refer [defreadmodel]]))
+
+(defn- apply-fact [state {:keys [kind data]}]
+  (case kind
+    :intake (let [{:keys [source-id]} data]
+              (-> state
+                  (assoc-in [:sources source-id] (select-keys data [:source-id :owner :conversation-id :message-id :transcript :captured-at]))
+                  (assoc-in [:work source-id :journal] {:source-id source-id :mode :journal :status :pending :request-id (:journal-request-id data)})
+                  (assoc-in [:work source-id :classification] {:source-id source-id :mode :classification :status :pending :request-id (:classification-request-id data)})))
+    :submission (assoc-in state [:work (:source-id data) (:mode data) :task-id] (:task-id data))
+    :submission-uncertain (assoc-in state [:work (:source-id data) (:mode data) :status] :uncertain)
+    :outcome (let [{:keys [source-id mode status suggestions]} data
+                   next (-> state
+                            (assoc-in [:work source-id mode :status] status)
+                            (assoc-in [:work source-id mode :reason] (:reason data))
+                            (assoc-in [:work source-id mode :output-digest] (:output-digest data)))]
+               (reduce (fn [s item]
+                         (assoc-in s [:items (:item-id item)]
+                                   {:item-id (:item-id item) :kind (:kind item)
+                                    :owner (:owner data) :source-id source-id :mode mode
+                                    :original-text (:text item) :current-text (:text item)
+                                    :evidence (:evidence item) :status :pending :revision 0 :reviews []}))
+                       next suggestions))
+    :review (let [{:keys [item-id decision text action-id]} data]
+              (-> state
+                  (update-in [:items item-id :revision] inc)
+                  (assoc-in [:items item-id :status] decision)
+                  (cond-> text (assoc-in [:items item-id :current-text] text))
+                  (update-in [:items item-id :reviews] conj
+                             (select-keys data [:action-id :decision :text :expected-revision :at]))
+                  (assoc-in [:actions action-id] data)))
+    :daily-request (assoc-in state [:accounts (:account-id data)]
+                             (assoc data :status :pending))
+    :daily-submission (assoc-in state [:accounts (:account-id data) :task-id] (:task-id data))
+    :daily-uncertain (assoc-in state [:accounts (:account-id data) :status] :uncertain)
+    :daily-result (-> state
+                      (assoc-in [:accounts (:account-id data) :status] (:status data))
+                      (assoc-in [:accounts (:account-id data) :title] (:title data))
+                      (assoc-in [:accounts (:account-id data) :story] (:story data))
+                      (assoc-in [:accounts (:account-id data) :reason] (:reason data)))
+    state))
+
+(defreadmodel :knowledge state
+  {:events #{:knowledge/fact} :version 1 :schema [:map-of :string :map]}
+  "Owner-scoped knowledge state from immutable decisions."
+  [state event]
+  (let [owner (:owner event)]
+    (assoc state owner (-> (apply-fact (get state owner {}) event)
+                           (assoc :revision (:event/id event))))))
+
+(defn owners [context] (rmp/project context :knowledge/state))
+(defn owner-state [context owner]
+  (get (owners context) owner))

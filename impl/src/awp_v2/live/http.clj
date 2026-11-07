@@ -176,6 +176,10 @@
                                                                             {:journal-date (:journal-date data)
                                                                              :time-zone (:time-zone data)
                                                                              :sources (mapv #(update % :speaker keyword) (:sources data))})
+                                 "daily-worker-result" (knowledge/ingest-daily-worker-result! knowledge-system owner
+                                                     (update data :sources (fn [sources] (mapv #(update % :speaker keyword) sources))))
+                                 "worker-result" (knowledge/ingest-worker-result! knowledge-system owner
+                                                   (update data :suggestions (fn [items] (mapv #(update % :kind keyword) items))))
                                  "daily-result" (knowledge/daily-result! knowledge-system owner (:account-id data)
                                                                           {:title (:title data) :story (:story data)
                                                                            :reason (:reason data)

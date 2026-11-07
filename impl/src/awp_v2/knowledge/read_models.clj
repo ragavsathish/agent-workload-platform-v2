@@ -14,13 +14,19 @@
                    next (-> state
                             (assoc-in [:work source-id mode :status] status)
                             (assoc-in [:work source-id mode :reason] (:reason data))
-                            (assoc-in [:work source-id mode :output-digest] (:output-digest data)))]
+                            (assoc-in [:work source-id mode :output-digest] (:output-digest data))
+                            (assoc-in [:work source-id mode :result-id] (:result-id data))
+                            (assoc-in [:work source-id mode :model] (:model data))
+                            (assoc-in [:work source-id mode :processor-version] (:processor-version data))
+                            (assoc-in [:work source-id mode :classification] (:classification data)))]
                (reduce (fn [s item]
                          (assoc-in s [:items (:item-id item)]
                                    {:item-id (:item-id item) :kind (:kind item)
                                     :owner (:owner data) :source-id source-id :mode mode
                                     :original-text (:text item) :current-text (:text item)
-                                    :evidence (:evidence item) :status :pending :revision 0 :reviews []}))
+                                    :evidence (:evidence item) :entry-type (:entry-type item) :result-id (:result-id data)
+                                    :model (:model data) :processor-version (:processor-version data)
+                                    :status :pending :revision 0 :reviews []}))
                        next suggestions))
     :review (let [{:keys [item-id decision text action-id]} data]
               (-> state
@@ -30,6 +36,10 @@
                   (update-in [:items item-id :reviews] conj
                              (select-keys data [:action-id :decision :text :expected-revision :at]))
                   (assoc-in [:actions action-id] data)))
+    :legacy-snapshot (assoc-in state [:legacy-snapshots (:snapshot-id data)] (select-keys data [:snapshot-id :digest]))
+    :legacy-resource (assoc-in state [:legacy-resources (:snapshot-id data) (:legacy-id data)] (:resource data))
+    :legacy-switch (assoc state :read-source :import :selected-snapshot (:snapshot-id data))
+    :legacy-rollback (assoc state :read-source :source)
     :daily-request (assoc-in state [:accounts (:account-id data)]
                              (assoc data :status :pending))
     :daily-submission (assoc-in state [:accounts (:account-id data) :task-id] (:task-id data))
@@ -38,7 +48,11 @@
                       (assoc-in [:accounts (:account-id data) :status] (:status data))
                       (assoc-in [:accounts (:account-id data) :title] (:title data))
                       (assoc-in [:accounts (:account-id data) :story] (:story data))
-                      (assoc-in [:accounts (:account-id data) :reason] (:reason data)))
+                      (assoc-in [:accounts (:account-id data) :reason] (:reason data))
+                      (assoc-in [:accounts (:account-id data) :result-id] (:result-id data))
+                      (assoc-in [:accounts (:account-id data) :model] (:model data))
+                      (assoc-in [:accounts (:account-id data) :processor-version] (:processor-version data))
+                      (assoc-in [:accounts (:account-id data) :output-digest] (:output-digest data)))
     state))
 
 (defreadmodel :knowledge state

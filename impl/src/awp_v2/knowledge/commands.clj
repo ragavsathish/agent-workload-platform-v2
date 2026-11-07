@@ -21,6 +21,8 @@
         item (get-in state [:items (:item-id data)])
         account (get-in state [:accounts (:account-id data)])
         prior-action (get-in state [:actions (:action-id data)])
+        legacy-snapshot (get-in state [:legacy-snapshots (:snapshot-id data)])
+        legacy-resource (get-in state [:legacy-resources (:snapshot-id data) (:legacy-id data)])
         result
         (cond
           (not= actor-id owner) (refuse :not-found)
@@ -76,12 +78,35 @@
           (= op :daily-uncertain)
           (if account {:fact data :value {:account-id (:account-id data) :status :uncertain}}
               (refuse :not-found))
+          (= op :legacy-snapshot)
+          (if legacy-snapshot
+            (if (= (:digest legacy-snapshot) (:digest data))
+              {:value {:status :reused :snapshot-id (:snapshot-id data)}} (refuse :conflict))
+            {:fact data :value {:status :accepted :snapshot-id (:snapshot-id data)}})
+          (= op :legacy-resource)
+          (cond
+            (nil? legacy-snapshot) (refuse :not-found)
+            legacy-resource (if (= legacy-resource (:resource data))
+                              {:value {:status :reused :legacy-id (:legacy-id data)}} (refuse :conflict))
+            :else {:fact data :value {:status :accepted :legacy-id (:legacy-id data)}})
+          (= op :legacy-switch)
+          (cond
+            (nil? legacy-snapshot) (refuse :not-found)
+            (not= (:expected-ids data) (set (keys (get-in state [:legacy-resources (:snapshot-id data)]))))
+            (refuse :conflict)
+            :else {:fact data :value {:read-source :import :snapshot-id (:snapshot-id data)}})
+          (= op :legacy-rollback)
+          (if legacy-snapshot
+            {:fact data :value {:read-source :source :snapshot-id (:snapshot-id data)}}
+            (refuse :not-found))
           (= op :daily-result)
           (cond
             (nil? account) (refuse :not-found)
             (not= (:source-digest account) (:source-digest data)) (refuse :conflict)
             (#{:completed :failed} (:status account))
-            (if (= (:status account) (:status data)) {:value account} (refuse :conflict))
+            (if (and (= (:status account) (:status data))
+                     (= (:output-digest account) (:output-digest data)))
+              {:value account} (refuse :conflict))
             :else {:fact data :value (merge account data)})
           :else (refuse :incorrect))]
     (if-not (:fact result)
@@ -101,3 +126,8 @@
 (defcommand :knowledge daily-submission {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :daily-submission ctx))
 (defcommand :knowledge daily-uncertain {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :daily-uncertain ctx))
 (defcommand :knowledge daily-result {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :daily-result ctx))
+
+(defcommand :knowledge legacy-snapshot {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :legacy-snapshot ctx))
+(defcommand :knowledge legacy-resource {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :legacy-resource ctx))
+(defcommand :knowledge legacy-switch {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :legacy-switch ctx))
+(defcommand :knowledge legacy-rollback {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :legacy-rollback ctx))

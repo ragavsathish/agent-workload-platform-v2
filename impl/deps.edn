@@ -1,6 +1,10 @@
 {:paths ["src"]
  :deps {org.clojure/clojure {:mvn/version "1.12.0"}
         org.clojure/data.json {:mvn/version "2.5.1"}
+        cat/schema-util
+        {:git/url "https://github.com/ObneyAI/grain.git"
+         :git/sha "dbf5b5229aad09785e40f71e96adf65c90f971d5"
+         :deps/root "components/schema-util"}
         obneyai/grain-core-v2
         {:git/url "https://github.com/ObneyAI/grain.git"
          :git/sha "dbf5b5229aad09785e40f71e96adf65c90f971d5"
@@ -9,6 +13,10 @@
         {:git/url "https://github.com/ObneyAI/grain.git"
          :git/sha "dbf5b5229aad09785e40f71e96adf65c90f971d5"
          :deps/root "projects/grain-event-model"}
+        obneyai/orc-ontology
+        {:git/url "https://github.com/ObneyAI/orc.git"
+         :git/sha "033f0ab7c2be46fd8bddd5fc94e362d074afac34"
+         :deps/root "projects/orc-ontology"}
         obneyai/grain-event-store-sqlite-v3
         {:git/url "https://github.com/ObneyAI/grain.git"
          :git/sha "dbf5b5229aad09785e40f71e96adf65c90f971d5"

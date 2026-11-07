@@ -10,7 +10,7 @@ allium check specs
 (cd "$ROOT/impl" && clojure -M:verify)
 pnpm --dir "$ROOT/impl/runtime" install --frozen-lockfile --ignore-scripts
 pnpm --dir "$ROOT/impl/runtime" run build
-pnpm --dir "$ROOT/impl/runtime/products/voice-agent/apps/pi-agent" exec node --test live-protocol.test.mjs
+pnpm --dir "$ROOT/impl/runtime/products/voice-agent/apps/pi-agent" exec node --test live-protocol.test.mjs knowledge-worker.test.mjs knowledge-quality.test.mjs
 (cd "$ROOT/impl/runtime/products/voice-agent/apps/broker" &&
   uv sync --frozen --no-dev --quiet &&
   PYTHONPATH=src:../../packages/telemetry/src .venv/bin/python test_live_proxy.py)
@@ -43,6 +43,7 @@ python3 -m py_compile "$ROOT/impl/deployment/deployment.py" \
   "$ROOT/impl/deployment/qualify_public.py" \
   "$ROOT/impl/deployment/confirm_public_report.py"
 python3 -m unittest discover -s "$ROOT/impl/deployment" -p test_deployment.py -v
+python3 -m unittest discover -s "$ROOT/impl/knowledge-migration" -p test_snapshot.py -v
 if command -v docker >/dev/null 2>&1; then
   AWP_PUBLIC_EDGE_ENV="$ROOT/impl/deployment/edge.env.example" \
     docker compose -f "$ROOT/impl/deployment/compose.yml" config --quiet

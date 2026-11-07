@@ -25,7 +25,7 @@
   (.formatHex (java.util.HexFormat/of)
               (.digest (MessageDigest/getInstance "SHA-256") (.getBytes (pr-str value) "UTF-8"))))
 (defn- stable-id [value] (str (UUID/nameUUIDFromBytes (.getBytes value "UTF-8"))))
-(declare recover!)
+(declare recover! daily-result! ingest-worker-result! ingest-daily-worker-result! schedule-worker!)
 (defn open-system [{:keys [storage-dir] :as options}]
   (validator/verify-or-throw!)
   (let [owned? (nil? storage-dir)
@@ -36,9 +36,9 @@
         store (es/start {:conn {:type :sqlite :database-file (str (io/file dir "knowledge-events.sqlite"))}})
         cache (kv/start (lmdb/->KV-Store-LMDB {:storage-dir (.getPath dir) :db-name "knowledge"}))]
     (let [system (assoc options :event-store store :cache cache :cache-dir dir :owned-dir? owned?
-                        :closed? (atom false)
+                        :closed? (atom false) :inflight (atom #{})
                         :tenant-id (UUID/nameUUIDFromBytes (.getBytes (.getCanonicalPath dir) "UTF-8")))]
-      (when (:submit-task! system) (recover! system))
+      (when (or (:submit-task! system) (:run-worker! system)) (recover! system))
       system)))
 (defn close-system! [{:keys [event-store cache cache-dir owned-dir? closed?]}]
   (when (compare-and-set! closed? false true)
@@ -57,7 +57,11 @@
       (if (and (= ::anom/conflict (::anom/category result))
                (= "CAS failed" (::anom/message result)) (< attempt 12))
         (do (rmp/l1-clear!) (recur (inc attempt)))
-        (response result :command/result)))))
+        (let [value (response result :command/result)]
+          (when (and (:after-write! system) (not (:error value)))
+            (try ((:after-write! system) system actor)
+                 (catch Throwable _ nil)))
+          value)))))
 (defn- read! [system actor op data]
   (response (qp/process-query (assoc system :actor-id actor
                                      :query (merge {:query/name (keyword "knowledge" (name op))
@@ -90,7 +94,8 @@
           (if-let [submit (:submit-task! system)]
             (let [accepted (submit request)]
               (if-let [task-id (:task-id accepted)]
-                (issue! system actor :submission {:source-id source-id :mode mode :task-id (str task-id)})
+                (do (issue! system actor :submission {:source-id source-id :mode mode :task-id (str task-id)})
+                    (schedule-worker! system (assoc request :task-id (str task-id))))
                 (issue! system actor :submission-uncertain {:source-id source-id :mode mode})))
             (issue! system actor :submission-uncertain {:source-id source-id :mode mode}))
           (catch Throwable _
@@ -123,7 +128,7 @@
                       (#{:journal :assertion} kind)
                       (string? text) (<= 1 (count text) 1000)
                       (string? evidence) (not (str/blank? evidence))
-                      (str/includes? (str/lower-case transcript) (str/lower-case evidence)))) suggestions)
+                      (str/includes? transcript evidence))) suggestions)
        (= (count suggestions) (count (set (map :item-id suggestions))))))
 (defn outcome! [system actor source-id mode status payload]
   (let [state (models/owner-state system actor)
@@ -137,9 +142,38 @@
       (issue! system actor :outcome {:owner actor :source-id source-id :mode mode :status status
                                      :suggestions (if (= status :completed) suggestions [])
                                      :task-id (:task-id work)
-                                     :output-digest (digest [status suggestions (:reason payload)])
+                                     :output-digest (digest [status suggestions (:reason payload) (:result-id payload) (:model payload) (:processor-version payload)])
+                                     :result-id (:result-id payload) :model (:model payload)
+                                     :processor-version (:processor-version payload)
+                                     :classification (:classification payload)
                                      :reason (:reason payload)})
       {:error :incorrect})))
+(defn ingest-worker-result! [system actor {:keys [result-id task-id source-id mode status suggestions
+                                                  model processor-version reason classification]}]
+  (let [mode (if (keyword? mode) mode (keyword mode))
+        status (if (keyword? status) status (keyword status))]
+    (if (and (string? result-id) (not (str/blank? result-id))
+             (string? task-id) (string? source-id)
+             (string? model) (not (str/blank? model))
+             (string? processor-version) (not (str/blank? processor-version))
+             (#{:journal :classification} mode) (#{:completed :failed} status))
+      (outcome! system actor source-id mode status
+                {:task-id task-id :suggestions (mapv #(update % :kind (fn [k] (if (keyword? k) k (keyword k)))) suggestions)
+                 :reason reason :result-id result-id :model model :processor-version processor-version
+                 :classification classification})
+      {:error :incorrect})))
+
+(defn ingest-daily-worker-result! [system actor {:keys [account-id task-id result-id title story reason sources model processor-version]}]
+  (let [account (get-in (models/owner-state system actor) [:accounts account-id])]
+    (if (and account (= task-id (:task-id account))
+             (string? result-id) (not (str/blank? result-id))
+             (string? model) (not (str/blank? model))
+             (string? processor-version) (not (str/blank? processor-version)))
+      (daily-result! system actor account-id {:title title :story story :reason reason :sources sources
+                                               :result-id result-id :model model
+                                               :processor-version processor-version})
+      {:error :conflict})))
+
 (defn review! [system actor item-id {:keys [action-id expected-revision decision text] :as command}]
   (if (and (string? action-id) (<= 1 (count action-id) 128)
            (integer? expected-revision) (<= 0 expected-revision)
@@ -165,7 +199,8 @@
                                                               :sources :source-refs :source-digest])
                                         :mode :daily-account :request-id account-id))]
             (if-let [task-id (:task-id accepted)]
-              (issue! system actor :daily-submission {:account-id account-id :task-id (str task-id)})
+              (do (issue! system actor :daily-submission {:account-id account-id :task-id (str task-id)})
+                  (schedule-worker! system (assoc account :mode :daily-account :task-id (str task-id))))
               (issue! system actor :daily-uncertain {:account-id account-id})))
           (issue! system actor :daily-uncertain {:account-id account-id}))
         (catch Throwable _ (issue! system actor :daily-uncertain {:account-id account-id}))))))
@@ -187,7 +222,7 @@
         (submit-daily! system actor account-id))
       result)
     {:error :incorrect}))
-(defn daily-result! [system actor account-id {:keys [title story reason sources]}]
+(defn daily-result! [system actor account-id {:keys [title story reason sources result-id model processor-version]}]
   (if (and (string? account-id)
            (and (vector? sources) (or (and (string? title) (not (str/blank? title)) (<= (count title) 200)
                     (string? story) (not (str/blank? story)) (<= (count story) 8000))
@@ -195,13 +230,55 @@
     (issue! system actor :daily-result {:account-id account-id
                                          :source-digest (digest (canonical-sources sources))
                                          :status (if story :completed :failed)
-                                         :title title :story story :reason reason})
+                                         :title title :story story :reason reason
+                                         :result-id result-id :model model :processor-version processor-version
+                                         :output-digest (digest [title story reason result-id model processor-version])})
     {:error :incorrect}))
+
+(defn schedule-worker! [system {:keys [owner source-id mode account-id task-id request-id] :as request}]
+  (when-let [run (:run-worker! system)]
+    (let [key [owner (or source-id account-id) mode task-id]
+          [before _] (swap-vals! (:inflight system) conj key)]
+      (when-not (contains? before key)
+        (future
+          (try
+            (let [result (run request)]
+              (if (= mode :daily-account)
+                (ingest-daily-worker-result! system owner
+                  {:account-id account-id :task-id task-id :result-id (:result-id result)
+                   :title (:title result) :story (:story result) :reason (:reason result)
+                   :sources (mapv #(update % :speaker keyword) (:sources result))
+                   :model (:model result) :processor-version (:processor-version result)})
+                (ingest-worker-result! system owner
+                  {:source-id source-id :task-id task-id :result-id (:result-id result)
+                   :mode mode :status (:status result) :reason (:reason result)
+                   :suggestions (:suggestions result) :classification (:classification result)
+                   :model (:model result) :processor-version (:processor-version result)})))
+            (catch Throwable error
+              (when (not= mode :daily-account)
+                (ingest-worker-result! system owner
+                  {:source-id source-id :task-id task-id :result-id (str task-id ":failed")
+                   :mode mode :status :failed :reason (or (.getMessage error) "worker failed")
+                   :suggestions [] :model "worker-error" :processor-version "knowledge-v2-1"})))
+            (finally (swap! (:inflight system) disj key))))))))
 
 (defn recover! [system]
   (doseq [[owner state] (models/owners system)]
     (doseq [source-id (keys (:sources state))]
-      (submit-extractions! system owner source-id))
+      (submit-extractions! system owner source-id)
+      (when (:run-worker! system)
+        (doseq [[mode work] (get-in (models/owner-state system owner) [:work source-id])
+                :when (and (:task-id work) (#{:pending :uncertain} (:status work)))]
+          (schedule-worker! system (assoc (get-in (models/owner-state system owner) [:sources source-id])
+                                          :mode mode :task-id (:task-id work) :request-id (:request-id work))))))
     (doseq [account-id (keys (:accounts state))]
-      (submit-daily! system owner account-id)))
+      (submit-daily! system owner account-id)
+      (let [account (get-in (models/owner-state system owner) [:accounts account-id])]
+        (when (and (:run-worker! system) (:task-id account) (#{:pending :uncertain} (:status account)))
+          (schedule-worker! system (assoc account :mode :daily-account :request-id account-id))))))
   {:status :reconciled})
+
+(defn legacy-command! [system actor op data]
+  (if (#{:legacy-snapshot :legacy-resource :legacy-switch :legacy-rollback} op)
+    (issue! system actor op (assoc data :owner actor))
+    {:error :incorrect}))

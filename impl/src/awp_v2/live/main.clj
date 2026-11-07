@@ -2,6 +2,8 @@
   (:require [awp-v2.live.http :as http]
             [awp-v2.knowledge.api :as knowledge]
             [awp-v2.knowledge.gateway-adapter :as knowledge-gateway]
+            [awp-v2.knowledge.native-worker :as native-worker]
+            [awp-v2.knowledge.orc-adapter :as orc-adapter]
             [awp-v2.session.api :as session]
             [awp-v2.tasking.api :as tasking]
             [awp-v2.tasking.commands :as task-commands]
@@ -29,11 +31,16 @@
         knowledge-system (knowledge/open-system
                            {:storage-dir (or (System/getenv "AWP_KNOWLEDGE_STORAGE_DIR")
                                              (str (required "AWP_SESSION_STORAGE_DIR") "-knowledge"))
-                            :submit-task! (when (and (System/getenv "AWP_LEGACY_KNOWLEDGE_GATEWAY_URL")
+                            :after-write! (fn [system owner] (orc-adapter/sync-owner! system owner))
+                            :run-worker! (when-let [script (System/getenv "AWP_KNOWLEDGE_WORKER_SCRIPT")]
+                                           (native-worker/runner {:script script}))
+                            :submit-task! (if (System/getenv "AWP_KNOWLEDGE_WORKER_SCRIPT")
+                                            (fn [request] {:task-id (:request-id request)})
+                                            (when (and (System/getenv "AWP_LEGACY_KNOWLEDGE_GATEWAY_URL")
                                                      (System/getenv "AWP_LEGACY_KNOWLEDGE_GATEWAY_TOKEN"))
                                             (knowledge-gateway/task-submitter
                                               {:base-url (System/getenv "AWP_LEGACY_KNOWLEDGE_GATEWAY_URL")
-                                               :token (System/getenv "AWP_LEGACY_KNOWLEDGE_GATEWAY_TOKEN")}))})
+                                               :token (System/getenv "AWP_LEGACY_KNOWLEDGE_GATEWAY_TOKEN")})))})
         system (session/open-system
                  {:storage-dir (required "AWP_SESSION_STORAGE_DIR")
                   :owned-task? owned-task?})

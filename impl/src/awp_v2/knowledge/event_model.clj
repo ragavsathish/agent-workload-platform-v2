@@ -12,12 +12,19 @@
                              :daily-request "RequestDailyAccount"
                              :daily-submission "RequestDailyAccount"
                              :daily-uncertain "FailDailyAccount"
-                             :daily-result "CompleteDailyAccount"}]
+                             :daily-result "CompleteDailyAccount"
+                             :legacy-snapshot "StartImport"
+                             :legacy-resource "ImportResource"
+                             :legacy-switch "PassGate"
+                             :legacy-rollback "StartImport"}]
               [(keyword "knowledge" (name op))
                {:description (name op)
                 :schema [:map [:owner :string] [:data :map]]
                 :reads #{:knowledge/state} :produces #{:knowledge/fact}
-                :grain/allium [{:spec "specs/personal-knowledge.allium" :kind :rule :name rule}]}]))
+                :grain/allium [{:spec (if (#{:legacy-snapshot :legacy-resource :legacy-switch :legacy-rollback} op)
+                                         "specs/knowledge-extraction-migration.allium"
+                                         "specs/personal-knowledge.allium")
+                                :kind :rule :name rule}]}]))
    :events {:knowledge/fact {:description "One knowledge decision or external outcome."
                              :schema [:map [:owner :string] [:kind :keyword] [:data :map]]}}
    :read-models {:knowledge/state {:description "Owner source, work, review, and account state."

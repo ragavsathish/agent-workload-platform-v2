@@ -12,7 +12,11 @@
    :knowledge/daily-request command-schema
    :knowledge/daily-submission command-schema
    :knowledge/daily-uncertain command-schema
-   :knowledge/daily-result command-schema})
+   :knowledge/daily-result command-schema
+   :knowledge/legacy-snapshot command-schema
+   :knowledge/legacy-resource command-schema
+   :knowledge/legacy-switch command-schema
+   :knowledge/legacy-rollback command-schema})
 (defevent :knowledge/fact "One committed source, extraction, review, or account fact."
   {:schema [:map [:owner :string] [:kind :keyword] [:data :map]]})
 (defschemas queries

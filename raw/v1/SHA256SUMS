@@ -9,6 +9,7 @@ e3ff10a16e3a993039cb378c66447fb2ce57eb0b5ad18acc3c2fa658796f8af5  raw/v1/voice-t
 1be23779277132ee44cbe29ff1d78c841c26af46fe934cdeec0b43eb317bcfb7  raw/v1/session-execution.ts
 f3f5146cb67f5dfede911ef857ef074b7d629e30985a09ba8936d4798fbd316a  raw/v1/task-progress.py
 cad585e3628ff7d27b9ed6e8965791df188d92f00b8d4291ce23c2d1acd0a810  raw/v1/voice-agent.ts
+22ba8cb97b149bdd923fc596edb87479be65ee770d3d2cc8e0683b8bcdcacea8  raw/v1/voice-agent-service.ts
 d69129356c95d78326faf3bbf735c4890eb9f674f39afd49c57f5c4391969353  raw/v1/voice-sessions.ts
 4c51de48181155cd4252aadb599ae4d09750d9ce4928c80a3daaa6c4901d3e18  raw/v1/voice-http-server.ts
 49e0f173763c8058900e122a6b319ba052a8b3d94207ee61561211e91670e319  raw/v1/public-transcript.ts

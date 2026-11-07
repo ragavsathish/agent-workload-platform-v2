@@ -1,0 +1,142 @@
+-- allium: 3
+-- Live owner conversation. Cites docs/plan/04-live-session-integration/spec.feature
+-- and raw/v1/manifest.md.
+
+entity LiveConversation {
+    conversation_id: String
+    owner: String
+    context_bound: Boolean
+}
+
+entity LiveTurn {
+    turn_id: String
+    owner: String
+    conversation_id: String
+    task_id: String?
+    status: String
+}
+
+entity LiveAttachment {
+    owner: String
+    task_id: String
+    connected: Boolean
+}
+
+rule BindSelectedContext {
+    when: SelectionAccepted(owner, conversation_id)
+    let conversation = LiveConversation{conversation_id: conversation_id}
+    requires: exists conversation
+    requires: conversation.owner = owner
+    ensures: SelectedContextBindRequested(owner: owner, conversation_id: conversation_id)
+}
+
+rule ConfirmSelectedContext {
+    when: SelectedContextBound(owner, conversation_id)
+    let conversation = LiveConversation{conversation_id: conversation_id}
+    requires: exists conversation
+    requires: conversation.owner = owner
+    ensures: conversation.context_bound = true
+}
+
+rule RecordAcceptedLiveTurn {
+    when: TurnDecisionAccepted(owner, turn_id, conversation_id, task_id)
+    requires: not exists LiveTurn{turn_id: turn_id}
+    ensures: LiveTurn.created(
+        turn_id: turn_id,
+        owner: owner,
+        conversation_id: conversation_id,
+        task_id: task_id,
+        status: "accepted")
+}
+
+rule DispatchOrchestratorTurn {
+    when: LiveTurnAccepted(owner, turn_id, conversation_id)
+    let turn = LiveTurn{turn_id: turn_id}
+    let conversation = LiveConversation{conversation_id: conversation_id}
+    requires: exists turn
+    requires: exists conversation
+    requires: turn.owner = owner
+    requires: turn.conversation_id = conversation_id
+    requires: turn.task_id = null
+    requires: conversation.context_bound = true
+    requires: turn.status = "accepted"
+    ensures: PromptDispatched(turn_id: turn_id, conversation_id: conversation_id)
+}
+
+rule DispatchAttachedTaskTurn {
+    when: LiveTurnAccepted(owner, turn_id, conversation_id)
+    let turn = LiveTurn{turn_id: turn_id}
+    let attachment = LiveAttachment{owner: owner}
+    requires: exists turn
+    requires: exists attachment
+    requires: turn.owner = owner
+    requires: turn.task_id = attachment.task_id
+    requires: attachment.connected = true
+    requires: turn.status = "accepted"
+    ensures: TaskPromptDispatched(turn_id: turn_id, task_id: attachment.task_id)
+}
+
+rule ObserveLiveOutcome {
+    when: ExternalTurnSettled(owner, turn_id, outcome)
+    let turn = LiveTurn{turn_id: turn_id}
+    requires: exists turn
+    requires: turn.owner = owner
+    requires: turn.status = "accepted"
+    ensures: turn.status = outcome
+}
+
+rule RecoverAmbiguousTurn {
+    when: EffectOutcomeLost(owner, turn_id)
+    let turn = LiveTurn{turn_id: turn_id}
+    requires: exists turn
+    requires: turn.owner = owner
+    requires: turn.status = "accepted"
+    ensures: turn.status = "uncertain"
+}
+
+rule ReleaseLiveAttachment {
+    when: SelectionChangedOrVoiceEnded(owner)
+    let attachment = LiveAttachment{owner: owner}
+    requires: exists attachment
+    ensures: attachment.connected = false
+}
+
+invariant OneLiveTurnPerIdentity {
+    for a in LiveTurns:
+        for b in LiveTurns:
+            a.turn_id = b.turn_id implies a = b
+}
+
+surface OwnerLiveConversation {
+    facing conversation: LiveConversation
+
+    exposes:
+        conversation.conversation_id
+
+    provides:
+        SelectionAccepted(owner, conversation_id)
+        TurnDecisionAccepted(owner, turn_id, conversation_id, task_id)
+        LiveTurnAccepted(owner, turn_id, conversation_id)
+        SelectionChangedOrVoiceEnded(owner)
+
+    @guarantee SelectedContextPrecedesDispatch
+        -- A public turn uses a bound selected conversation.
+
+    @guarantee AcceptedTurnIsNotBlindlyReplayed
+        -- An uncertain external outcome remains inspectable.
+
+    @guarantee TaskHistoryStaysWithTask
+        -- Attached turns do not enter saved orchestrator history.
+}
+
+surface LiveEffectFeed {
+    facing turn: LiveTurn
+
+    exposes:
+        turn.turn_id
+
+    provides:
+        SelectedContextBound(owner, conversation_id)
+        ExternalTurnSettled(owner, turn_id, outcome)
+        EffectOutcomeLost(owner, turn_id)
+}

@@ -8,6 +8,8 @@ Cites [the pinned v1 source inventory](../../raw/v1/manifest.md).
   interruption, and capability rules used by [slice 02](../plan/02-task-lifecycle/plan.md).
 - [Current conversation orchestration](session-orchestration.md) defines active
   selection, turn routing, and public history used by [slice 03](../plan/03-session-orchestration/plan.md).
+- [Live owner conversation](live-session-integration.md) defines the public
+  route, voice connection, and production turn behavior used by [slice 04](../plan/04-live-session-integration/plan.md).
 
 The wiki records source-backed current behavior separately from agreed behavior
 and explicit v2 decisions. It does not describe the implementation.

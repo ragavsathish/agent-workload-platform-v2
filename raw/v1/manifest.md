@@ -18,6 +18,7 @@ v1 checkout also has uncommitted work, which is excluded from this baseline.
 | [Session execution](session-execution.ts) | `platform/agent-execution/pi-durable-task/session-execution.ts` | `1be23779277132ee44cbe29ff1d78c841c26af46fe934cdeec0b43eb317bcfb7` |
 | [Progress narration](task-progress.py) | `products/voice-agent/packages/tasking/src/voice_agent/tasking/domain/task_progress.py` | `f3f5146cb67f5dfede911ef857ef074b7d629e30985a09ba8936d4798fbd316a` |
 | [Session orchestration: voice-agent.ts](voice-agent.ts) | `products/voice-agent/apps/pi-agent/voice-agent/voice-agent.ts` | `cad585e3628ff7d27b9ed6e8965791df188d92f00b8d4291ce23c2d1acd0a810` |
+| [Voice service entry point](voice-agent-service.ts) | `products/voice-agent/apps/pi-agent/voice-agent-service.ts` | `22ba8cb97b149bdd923fc596edb87479be65ee770d3d2cc8e0683b8bcdcacea8` |
 | [Session orchestration: voice-sessions.ts](voice-sessions.ts) | `products/voice-agent/apps/pi-agent/voice-agent/voice-sessions.ts` | `d69129356c95d78326faf3bbf735c4890eb9f674f39afd49c57f5c4391969353` |
 | [Session orchestration: voice-http-server.ts](voice-http-server.ts) | `products/voice-agent/apps/pi-agent/voice-agent/voice-http-server.ts` | `4c51de48181155cd4252aadb599ae4d09750d9ce4928c80a3daaa6c4901d3e18` |
 | [Session orchestration: public-transcript.ts](public-transcript.ts) | `products/voice-agent/apps/pi-agent/voice-agent/public-transcript.ts` | `49e0f173763c8058900e122a6b319ba052a8b3d94207ee61561211e91670e319` |

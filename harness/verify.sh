@@ -9,4 +9,5 @@ allium check specs
 "$ROOT/impl/test.sh"
 (cd "$ROOT/impl" && clojure -M:verify)
 "$ROOT/harness/probe.sh"
+"$ROOT/harness/session-probe.sh"
 echo "verify OK: documentation, source hashes, behavior, runtime topology, and public module probe"

@@ -12,8 +12,20 @@ selection and turn boundary as a typed turn. The Pi service's persistent tool
 environment and Gondolin voice VM remain separate from conversation identity;
 the durable task runtime owns its own task identity and session.
 
-The first executable proof uses a controlled turn driver behind that boundary.
-Its public module contract mirrors v1 owner operations for fresh selection,
-resume, list, historical read, and active transcript. Network and audio
-adapters can call the same module later without moving voice transport into
-the conversation aggregate.
+The executable proof uses a controlled turn driver behind that boundary.
+`awp-v2.session.api` exposes owner operations for fresh selection, resume,
+list, historical read, active transcript, voice and typed turn admission,
+stop, context, and task attachment. Grain commits facts with an owner-scoped
+compare-and-swap and rebuilds the owner read model from those facts. A restart
+marks accepted turns uncertain and releases a task attachment; it never
+replays an external turn or assumes a task socket survived. The independent
+restart probe runs create and read in separate processes.
+
+This build proves orchestration through the public module, not a live
+Pipecat, Pi, Gondolin, or durable-task adapter. It does not install the v1
+HTTP routes or connect browser audio. The controlled driver supplies safe
+assistant and tool observations and context usage. Context compaction updates
+the bounded projection but does not compact provider state. Stop requests
+need a production adapter to confirm downstream cancellation or reconcile
+effects; an uncertain turn remains inspectable and is not automatically
+retried. Tool environment ownership stays outside the conversation module.

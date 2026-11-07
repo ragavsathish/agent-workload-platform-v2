@@ -14,4 +14,4 @@ from the scenarios while the implementation is red. An independent gate checks
 the result. A later generation can remove `impl/` and rebuild from the durable
 documents through a clean-room fence.
 
-The current planned slice is [personal knowledge](../plan/07-personal-knowledge/plan.md).
+The current planned slice is [knowledge extraction and migration](../plan/08-knowledge-extraction-migration/plan.md).

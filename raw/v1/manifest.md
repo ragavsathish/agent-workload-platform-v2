@@ -60,3 +60,17 @@ The [tasking wiki](../../docs/wiki/tasking.md) and
 [Löyly method snapshot](../loyly-method.md) is copied from the v1 checkout's
 untracked `loyly/docs/wow/way-of-working.md` on 2026-11-07 and is methodological
 input, not a pinned v1 product contract.
+
+## Slice 08 evidence
+
+| [Knowledge migration: knowledge-processor.mjs](knowledge-processor.mjs) | `products/voice-agent/apps/pi-agent/digital-twin/runtime/image/processor.mjs` | `96d1e2f37a885593a4c8323df7a6527f28ca196040e2ec402968471cb34414ae` |
+| [Knowledge migration: knowledge-task-runner.ts](knowledge-task-runner.ts) | `products/voice-agent/apps/pi-agent/digital-twin/runtime/task-runner.ts` | `6700f546d1fa0a8666ba962a949fc052e1b481cafc5b2fe7e6a37d61fb51abb6` |
+| [Knowledge migration: journal-prompt.md](journal-prompt.md) | `products/voice-agent/apps/pi-agent/digital-twin/runtime/image/prompts/cognitive-journal/SYSTEM.md` | `ce57cb1c33808c3327df8da41b02705c02e1a49506f957f53d2d6bcc7aac73a7` |
+| [Knowledge migration: candidate-prompt.md](candidate-prompt.md) | `products/voice-agent/apps/pi-agent/digital-twin/runtime/image/prompts/candidate-extraction/SYSTEM.md` | `8903f7c2a191c9cd68a5a21f741506328d30ec8e62938ff59e969665bd62d2bf` |
+| [Knowledge migration: daily-prompt.md](daily-prompt.md) | `products/voice-agent/apps/pi-agent/digital-twin/runtime/image/prompts/daily-journal/SYSTEM.md` | `67f38f476dd431ff23364d3abcf5e0dc42fb1a3c30c1c5745bea6e12632a99c6` |
+| [Knowledge migration: knowledge-ontology.ttl](knowledge-ontology.ttl) | `products/voice-agent/apps/pi-agent/digital-twin/runtime/rdf/ontology/personal-knowledge.ttl` | `86e4af6b2ee321d40ae299f6592e6a7f5c51ed60aea3b09afc4aeec15e5347b6` |
+| [Knowledge migration: knowledge-shapes.ttl](knowledge-shapes.ttl) | `products/voice-agent/apps/pi-agent/digital-twin/runtime/rdf/shapes/personal-knowledge.shacl.ttl` | `682f11c98a0b23a60bf97bb23035e832e1d39a2532061ce9c485abeba86b91a0` |
+| [Knowledge migration: knowledge-projection-migration.ru](knowledge-projection-migration.ru) | `products/voice-agent/apps/pi-agent/digital-twin/runtime/rdf/migrations/001_typed_journal_projections.ru` | `a84238ed1663b7ce2dfb621812663b28f4d6a704426a67f27317f89a21e1af10` |
+| [Knowledge migration: journal-extraction-eval.mjs](journal-extraction-eval.mjs) | `products/voice-agent/apps/pi-agent/digital-twin/eval/journal-extraction.eval.mjs` | `70c8377ea551213b8406d2dfe4b918d2edfe67245836c549f36e62544d7f454a` |
+| [Knowledge migration: knowledge-gateway-migration-test.py](knowledge-gateway-migration-test.py) | `products/voice-agent/apps/gateway/tests/test_digital_twin_migration.py` | `189f131a47e52711c5c78a3a5d1f92ed455826315a522ce66499dcce1e1649a5` |
+| [Knowledge migration: graph operations](knowledge-graph-ops.py) | `products/voice-agent/tools/ops/digital_twin.py` | `7622ce2c205c932ef267e2c11580a6c15af9fabeb32adc015d4a227f1c6766ea` |

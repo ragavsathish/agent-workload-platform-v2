@@ -1,0 +1,120 @@
+-- allium: 3
+-- Sources: docs/plan/08-knowledge-extraction-migration/spec.feature,
+-- docs/wiki/knowledge-extraction-migration.md, raw/v1/knowledge-processor.mjs.
+
+entity ExtractionResult {
+    result_id: String
+    task_id: String
+    source_id: String
+    owner: String
+    mode: String
+    digest: String
+    status: String
+}
+
+entity ExtractedItem {
+    item_id: String
+    result_id: String
+    owner: String
+    source_id: String
+    evidence: String
+}
+
+entity LegacySnapshot {
+    snapshot_id: String
+    digest: String
+    status: String
+}
+
+entity ImportedResource {
+    snapshot_id: String
+    legacy_id: String
+    owner: String
+    source_id: String
+    status: String
+}
+
+entity QualificationGate {
+    gate_id: String
+    status: String
+}
+
+rule IncorporateResult {
+    when: ResultReceived(result_id, task_id, source_id, owner, mode, digest)
+    requires: not exists ExtractionResult{result_id: result_id}
+    ensures: ExtractionResult.created(result_id: result_id, task_id: task_id, source_id: source_id, owner: owner, mode: mode, digest: digest, status: "incorporated")
+}
+
+rule RecordExtractedItem {
+    when: ItemValidated(item_id, result_id, owner, source_id, evidence)
+    let result = ExtractionResult{result_id: result_id}
+    requires: exists result
+    requires: result.owner = owner
+    requires: result.source_id = source_id
+    requires: not exists ExtractedItem{item_id: item_id}
+    ensures: ExtractedItem.created(item_id: item_id, result_id: result_id, owner: owner, source_id: source_id, evidence: evidence)
+}
+
+rule StartImport {
+    when: SnapshotFrozen(snapshot_id, digest)
+    requires: not exists LegacySnapshot{snapshot_id: snapshot_id}
+    ensures: LegacySnapshot.created(snapshot_id: snapshot_id, digest: digest, status: "frozen")
+}
+
+rule ImportResource {
+    when: ResourceMapped(snapshot_id, legacy_id, owner, source_id)
+    let snapshot = LegacySnapshot{snapshot_id: snapshot_id}
+    requires: exists snapshot
+    requires: not exists ImportedResource{snapshot_id: snapshot_id, legacy_id: legacy_id}
+    ensures: ImportedResource.created(snapshot_id: snapshot_id, legacy_id: legacy_id, owner: owner, source_id: source_id, status: "imported")
+}
+
+rule QuarantineResource {
+    when: ResourceQuarantined(snapshot_id, legacy_id, owner, source_id)
+    let snapshot = LegacySnapshot{snapshot_id: snapshot_id}
+    requires: exists snapshot
+    requires: not exists ImportedResource{snapshot_id: snapshot_id, legacy_id: legacy_id}
+    ensures: ImportedResource.created(snapshot_id: snapshot_id, legacy_id: legacy_id, owner: owner, source_id: source_id, status: "quarantined")
+}
+
+rule OpenGate {
+    when: GateDefined(gate_id)
+    requires: not exists QualificationGate{gate_id: gate_id}
+    ensures: QualificationGate.created(gate_id: gate_id, status: "open")
+}
+
+rule PassGate {
+    when: GateEvidenceAccepted(gate_id)
+    let gate = QualificationGate{gate_id: gate_id}
+    requires: exists gate
+    requires: gate.status = "open"
+    ensures: gate.status = "passed"
+}
+
+surface WorkerResultIntake {
+    facing result: ExtractionResult
+    exposes:
+        result.result_id
+    provides:
+        ResultReceived(result_id, task_id, source_id, owner, mode, digest)
+        ItemValidated(item_id, result_id, owner, source_id, evidence)
+}
+
+surface MigrationIntake {
+    facing snapshot: LegacySnapshot
+    exposes:
+        snapshot.snapshot_id
+    provides:
+        SnapshotFrozen(snapshot_id, digest)
+        ResourceMapped(snapshot_id, legacy_id, owner, source_id)
+        ResourceQuarantined(snapshot_id, legacy_id, owner, source_id)
+}
+
+surface GateReview {
+    facing gate: QualificationGate
+    exposes:
+        gate.gate_id
+    provides:
+        GateDefined(gate_id)
+        GateEvidenceAccepted(gate_id)
+}

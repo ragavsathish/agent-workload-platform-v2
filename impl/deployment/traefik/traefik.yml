@@ -1,0 +1,14 @@
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+entryPoints:
+  tailnet:
+    address: "127.0.0.1:8080"
+    forwardedHeaders:
+      trustedIPs: ["127.0.0.1/32"]
+providers:
+  file:
+    filename: /etc/traefik/routes.yml
+    watch: false
+api:
+  dashboard: false

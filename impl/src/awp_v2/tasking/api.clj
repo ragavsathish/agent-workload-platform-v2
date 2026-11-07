@@ -71,6 +71,11 @@
                                 :request-id request-id}))]
     (or (:query/result result) result)))
 
+(defn all-tasks [system]
+  (mapv (fn [[_ accepted]]
+          (lifecycle/task-state system (:task-id accepted)))
+        (read-models/requests system)))
+
 (defn accepted-count [system]
   (count (read-models/requests system)))
 

@@ -38,6 +38,15 @@ python3 -m py_compile \
   "$ROOT/impl/qualification/restart_local_pi.py" \
   "$ROOT/impl/qualification/sitecustomize.py"
 (cd "$ROOT/impl/qualification" && "$ROOT/impl/runtime/products/voice-agent/apps/edge/.venv/bin/python" -m unittest test_voice_media_unit.py)
+python3 -m py_compile "$ROOT/impl/deployment/deployment.py" \
+  "$ROOT/impl/deployment/gateway.py" "$ROOT/impl/deployment/stack.py" \
+  "$ROOT/impl/deployment/qualify_public.py" \
+  "$ROOT/impl/deployment/confirm_public_report.py"
+python3 -m unittest discover -s "$ROOT/impl/deployment" -p test_deployment.py -v
+if command -v docker >/dev/null 2>&1; then
+  AWP_PUBLIC_EDGE_ENV="$ROOT/impl/deployment/edge.env.example" \
+    docker compose -f "$ROOT/impl/deployment/compose.yml" config --quiet
+fi
 "$ROOT/harness/probe.sh"
 "$ROOT/harness/session-probe.sh"
 echo "verify OK: documentation, source hashes, behavior, runtime topology, and public module probe"

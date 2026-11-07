@@ -1,0 +1,24 @@
+http:
+  middlewares:
+    tailnet-loopback-only:
+      ipAllowList:
+        sourceRange: ["127.0.0.1/32"]
+    strip-local-marker:
+      headers:
+        customRequestHeaders:
+          X-Voice-Local-Ingress: ""
+    owner-only:
+      forwardAuth:
+        address: http://127.0.0.1:7860/api/ingress-auth
+        trustForwardHeader: false
+  routers:
+    owner-voice:
+      entryPoints: [tailnet]
+      rule: "HeaderRegexp(`Tailscale-User-Login`, `.+`) && PathPrefix(`/`)"
+      middlewares: [tailnet-loopback-only, strip-local-marker, owner-only]
+      service: voice-edge
+  services:
+    voice-edge:
+      loadBalancer:
+        servers:
+          - url: http://127.0.0.1:7860

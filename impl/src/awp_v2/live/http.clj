@@ -1,7 +1,11 @@
 (ns awp-v2.live.http
   (:require [awp-v2.session.api :as session]
+            [awp-v2.tasking.api :as tasking]
+            [awp-v2.tasking.lifecycle :as task-life]
+            [awp-v2.tasking.commands :as task-commands]
             [clojure.data.json :as json]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [cognitect.anomalies :as anom])
   (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]
            [java.net InetSocketAddress]))
 
@@ -62,7 +66,34 @@
   (case (:error result)
     :incorrect 400 :not-found 404 :forbidden 403 :busy 409 :conflict 409 200))
 
-(defn start! [{:keys [system token port host] :or {port 0 host "127.0.0.1"}}]
+(defn- task-operation [task-system owner op data]
+  (let [task-id (some-> (:task-id data) parse-uuid)]
+    (case op
+      "list" {:tasks (tasking/all-tasks task-system)}
+      "submit" (tasking/submit! task-system owner
+                                {:request-id (parse-uuid (:request-id data))
+                                 :owner owner
+                                 :instruction (:instruction data)
+                                 :workspace (:workspace data)})
+      "read" (let [task (task-life/task-state task-system task-id)]
+                 (if (= (:owner task) (task-commands/canonical-owner owner))
+                   task {:error "not-found"}))
+      "owned-list" {:tasks (->> (tasking/all-tasks task-system)
+                                (filter #(= (:owner %) (task-commands/canonical-owner owner)))
+                                vec)}
+      "abort" (tasking/abort! task-system owner task-id)
+      "retry" (tasking/retry! task-system owner task-id)
+      "owned-progress" (tasking/progress task-system owner task-id
+                                         (long (or (:after data) 0))
+                                         (long (or (:limit data) 100)))
+      "dispatch" (tasking/dispatch! task-system task-id (:workspace data))
+      "progress" (tasking/report-progress! task-system task-id (:summary data))
+      "complete" (tasking/complete! task-system task-id (:result data))
+      "fail" (tasking/fail! task-system task-id (:failure data))
+      "interrupt" (tasking/interrupt! task-system task-id)
+      {:error "not-found"})))
+
+(defn start! [{:keys [system task-system token port host] :or {port 0 host "127.0.0.1"}}]
   (when-not (and system (string? token) (not (str/blank? token)))
     (throw (ex-info "system and token required" {})))
   (let [server (HttpServer/create (InetSocketAddress. ^String host (int port)) 0)]
@@ -84,6 +115,29 @@
             (catch Throwable e
               (send! exchange (or (:status (ex-data e)) 400)
                      {:error "invalid request"}))))))
+    (when task-system
+      (.createContext server "/internal/task"
+        (reify HttpHandler
+          (handle [_ exchange]
+            (try
+              (let [auth (.getFirst (.getRequestHeaders exchange) "Authorization")
+                    path (.getPath (.getRequestURI exchange))
+                    op (last (str/split path #"/"))
+                    owner (.getFirst (.getRequestHeaders exchange) "X-AWP-Owner")]
+                (cond
+                  (not= auth (str "Bearer " token)) (send! exchange 401 {:error "unauthorized"})
+                  (not (contains? #{"list" "dispatch" "progress" "complete" "fail" "interrupt"
+                                   "submit" "read" "owned-list" "abort" "retry" "owned-progress"} op))
+                  (send! exchange 404 {:error "not-found"})
+                  :else (let [result (task-operation task-system owner op (parse-body exchange))]
+                          (send! exchange (cond
+                                            (= ::anom/not-found (::anom/category result)) 404
+                                            (= ::anom/forbidden (::anom/category result)) 403
+                                            (= ::anom/incorrect (::anom/category result)) 400
+                                            (or (:error result) (::anom/category result)) 409
+                                            :else 200) result))))
+              (catch Throwable _
+                (send! exchange 400 {:error "invalid request"})))))))
     (.setExecutor server (java.util.concurrent.Executors/newVirtualThreadPerTaskExecutor))
     (.start server)
     server))

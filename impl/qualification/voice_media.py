@@ -110,6 +110,7 @@ async def run_voice_session(
     broker_token: str = "", audio_wav: str = "", local_ingress: bool = False,
     before_input: Callable[[], Awaitable[None]] | None = None,
     after_input: Callable[[], Awaitable[None]] | None = None,
+    send_identity_header: bool = True,
 ) -> list[dict[str, object]]:
     if audio_wav:
         with wave.open(audio_wav, "rb") as source:
@@ -196,7 +197,7 @@ async def run_voice_session(
                 f"{edge_url.rstrip('/')}/api/offer",
                 headers={
                     "Origin": origin,
-                    "tailscale-user-login": identity,
+                    **({"tailscale-user-login": identity} if send_identity_header else {}),
                     **({"x-voice-local-ingress": "1"} if local_ingress else {}),
                 },
                 json={
@@ -244,12 +245,26 @@ async def run_voice_session(
                 "transcriptions": transcriptions[transcription_start:],
                 "output_bytes": output_bytes - output_start,
                 "response_completed": response_done.is_set(),
+                "ice": selected_ice_pair(peer),
             })
             awaiting_response = False
     finally:
         await peer.close()
 
     return results
+
+
+def selected_ice_pair(peer: RTCPeerConnection) -> dict[str, object] | None:
+    """Read the nominated aiortc pair for external-route qualification evidence."""
+    try:
+        transport = peer.sctp.transport.transport
+        pair = next(iter(transport._connection._nominated.values()))
+        return {"local_address": pair.local_candidate.host,
+                "remote_address": pair.remote_candidate.host,
+                "local_type": pair.local_candidate.type,
+                "remote_type": pair.remote_candidate.type}
+    except (AttributeError, StopIteration):
+        return None
 
 
 def assert_result(result: dict[str, object]) -> None:

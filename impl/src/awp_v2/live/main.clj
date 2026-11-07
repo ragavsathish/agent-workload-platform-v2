@@ -13,7 +13,10 @@
     value))
 
 (defn -main [& _]
-  (let [task-system (tasking/open-system {:storage-dir (required "AWP_TASKING_STORAGE_DIR")})
+  (let [workspaces (->> (str/split (or (System/getenv "AWP_ELIGIBLE_WORKSPACES") "") #",")
+                        (map str/trim) (remove str/blank?) set)
+        task-system (tasking/open-system {:storage-dir (required "AWP_TASKING_STORAGE_DIR")
+                                          :eligible-workspaces workspaces})
         owned-task? (fn [owner task-id]
                       (try
                         (let [task (lifecycle/task-state task-system (parse-uuid task-id))]
@@ -25,6 +28,7 @@
                  {:storage-dir (required "AWP_SESSION_STORAGE_DIR")
                   :owned-task? owned-task?})
         server (http/start! {:system system
+                             :task-system task-system
                              :token (required "AWP_GRAIN_SESSION_TOKEN")
                              :port (Integer/parseInt (or (System/getenv "AWP_GRAIN_SESSION_PORT")
                                                          "9447"))})]

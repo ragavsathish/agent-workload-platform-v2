@@ -460,6 +460,8 @@ async def owner_gateway_request(
     """Proxy one owner-scoped task operation through the narrow gateway."""
     identity = validate_http_identity(request)
     headers = {"Authorization": f"Bearer {required_env('AGENT_GATEWAY_TOKEN')}"}
+    if request.headers.get("idempotency-key"):
+        headers["Idempotency-Key"] = request.headers["idempotency-key"]
     url = f"{required_env('AGENT_GATEWAY_BASE_URL').rstrip('/')}{path}"
     with telemetry.observe("task.gateway"):
         inject(headers)
@@ -493,6 +495,8 @@ async def owner_gateway_audio(request: Request, generation_id: str) -> bytes:
         raise HTTPException(status_code=400, detail="invalid song generation ID")
     identity = validate_http_identity(request)
     headers = {"Authorization": f"Bearer {required_env('AGENT_GATEWAY_TOKEN')}"}
+    if request.headers.get("idempotency-key"):
+        headers["Idempotency-Key"] = request.headers["idempotency-key"]
     url = (
         f"{required_env('AGENT_GATEWAY_BASE_URL').rstrip('/')}"
         f"/music/generations/{generation_id}/audio"
@@ -520,6 +524,8 @@ async def owner_gateway_artifact(
         raise HTTPException(status_code=404, detail="task artifact is unavailable")
     identity = validate_http_identity(request)
     headers = {"Authorization": f"Bearer {required_env('AGENT_GATEWAY_TOKEN')}"}
+    if request.headers.get("idempotency-key"):
+        headers["Idempotency-Key"] = request.headers["idempotency-key"]
     url = (
         f"{required_env('AGENT_GATEWAY_BASE_URL').rstrip('/')}/tasks/"
         f"{task_id}/artifacts/{name}"
@@ -1303,6 +1309,13 @@ if __name__ == "__main__":
     async def cancel_browser_task(task_id: str, request: Request):
         return JSONResponse(
             await owner_gateway_request(request, "POST", f"/tasks/{task_id}/cancel"),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.post("/api/tasks/{task_id}/retry")
+    async def retry_browser_task(task_id: str, request: Request):
+        return JSONResponse(
+            await owner_gateway_request(request, "POST", f"/tasks/{task_id}/retry"),
             headers={"Cache-Control": "no-store"},
         )
 

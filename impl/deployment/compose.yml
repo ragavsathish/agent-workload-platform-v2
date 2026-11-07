@@ -1,0 +1,62 @@
+name: awp-v2-public-voice
+services:
+  tailscale:
+    image: docker.io/tailscale/tailscale@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065
+    hostname: awp-v2-voice
+    restart: unless-stopped
+    environment:
+      TS_USERSPACE: "false"
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SOCKET: /tmp/tailscaled.sock
+      TS_HOSTNAME: awp-v2-voice
+      TS_ACCEPT_DNS: "false"
+      TS_AUTH_ONCE: "true"
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # No host port: only Tailscale Serve can reach the proxy listener.
+  traefik:
+    image: traefik:3.7.13@sha256:24841fe2de7304c149343d877d2923b4c8800a38ba015dea9174c23b20e344a0
+    restart: unless-stopped
+    depends_on: [tailscale, voice-edge]
+    network_mode: service:tailscale
+    command: ["--configFile=/etc/traefik/traefik.yml"]
+    volumes:
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/routes.yml:/etc/traefik/routes.yml:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: "65532:65532"
+  voice-edge:
+    build:
+      context: ../runtime/products/voice-agent
+      dockerfile: apps/edge/Containerfile
+    image: local/awp-v2-voice-edge:latest
+    restart: unless-stopped
+    depends_on: [tailscale]
+    network_mode: service:tailscale
+    env_file: ["${AWP_PUBLIC_EDGE_ENV:?set AWP_PUBLIC_EDGE_ENV}"]
+    environment:
+      INFERENCE_BROKER_BASE_URL: http://host.docker.internal:${AWP_BROKER_PORT:-9443}/v1
+      EDGE_ALLOW_LOCAL_INGRESS: "false"
+      VOICE_LLM_BACKEND: pi
+    command: ["-t", "webrtc", "--host", "127.0.0.1", "--port", "7860"]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=256m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: "65532:65532"
+    volumes:
+      - voice-diagnostics:/var/lib/voice-diagnostics
+volumes:
+  tailscale-state:
+  voice-diagnostics:

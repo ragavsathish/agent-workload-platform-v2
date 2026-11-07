@@ -1,0 +1,52 @@
+-- allium: 3
+-- AWP v2 Tasking admission, distilled from v1 C2 rules @bc-c2-001..003
+-- and the agreed retry rule @bc-c2-007. Execution is outside this first slice.
+
+entity TaskRequest {
+    request_id: String
+    owner: String
+    instruction: String
+    workspace: String
+    task_id: String
+}
+
+rule AdmitTask {
+    when: SubmitTask(owner, request_id, instruction, workspace)
+    requires: not exists TaskRequest{request_id: request_id}
+    ensures: TaskRequest.created(
+        request_id: request_id,
+        owner: owner,
+        instruction: instruction,
+        workspace: workspace,
+        task_id: request_id)
+}
+
+rule ReuseTask {
+    when: SubmitTask(owner, request_id, instruction, workspace)
+    let prior = TaskRequest{request_id: request_id}
+    requires: exists prior
+    requires: prior.owner = owner
+    requires: prior.instruction = instruction
+    requires: prior.workspace = workspace
+    ensures: TaskReused(task_id: prior.task_id)
+}
+
+invariant OneTaskPerRequest {
+    for a in TaskRequests:
+        for b in TaskRequests:
+            a.request_id = b.request_id implies a = b
+}
+
+surface TaskAdmission {
+    facing request: TaskRequest
+
+    exposes:
+        request.task_id
+
+    provides:
+        SubmitTask(owner, request_id, instruction, workspace)
+
+    @guarantee BoundedRefusal
+        -- An ineligible workspace, empty instruction, or conflicting reuse
+        -- is refused without exposing another owner's task or artifact.
+}

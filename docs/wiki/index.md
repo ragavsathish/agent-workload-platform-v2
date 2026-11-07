@@ -14,6 +14,7 @@ Cites [the pinned v1 source inventory](../../raw/v1/manifest.md).
   media and qualification boundary used by [slice 05](../plan/05-deployed-voice-journey/plan.md).
 
 - [Public owner deployment](public-deployment.md) defines authenticated entry, external media, service recovery, and scheduling for [slice 06](../plan/06-public-deployment/plan.md).
+- [Personal knowledge](personal-knowledge.md) defines completed-turn intake, reviewable knowledge, and explicit daily accounts for [slice 07](../plan/07-personal-knowledge/plan.md).
 
 The wiki records source-backed current behavior separately from agreed behavior
 and explicit v2 decisions. It does not describe the implementation.

@@ -1,0 +1,177 @@
+-- allium: 3
+-- Sources: docs/plan/07-personal-knowledge/spec.feature,
+-- docs/wiki/personal-knowledge.md, raw/v1/c3-personal-knowledge.feature.
+
+entity SourceTurn {
+    source_id: String
+    owner: String
+    conversation_id: String
+    message_id: String
+    settled: Boolean
+}
+
+entity ExtractionWork {
+    source_id: String
+    mode: String
+    task_id: String
+    status: String
+}
+
+entity Suggestion {
+    item_id: String
+    source_id: String
+    owner: String
+    status: String
+    revision: Integer
+}
+
+entity ReviewAction {
+    action_id: String
+    item_id: String
+    owner: String
+    revision: Integer
+    decision: String
+}
+
+entity DailyAccount {
+    account_id: String
+    owner: String
+    local_date: String
+    time_zone: String
+    source_digest: String
+    status: String
+}
+
+rule AdmitSourceTurn {
+    when: TurnSettled(source_id, owner, conversation_id, message_id)
+    requires: not exists SourceTurn{source_id: source_id}
+    ensures: SourceTurn.created(source_id: source_id, owner: owner, conversation_id: conversation_id, message_id: message_id, settled: true)
+}
+
+rule RecordExtraction {
+    when: ExtractionSubmitted(source_id, mode, task_id)
+    let source = SourceTurn{source_id: source_id}
+    requires: exists source
+    requires: source.settled = true
+    requires: not exists ExtractionWork{source_id: source_id, mode: mode}
+    ensures: ExtractionWork.created(source_id: source_id, mode: mode, task_id: task_id, status: "pending")
+}
+
+rule CompleteExtraction {
+    when: ExtractionCompleted(source_id, mode, task_id)
+    let work = ExtractionWork{source_id: source_id, mode: mode}
+    requires: exists work
+    requires: work.task_id = task_id
+    requires: work.status = "pending"
+    ensures: work.status = "completed"
+}
+
+rule FailExtraction {
+    when: ExtractionFailed(source_id, mode, task_id)
+    let work = ExtractionWork{source_id: source_id, mode: mode}
+    requires: exists work
+    requires: work.task_id = task_id
+    requires: work.status = "pending"
+    ensures: work.status = "failed"
+}
+
+rule MarkSubmissionUncertain {
+    when: ExtractionSubmissionUncertain(source_id, mode, task_id)
+    let work = ExtractionWork{source_id: source_id, mode: mode}
+    requires: exists work
+    requires: work.task_id = task_id
+    requires: work.status = "pending"
+    ensures: work.status = "uncertain"
+}
+
+rule ReconcileSubmission {
+    when: ExtractionSubmissionReconciled(source_id, mode, task_id)
+    let work = ExtractionWork{source_id: source_id, mode: mode}
+    requires: exists work
+    requires: work.task_id = task_id
+    requires: work.status = "uncertain"
+    ensures: work.status = "pending"
+}
+
+rule RecordSuggestion {
+    when: SuggestionExtracted(item_id, source_id, owner)
+    let source = SourceTurn{source_id: source_id}
+    requires: exists source
+    requires: source.owner = owner
+    requires: not exists Suggestion{item_id: item_id}
+    ensures: Suggestion.created(item_id: item_id, source_id: source_id, owner: owner, status: pending, revision: 0)
+}
+
+rule ReviewSuggestion {
+    when: ReviewRequested(action_id, item_id, owner, expected_revision, decision)
+    let item = Suggestion{item_id: item_id}
+    requires: exists item
+    requires: item.owner = owner
+    requires: item.revision = expected_revision
+    requires: not exists ReviewAction{action_id: action_id}
+    ensures: ReviewAction.created(action_id: action_id, item_id: item_id, owner: owner, revision: expected_revision + 1, decision: decision)
+    ensures: item.status = decision
+    ensures: item.revision = expected_revision + 1
+}
+
+rule RequestDailyAccount {
+    when: DailyBuildRequested(account_id, owner, local_date, time_zone, source_digest)
+    requires: not exists DailyAccount{account_id: account_id}
+    ensures: DailyAccount.created(account_id: account_id, owner: owner, local_date: local_date, time_zone: time_zone, source_digest: source_digest, status: "pending")
+}
+
+rule CompleteDailyAccount {
+    when: DailyAccountWritten(account_id, source_digest)
+    let account = DailyAccount{account_id: account_id}
+    requires: exists account
+    requires: account.source_digest = source_digest
+    requires: account.status = "pending"
+    ensures: account.status = "completed"
+}
+
+rule FailDailyAccount {
+    when: DailyAccountFailed(account_id)
+    let account = DailyAccount{account_id: account_id}
+    requires: exists account
+    requires: account.status = "pending"
+    ensures: account.status = "failed"
+}
+
+surface ConversationIntake {
+    facing source: SourceTurn
+    exposes:
+        source.source_id
+    provides:
+        TurnSettled(source_id, owner, conversation_id, message_id)
+}
+
+surface ExtractionEffects {
+    facing work: ExtractionWork
+    exposes:
+        work.task_id
+    provides:
+        ExtractionSubmitted(source_id, mode, task_id)
+        ExtractionCompleted(source_id, mode, task_id)
+        ExtractionFailed(source_id, mode, task_id)
+        ExtractionSubmissionUncertain(source_id, mode, task_id)
+        ExtractionSubmissionReconciled(source_id, mode, task_id)
+        SuggestionExtracted(item_id, source_id, owner)
+}
+
+surface OwnerKnowledgeReview {
+    facing item: Suggestion
+    exposes:
+        item.item_id
+    provides:
+        ReviewRequested(action_id, item_id, owner, expected_revision, decision)
+}
+
+surface DailyAccountWork {
+    facing account: DailyAccount
+    exposes:
+        account.account_id
+    provides:
+        DailyBuildRequested(account_id, owner, local_date, time_zone, source_digest)
+        DailyAccountWritten(account_id, source_digest)
+        DailyAccountFailed(account_id)
+}

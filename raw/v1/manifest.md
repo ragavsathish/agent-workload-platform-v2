@@ -48,6 +48,13 @@ v1 checkout also has uncommitted work, which is excluded from this baseline.
 | [Conversation service](service-pi-voice.plist) | `products/voice-agent/deploy/launchd/com.sathish.pipecat-pi-voice.plist` | `6e0bcd8863ddac490328736d079a73e6e76ef334ecb3ba493bf397242d88ec9f` |
 | [Voice service lifecycle](voice-makefile) | `products/voice-agent/Makefile` | `0fb81fa45518b15cf037509c1b954499804f844eda90acc50c43417fc81d9977` |
 
+| [Personal knowledge: c3-personal-knowledge.feature](c3-personal-knowledge.feature) | `docs/spec/contexts/c3-personal-knowledge/spec.feature` | `940ada77790c91bb2551011210e1d72725c16d299f3d938caa09d37e869ee84a` |
+| [Personal knowledge: expanded-storming.md](expanded-storming.md) | `docs/event-model/expanded-storming.md` | `2e55f6fd27365ecd5c56595b2b0d9124d22d48499fd0c90cd5a2d0f2f08ecd87` |
+| [Personal knowledge: phase-3-policies.md](phase-3-policies.md) | `docs/event-model/phase-3-policies.md` | `dbc8006f57e42c5962bc28875b855e494b7ccb7063ee0e64e21d5b74cce70f17` |
+| [Personal knowledge: session-listener.ts](session-listener.ts) | `products/voice-agent/apps/pi-agent/digital-twin/runtime/session-listener.ts` | `6688ec592a15662554d84176cdd35a77f686c013efbac33a88db2653d36cbcef` |
+| [Personal knowledge: gateway-main.py](gateway-main.py) | `products/voice-agent/apps/gateway/src/voice_gateway/main.py` | `e1938eb224cd9d37a69f107ea82d950f6accfd6e3249a7d860f711e8f510eb93` |
+| [Personal knowledge: personal-knowledge-regression.py](personal-knowledge-regression.py) | `products/voice-agent/tests/e2e/personal-knowledge-regression.py` | `683423253d62f059def6751a8e28ed6bf9a30c8e0c476f1df9d4bf4318e3ee78` |
+
 The [tasking wiki](../../docs/wiki/tasking.md) and
 [conversation wiki](../../docs/wiki/session-orchestration.md) cite these sources. The
 [Löyly method snapshot](../loyly-method.md) is copied from the v1 checkout's

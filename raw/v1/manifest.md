@@ -34,6 +34,10 @@ v1 checkout also has uncommitted work, which is excluded from this baseline.
 | [Session orchestration: voice-product-readme.md](voice-product-readme.md) | `products/voice-agent/README.md` | `c92b3cb928062485686f35abb4ad684d3288a7823341ada27506e0a50f4b6891` |
 | [Session orchestration: process-model.md](process-model.md) | `docs/event-model/process-model.md` | `52e5905d578798aab770b96224d9269242e17c8b9cab4601be9ee278e44565c6` |
 | [Session orchestration: owner-workday-walk.md](owner-workday-walk.md) | `docs/event-model/owner-workday-walk.md` | `22f5c3631be65d88eff7790a1bc20b4543c05bd1c83ea0274065f2f292b1f7a3` |
+| [SmallWebRTC voice probe](smallwebrtc_voice.py) | `products/voice-agent/tests/e2e/smallwebrtc_voice.py` | `4057cc375a39f68a26f3153fc2b440b222e19092aec4a2c9dbb25bf6b8f83a95` |
+| [Voice testing guide](voice-testing.md) | `products/voice-agent/TESTING.md` | `90996ecf1679457a6ac5bed5e9cd02a7dec67efa2db4569e59c9338d1e94dd8d` |
+| [Host requirements](host-requirements.md) | `products/voice-agent/HOST_REQUIREMENTS.md` | `0a67993a85e3f7b559f71b5aba57a501d8dfce3f86ddcd5d16529fc15c19635a` |
+| [Voice environment example](voice-env.example) | `products/voice-agent/deploy/.env.example` | `8d8b3f4c02c959ad7441274f63e6c886529f8c2d4128692947bf60c217670908` |
 
 The [tasking wiki](../../docs/wiki/tasking.md) and
 [conversation wiki](../../docs/wiki/session-orchestration.md) cite these sources. The

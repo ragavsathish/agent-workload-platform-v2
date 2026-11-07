@@ -1,0 +1,86 @@
+# All inference endpoints remain on this Mac. Copy this file to .env and keep it private.
+
+# Add the exact HTTPS hostname printed by `tailscale serve status`.
+PIPECAT_ALLOWED_ORIGINS=http://localhost:7860,http://localhost:5173,https://mac-mini.example-tailnet.ts.net
+
+# Local MLX Whisper. large-v3-turbo-q4 is a good M4 Pro latency/quality tradeoff.
+MLX_STT_MODEL=mlx-community/parakeet-tdt-0.6b-v3
+
+# Local MLX Audio Kokoro.
+MLX_TTS_MODEL=mlx-community/Kokoro-82M-bf16
+MLX_TTS_VOICE=af_heart
+MLX_TTS_LANGUAGE_CODE=a
+MLX_TTS_SPEED=1.0
+MLX_TTS_STREAMING_INTERVAL=0.5
+
+# Ollama is local-only. The MLX tag keeps the whole inference stack on Apple MLX.
+OLLAMA_BASE_URL=http://127.0.0.1:11434/v1
+OLLAMA_MODEL=qwen3.5:9b-mlx
+
+# Capability used only by the isolated edge to call the narrow inference broker.
+INFERENCE_BROKER_TOKEN=replace-with-at-least-32-random-characters
+# Separate capability for the four narrow voice task lifecycle routes.
+AGENT_GATEWAY_TOKEN=replace-with-another-at-least-32-random-characters
+# Optional; `make config-init` generates and preserves these capabilities.
+DIGITAL_TWIN_WRITER_TOKEN=
+DIGITAL_TWIN_READER_TOKEN=
+DIGITAL_TWIN_CLASSIFIER_BASE_URL=http://127.0.0.1:8010
+DIGITAL_TWIN_CLASSIFIER_MODEL=von-1.3.0
+DIGITAL_TWIN_REVIEW_THRESHOLD=0.60
+BROKER_MAX_AUDIO_BYTES=4194304
+BROKER_MAX_AUDIO_SECONDS=45
+BROKER_MAX_CHAT_BYTES=131072
+BROKER_MAX_TTS_CHARS=2000
+
+# Optional override; `make config-init` otherwise preserves it in deploy/secrets.
+GRAFANA_ADMIN_PASSWORD=
+# `make login` replaces these local defaults with the authenticated tailnet URLs.
+GRAFANA_ROOT_URL=http://127.0.0.1:3300/
+GITEA_ROOT_URL=http://127.0.0.1:3001/
+ABSURD_QUEUE=agents
+IMAGE_BUILD_TIMEOUT_SECONDS=7200
+GITEA_IMAGE_WORKFLOW=build-execution-image.yml
+GITEA_WORKFLOW_REF=refs/heads/main
+NODE_BINARY=/opt/homebrew/bin/node
+# `make login` pins this single owner; tailnet ACLs authenticate reachable devices.
+ORCHESTRATOR_ALLOWED_USERS=you@example.com
+ORCHESTRATOR_ALLOW_LOCAL_DEV=true
+# Logical workspace names are resolved only after their committed Git bundles are published to S3Mock.
+# Add each explicitly authorized workspace here before running make publish-workspace for it.
+ORCHESTRATOR_ALLOWED_WORKSPACES=agent-workload-platform
+VOICE_DEFAULT_WORKSPACE=agent-workload-platform
+# Server-side microphone filter. Keep `rnnoise` for rollback; `voxlock` isolates
+# the enrolled target voice before VAD and transcription.
+VOICE_INPUT_FILTER=rnnoise
+# Keep raw, VoxLock, and RNNoise input replays for the five most recent completed
+# conversations. Recordings stay in a private Docker volume and are tailnet-only.
+VOICE_DIAGNOSTIC_MAX_SECONDS=1800
+# Mono 16 kHz PCM16 WAV containing at least three seconds of clean owner speech.
+# `make config-init` extracts the strongest three seconds into an ignored 0600 secret.
+VOXLOCK_VOICE_SAMPLE_SOURCE=
+ARTIFACT_ENDPOINT_URL=http://127.0.0.1:9090
+GITEA_ENDPOINT_URL=http://127.0.0.1:3001
+GITEA_OWNER=source-publisher
+ARTIFACT_BUCKET=agent-artifacts
+ARTIFACT_ACCESS_KEY=local-test
+ARTIFACT_SECRET_KEY=local-test
+MLFLOW_PORT=5001
+
+# Pi Durable runs model sessions on the host; task tools use the selected execution environment.
+PI_MODEL=
+PI_THINKING=medium
+PI_SESSION_DIR=~/.pi/agent/sessions
+# Task VMs get public HTTP(S) egress. Gondolin still blocks private, loopback,
+# link-local, and cloud-metadata destinations.
+GONDOLIN_PUBLIC_INTERNET=1
+# Optional voice-conversation backend. Set VOICE_LLM_BACKEND=pi in edge/.env,
+# then choose the Pi model here. Blank uses Pi's configured default model.
+PI_VOICE_MODEL=
+PI_VOICE_THINKING=low
+PI_VOICE_TIMEOUT_SECONDS=120
+PI_VOICE_SERVICE_URL=http://127.0.0.1:9446
+WORKER_ALLOW_UNSANDBOXED=false
+WORKER_TASK_TIMEOUT_SECONDS=1800
+WORKER_MAX_OUTPUT_BYTES=1048576
+WORKER_MAX_ARTIFACT_BYTES=16777216
+WORKER_SCRATCH_ROOT=~/.local/share/agent-workload-platform/workspaces

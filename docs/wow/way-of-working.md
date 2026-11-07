@@ -14,4 +14,4 @@ from the scenarios while the implementation is red. An independent gate checks
 the result. A later generation can remove `impl/` and rebuild from the durable
 documents through a clean-room fence.
 
-The current planned slice is [live conversation integration](../plan/04-live-session-integration/plan.md).
+The current planned slice is the [deployed owner voice journey](../plan/05-deployed-voice-journey/plan.md).

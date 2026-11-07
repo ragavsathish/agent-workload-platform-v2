@@ -1,0 +1,107 @@
+-- allium: 3
+-- Cites docs/plan/05-deployed-voice-journey/spec.feature and raw/v1/voice-testing.md.
+
+entity VoiceJourney {
+    journey_id: String
+    owner: String
+    conversation_id: String
+    turn_id: String?
+    status: String
+}
+
+entity SpokenTurn {
+    turn_id: String
+    owner: String
+    conversation_id: String
+    destination_id: String
+    recognized: Boolean
+    dispatched: Boolean
+    response_audio: Boolean
+    status: String
+}
+
+rule AcceptRecognizedSpeech {
+    when: FinalUtteranceRecognized(owner, journey_id, turn_id, conversation_id, destination_id)
+    let journey = VoiceJourney{journey_id: journey_id}
+    requires: exists journey
+    requires: journey.owner = owner
+    requires: journey.conversation_id = conversation_id
+    requires: journey.status = "connected"
+    requires: not exists SpokenTurn{turn_id: turn_id}
+    ensures: SpokenTurn.created(
+        turn_id: turn_id,
+        owner: owner,
+        conversation_id: conversation_id,
+        destination_id: destination_id,
+        recognized: true,
+        dispatched: false,
+        response_audio: false,
+        status: "accepted")
+    ensures: journey.turn_id = turn_id
+}
+
+rule DispatchRecognizedTurn {
+    when: SpokenTurnAccepted(owner, turn_id)
+    let turn = SpokenTurn{turn_id: turn_id}
+    requires: exists turn
+    requires: turn.owner = owner
+    requires: turn.recognized = true
+    requires: turn.dispatched = false
+    requires: turn.status = "accepted"
+    ensures: turn.dispatched = true
+    ensures: PromptDispatched(turn_id: turn_id, destination_id: turn.destination_id)
+}
+
+rule ConfirmAudibleReply {
+    when: ResponseMediaObserved(owner, turn_id)
+    let turn = SpokenTurn{turn_id: turn_id}
+    requires: exists turn
+    requires: turn.owner = owner
+    requires: turn.dispatched = true
+    ensures: turn.response_audio = true
+    ensures: turn.status = "completed"
+}
+
+rule RecordMediaUncertainty {
+    when: MediaConnectionLost(owner, turn_id)
+    let turn = SpokenTurn{turn_id: turn_id}
+    requires: exists turn
+    requires: turn.owner = owner
+    requires: turn.status = "accepted"
+    ensures: turn.status = "uncertain"
+    ensures: InterruptionRequested(turn_id: turn_id, destination_id: turn.destination_id)
+}
+
+invariant OneSpokenTurnPerIdentity {
+    for a in SpokenTurns:
+        for b in SpokenTurns:
+            a.turn_id = b.turn_id implies a = b
+}
+
+surface OwnerVoiceJourney {
+    facing journey: VoiceJourney
+
+    exposes:
+        journey.journey_id
+
+    provides:
+        FinalUtteranceRecognized(owner, journey_id, turn_id, conversation_id, destination_id)
+        SpokenTurnAccepted(owner, turn_id)
+        MediaConnectionLost(owner, turn_id)
+
+    @guarantee OneSelectedDestination
+        -- The accepted spoken turn keeps its chosen destination.
+
+    @guarantee NoBlindMediaReplay
+        -- Reconnection cannot dispatch the same turn again.
+}
+
+surface ResponseMediaFeed {
+    facing turn: SpokenTurn
+
+    exposes:
+        turn.turn_id
+
+    provides:
+        ResponseMediaObserved(owner, turn_id)
+}

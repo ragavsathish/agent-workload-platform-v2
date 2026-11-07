@@ -74,3 +74,19 @@ input, not a pinned v1 product contract.
 | [Knowledge migration: journal-extraction-eval.mjs](journal-extraction-eval.mjs) | `products/voice-agent/apps/pi-agent/digital-twin/eval/journal-extraction.eval.mjs` | `70c8377ea551213b8406d2dfe4b918d2edfe67245836c549f36e62544d7f454a` |
 | [Knowledge migration: knowledge-gateway-migration-test.py](knowledge-gateway-migration-test.py) | `products/voice-agent/apps/gateway/tests/test_digital_twin_migration.py` | `189f131a47e52711c5c78a3a5d1f92ed455826315a522ce66499dcce1e1649a5` |
 | [Knowledge migration: graph operations](knowledge-graph-ops.py) | `products/voice-agent/tools/ops/digital_twin.py` | `7622ce2c205c932ef267e2c11580a6c15af9fabeb32adc015d4a227f1c6766ea` |
+
+## Slice 09 evidence
+
+All snapshots below are byte copies from the same pinned v1 commit named above.
+
+| Snapshot | Original path | SHA-256 |
+| --- | --- | --- |
+| [Personal song: song-service.py](song-service.py) | `products/voice-agent/packages/tasking/src/voice_agent/tasking/application/song_service.py` | `7498038a9f6a047c9b006e82560576f945fb7389c5a5ed99ef34cd74911e593e` |
+| [Personal song: song-generation.py](song-generation.py) | `products/voice-agent/packages/tasking/src/voice_agent/tasking/domain/song_generation.py` | `11d9bfa7df6bd20b524607f943ecda8993638f49a3cd7242da789ffb2d88dcc8` |
+| [Personal song: song-lifecycle.py](song-lifecycle.py) | `products/voice-agent/packages/tasking/src/voice_agent/tasking/domain/song_lifecycle.py` | `4ae345e8153e81b269021f7f732f0ea6b60177938fa40c1f583904391e685193` |
+| [Personal song: song-worker.py](song-worker.py) | `products/voice-agent/apps/worker/src/voice_worker/main.py` | `5b84c112d615bcc489604534e35c67d548ca698540b5ef659d62df0ccb2e5f84` |
+| [Personal song: song-workspace-effect.py](song-workspace-effect.py) | `products/voice-agent/apps/worker/src/voice_worker/workspace_effect.py` | `c475eba44d3e11b7a73dec7d3cc63429aaadb0b3b1f7af2b1b4be3e98d50edf1` |
+| [Personal song: song-ace-step.py](song-ace-step.py) | `products/voice-agent/packages/tasking/src/voice_agent/tasking/infrastructure/ace_step.py` | `3ea94870985179341bf390ad3c7cad755ba6e8e42ba56c88024c1bd285649ef5` |
+| [Personal song: song-pr-workflow.md](song-pr-workflow.md) | `docs/wow/pull-request-soundtrack-workflow.md` | `704aa42d7a6c6a3a902f98f2c0baf3395c70fe87730dc895e84d56c7a5b1942f` |
+| [Personal song: song-prompt.md](song-prompt.md) | `products/voice-agent/apps/pi-agent/voice-agent/prompts/music/APPEND_SYSTEM.md` | `02d973ccf9f20c62e190af35dd5422e4cb1b3e66ff1722bd5d65c87aef302953` |
+| [Personal song: song-gateway.py](song-gateway.py) | `products/voice-agent/apps/gateway/src/voice_gateway/main.py` | `e1938eb224cd9d37a69f107ea82d950f6accfd6e3249a7d860f711e8f510eb93` |

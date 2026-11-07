@@ -17,6 +17,7 @@ Cites [the pinned v1 source inventory](../../raw/v1/manifest.md).
 - [Personal knowledge](personal-knowledge.md) defines completed-turn intake, reviewable knowledge, and explicit daily accounts for [slice 07](../plan/07-personal-knowledge/plan.md).
 
 - [Knowledge extraction and continuity](knowledge-extraction-migration.md) defines result incorporation, projection repair, and old-data migration for [slice 08](../plan/08-knowledge-extraction-migration/plan.md).
+- [Personal song](personal-song.md) defines lyric review, approval, rendering, private audio, and cancellation for [slice 09](../plan/09-personal-song/plan.md).
 
 The wiki records source-backed current behavior separately from agreed behavior
 and explicit v2 decisions. It does not describe the implementation.

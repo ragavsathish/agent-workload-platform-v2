@@ -1,0 +1,122 @@
+-- allium: 3
+-- Sources: docs/plan/09-personal-song/spec.feature,
+-- docs/wiki/personal-song.md, raw/v1/song-service.py.
+
+entity SongGeneration {
+    generation_id: String
+    request_id: String
+    owner: String
+    input_digest: String
+    lyric_task_id: String
+    manifest_digest: String
+    render_task_id: String
+    artifact_id: String
+    status: String
+}
+
+entity SongDecision {
+    decision_id: String
+    generation_id: String
+    owner: String
+    manifest_digest: String
+    choice: String
+}
+
+rule RequestSong {
+    when: SongRequested(generation_id, request_id, owner, input_digest, lyric_task_id)
+    requires: not exists SongGeneration{request_id: request_id}
+    ensures: SongGeneration.created(generation_id: generation_id, request_id: request_id, owner: owner, input_digest: input_digest, lyric_task_id: lyric_task_id, manifest_digest: "", render_task_id: "", artifact_id: "", status: "writing_lyrics")
+}
+
+rule PrepareLyrics {
+    when: LyricsPrepared(generation_id, owner, lyric_task_id, manifest_digest)
+    let song = SongGeneration{generation_id: generation_id}
+    requires: exists song
+    requires: song.owner = owner
+    requires: song.lyric_task_id = lyric_task_id
+    requires: song.status = "writing_lyrics"
+    ensures: song.manifest_digest = manifest_digest
+    ensures: song.status = "lyrics_ready"
+}
+
+rule DecideLyrics {
+    when: LyricsDecided(decision_id, generation_id, owner, manifest_digest, choice)
+    let song = SongGeneration{generation_id: generation_id}
+    requires: exists song
+    requires: song.owner = owner
+    requires: song.status = "lyrics_ready"
+    requires: song.manifest_digest = manifest_digest
+    requires: not exists SongDecision{generation_id: generation_id}
+    requires: not exists SongDecision{decision_id: decision_id}
+    ensures: SongDecision.created(decision_id: decision_id, generation_id: generation_id, owner: owner, manifest_digest: manifest_digest, choice: choice)
+}
+
+rule RequestRender {
+    when: RenderRequested(generation_id, owner, manifest_digest, render_task_id)
+    let song = SongGeneration{generation_id: generation_id}
+    let decision = SongDecision{generation_id: generation_id, owner: owner, manifest_digest: manifest_digest, choice: "approved"}
+    requires: exists song
+    requires: exists decision
+    requires: song.owner = owner
+    requires: song.manifest_digest = manifest_digest
+    requires: song.status = "lyrics_ready"
+    requires: song.render_task_id = ""
+    ensures: song.render_task_id = render_task_id
+    ensures: song.status = "generating_music"
+}
+
+rule StoreSong {
+    when: AudioStored(generation_id, owner, render_task_id, artifact_id)
+    let song = SongGeneration{generation_id: generation_id}
+    requires: exists song
+    requires: song.owner = owner
+    requires: song.render_task_id = render_task_id
+    requires: song.status = "generating_music"
+    ensures: song.artifact_id = artifact_id
+    ensures: song.status = "complete"
+}
+
+rule CancelSong {
+    when: SongCancelled(generation_id, owner)
+    let song = SongGeneration{generation_id: generation_id}
+    requires: exists song
+    requires: song.owner = owner
+    requires: song.status != "complete"
+    ensures: song.status = "cancelled"
+}
+
+rule FailLyrics {
+    when: LyricsFailed(generation_id, owner, lyric_task_id)
+    let song = SongGeneration{generation_id: generation_id}
+    requires: exists song
+    requires: song.owner = owner
+    requires: song.lyric_task_id = lyric_task_id
+    requires: song.status = "writing_lyrics"
+    ensures: song.status = "failed"
+}
+
+rule FailRender {
+    when: RenderFailed(generation_id, owner, render_task_id)
+    let song = SongGeneration{generation_id: generation_id}
+    requires: exists song
+    requires: song.owner = owner
+    requires: song.render_task_id = render_task_id
+    requires: song.status = "generating_music"
+    ensures: song.status = "failed"
+}
+
+surface SongIntake {
+    facing song: SongGeneration
+    exposes:
+        song.generation_id
+        song.status
+    provides:
+        SongRequested(generation_id, request_id, owner, input_digest, lyric_task_id)
+        LyricsPrepared(generation_id, owner, lyric_task_id, manifest_digest)
+        LyricsDecided(decision_id, generation_id, owner, manifest_digest, choice)
+        RenderRequested(generation_id, owner, manifest_digest, render_task_id)
+        AudioStored(generation_id, owner, render_task_id, artifact_id)
+        SongCancelled(generation_id, owner)
+        LyricsFailed(generation_id, owner, lyric_task_id)
+        RenderFailed(generation_id, owner, render_task_id)
+}

@@ -918,6 +918,10 @@ async def run_bot(
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         try:
+            await broker_abort_pi_turn()
+        except Exception:
+            logger.exception("Unable to interrupt disconnected Pi voice turn")
+        try:
             await broker_detach_pi_task()
         except Exception:
             logger.exception("Unable to detach remote Pi task")

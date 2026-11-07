@@ -1,0 +1,11 @@
+# Slice 05 voice qualification
+
+Cites the [slice 05 scenarios](../../docs/plan/05-deployed-voice-journey/spec.feature), [implementation notes](../deployed-voice-journey-notes.md), and [pinned media probe](../../raw/v1/smallwebrtc_voice.py).
+
+The named `voice-001` through `voice-006` tests were recorded red on 2026-11-07 before the media driver existed: all six raised `ModuleNotFoundError: No module named 'voice_media'`. They are an opt-in deployed acceptance gate. `harness/verify.sh` checks their syntax but does not represent a deployed media pass.
+
+Run `harness/qualify-voice.sh` only against an explicitly configured v2 stack. Supply `VOICE_EDGE_URL`, `VOICE_GRAIN_URL`, `VOICE_GRAIN_TOKEN`, `VOICE_ORIGIN`, `VOICE_OWNER_IDENTITY`, and `VOICE_UTTERANCE`. For input speech, supply a mono PCM16 16 kHz `VOICE_AUDIO_WAV`, or `VOICE_BROKER_URL` and `VOICE_BROKER_TOKEN` to synthesize the utterance using the real broker. `VOICE_LOCAL_INGRESS=1` applies only to an isolated loopback ingress with its trusted marker path. The driver creates a real `aiortc` offer, sends 20 ms RTP audio, receives response media, reads the owner transcript, and compares the public selection to v2 Grain. The [stack template](voice-stack.env.example) identifies service variables without storing credentials.
+
+The gate currently has executable public media, restart, and foreign-owner checks for `voice-001`, `voice-002`, and `voice-006`. `voice-002` requires `VOICE_RESTART_ARGV_JSON`, a JSON array of the exact service restart command. The remaining named tests fail with explicit prerequisites for stream interruption with recorded turn inspection, a deployed eligible task with task-side evidence, and isolated speech provider outage. Those are unresolved build items, not passing tests. A full slice 05 qualification remains open until the named tests run green against the deployed services and the evidence is retained.
+
+The current host has v1 native broker and Pi Voice Service listeners on `127.0.0.1:9443` and `:9446`, and no edge listener at `:7860`. They are not a v2 Grain media deployment and were not modified by this build. V2 also lacks a complete public ingress and service installer. The present local gate cannot claim real Parakeet, Kokoro, Gondolin VM, or deployed task worker coverage.

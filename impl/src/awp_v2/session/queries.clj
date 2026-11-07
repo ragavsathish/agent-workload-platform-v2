@@ -68,3 +68,12 @@
     (if-let [id (:selection state)]
       {:query/result {:conversation-id id :task-id (:attachment state)}}
       (missing))))
+
+(defquery :session turn
+  {:grain.event-model/reads #{:session/state}}
+  [{:keys [query] :as context}]
+  (let [state (authorized-state context)
+        turn (get-in state [:turns (:turn-id query)])]
+    (if turn
+      {:query/result (select-keys turn [:turn-id :status :conversation-id :task-id :answer])}
+      (missing))))

@@ -24,4 +24,5 @@
    :session/transcript [:map [:owner :string]]
    :session/catalog [:map [:owner :string]]
    :session/context [:map [:owner :string]]
-   :session/routing [:map [:owner :string]]})
+   :session/routing [:map [:owner :string]]
+   :session/turn [:map [:owner :string] [:turn-id :string]]})

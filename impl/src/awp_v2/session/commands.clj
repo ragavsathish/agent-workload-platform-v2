@@ -100,13 +100,14 @@
               (refuse :conflict)
               (if (busy? state)
                 {:facts [[:compact-queued data]] :value {:status :queued}}
-                {:facts [[:context-compacted {:conversation-id selected}]]
+                {:facts [[:context-compacted {:conversation-id selected
+                                              :tokens (:tokens data)
+                                              :contextWindow (:contextWindow data)}]]
                  :value {:status :completed}})))
 
           (= op :attach)
           (cond
             (nil? selected) (refuse :not-found)
-            (busy? state) (refuse :busy)
             (not (and owned-task? (owned-task? owner (:task-id data))))
             (refuse :not-found)
             :else {:facts [[:task-attached data]] :value {:task-id (:task-id data)}})

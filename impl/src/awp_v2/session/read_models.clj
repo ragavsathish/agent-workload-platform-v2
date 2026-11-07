@@ -115,13 +115,29 @@
             assistant (when (and (string? answer) (seq answer))
                         (entry :assistant answer (str (:turn-id data) "-assistant")
                                (:at data) :completed))
-            settled (assoc-in owner-state [:turns (:turn-id data) :status] (:status data))
+            partial (when-not assistant
+                      (some (fn [item]
+                              (when (and (= (:id item) (str (:turn-id data) "-assistant"))
+                                         (= :running (:status item)))
+                                (assoc item :status (:status data))))
+                            (get-in owner-state [:conversations id :live])))
+            settled (-> owner-state
+                        (assoc-in [:turns (:turn-id data) :status] (:status data))
+                        (assoc-in [:turns (:turn-id data) :answer] answer))
             settled (if assistant
                       (update-in settled [:conversations id :live]
                                  (fn [entries]
                                    (if (= :running (:status (last entries)))
                                      (conj (pop entries) assistant)
                                      (append-entry entries assistant))))
+                      settled)
+            settled (if partial
+                      (cond-> (update-in settled [:conversations id :live]
+                                         update-entry
+                                         (fn [item] (= (:id item) (:id partial)))
+                                         (fn [_] partial))
+                        (not task?)
+                        (update-in [:conversations id :saved] append-entry partial))
                       settled)
             settled (if (and assistant (not task?))
                       (-> settled
@@ -147,7 +163,11 @@
           (assoc-in [:contexts id]
                     (-> (get-in owner-state [:contexts id])
                         (update :revision (fnil inc 0))
-                        (assoc :canCompact false))))
+                        (assoc :canCompact false)
+                        (cond-> (contains? data :tokens)
+                          (assoc :tokens (:tokens data)
+                                 :contextWindow (:contextWindow data)
+                                 :estimated true)))))
 
       :task-attached (assoc owner-state :attachment (:task-id data))
       :task-detached (assoc owner-state :attachment nil)

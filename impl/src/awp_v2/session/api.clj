@@ -116,6 +116,7 @@
 (defn catalog [system actor] (read! system actor :catalog {}))
 (defn context [system actor] (read! system actor :context {}))
 (defn routing [system actor] (read! system actor :routing {}))
+(defn turn [system actor turn-id] (read! system actor :turn {:turn-id turn-id}))
 
 (defn- parsed-turn [messages origin]
   (when (and (vector? messages) (<= 1 (count messages) 64)
@@ -197,9 +198,11 @@
       (when-let [abort-driver (:abort-driver system)] (abort-driver turn-id)))
     result))
 
-(defn compact! [system actor command-id]
+(defn compact! [system actor command-id & [{:keys [tokens contextWindow]}]]
   (if (valid-command-id? command-id)
-    (issue! system actor :compact {:command-id command-id :at (now)})
+    (issue! system actor :compact (cond-> {:command-id command-id :at (now)}
+                                (some? tokens) (assoc :tokens tokens
+                                                      :contextWindow contextWindow)))
     {:error :incorrect}))
 (defn attach! [system actor task-id]
   (issue! system actor :attach {:task-id task-id :at (now)}))

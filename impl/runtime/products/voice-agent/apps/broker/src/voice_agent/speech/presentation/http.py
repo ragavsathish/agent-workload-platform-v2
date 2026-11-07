@@ -637,4 +637,10 @@ if __name__ == "__main__":
     import uvicorn
 
     # Keep the host broker on the standard loop for predictable MLX and child-process behavior.
-    uvicorn.run(app, host="127.0.0.1", port=9443, access_log=False, loop="asyncio")
+    uvicorn.run(
+        app,
+        host="127.0.0.1",
+        port=int(os.getenv("INFERENCE_BROKER_PORT", "9443")),
+        access_log=False,
+        loop="asyncio",
+    )

@@ -172,35 +172,35 @@ async def run_voice_session(
 
         asyncio.create_task(consume())
 
-    offer = await peer.createOffer()
-    await peer.setLocalDescription(offer)
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.post(
-            f"{edge_url.rstrip('/')}/api/offer",
-            headers={
-                "Origin": origin,
-                "tailscale-user-login": identity,
-                **({"x-voice-local-ingress": "1"} if local_ingress else {}),
-            },
-            json={
-                "sdp": peer.localDescription.sdp,
-                "type": peer.localDescription.type,
-                "request_data": {"transport": "webrtc"},
-            },
-        )
-        response.raise_for_status()
-        answer = response.json()
-    await peer.setRemoteDescription(
-        RTCSessionDescription(sdp=answer["sdp"], type=answer["type"])
-    )
-
-    await asyncio.wait_for(ready.wait(), timeout=20)
-    # The server starts a welcome turn after client-ready. Do not let the
-    # synthetic microphone interrupt it: browser users naturally wait for this
-    # cue, and the black-box probe must exercise the same turn boundary.
-    await asyncio.wait_for(welcome_done.wait(), timeout=timeout)
-    results: list[dict[str, object]] = []
     try:
+        offer = await peer.createOffer()
+        await peer.setLocalDescription(offer)
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                f"{edge_url.rstrip('/')}/api/offer",
+                headers={
+                    "Origin": origin,
+                    "tailscale-user-login": identity,
+                    **({"x-voice-local-ingress": "1"} if local_ingress else {}),
+                },
+                json={
+                    "sdp": peer.localDescription.sdp,
+                    "type": peer.localDescription.type,
+                    "request_data": {"transport": "webrtc"},
+                },
+            )
+            response.raise_for_status()
+            answer = response.json()
+        await peer.setRemoteDescription(
+            RTCSessionDescription(sdp=answer["sdp"], type=answer["type"])
+        )
+
+        await asyncio.wait_for(ready.wait(), timeout=20)
+        # The server starts a welcome turn after client-ready. Do not let the
+        # synthetic microphone interrupt it: browser users naturally wait for this
+        # cue, and the black-box probe must exercise the same turn boundary.
+        await asyncio.wait_for(welcome_done.wait(), timeout=timeout)
+        results: list[dict[str, object]] = []
         for utterance, pcm in zip(utterances, pcms, strict=True):
             event_start = len(events)
             message_start = len(server_messages)
@@ -227,6 +227,7 @@ async def run_voice_session(
             awaiting_response = False
     finally:
         await peer.close()
+
     return results
 
 

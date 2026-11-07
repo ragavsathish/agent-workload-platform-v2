@@ -31,7 +31,12 @@ sources = [
 for source in sources:
     ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
 PY
-python3 -m py_compile "$ROOT/impl/qualification/voice_media.py" "$ROOT/impl/qualification/test_voice_media.py"
+python3 -m py_compile \
+  "$ROOT/impl/qualification/voice_media.py" \
+  "$ROOT/impl/qualification/test_voice_media.py" \
+  "$ROOT/impl/qualification/run_local_stack.py" \
+  "$ROOT/impl/qualification/restart_local_pi.py" \
+  "$ROOT/impl/qualification/sitecustomize.py"
 (cd "$ROOT/impl/qualification" && "$ROOT/impl/runtime/products/voice-agent/apps/edge/.venv/bin/python" -m unittest test_voice_media_unit.py)
 "$ROOT/harness/probe.sh"
 "$ROOT/harness/session-probe.sh"

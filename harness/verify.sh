@@ -10,7 +10,7 @@ allium check specs
 (cd "$ROOT/impl" && clojure -M:verify)
 pnpm --dir "$ROOT/impl/runtime" install --frozen-lockfile --ignore-scripts
 pnpm --dir "$ROOT/impl/runtime" run build
-pnpm --dir "$ROOT/impl/runtime/products/voice-agent/apps/pi-agent" exec node --test live-protocol.test.mjs knowledge-worker.test.mjs knowledge-quality.test.mjs
+pnpm --dir "$ROOT/impl/runtime/products/voice-agent/apps/pi-agent" exec node --test live-protocol.test.mjs knowledge-worker.test.mjs knowledge-quality.test.mjs song-worker.test.mjs
 (cd "$ROOT/impl/runtime/products/voice-agent/apps/broker" &&
   uv sync --frozen --no-dev --quiet &&
   PYTHONPATH=src:../../packages/telemetry/src .venv/bin/python test_live_proxy.py)
@@ -51,4 +51,5 @@ fi
 "$ROOT/harness/probe.sh"
 "$ROOT/harness/session-probe.sh"
 "$ROOT/harness/knowledge-probe.sh"
+"$ROOT/harness/song-probe.sh"
 echo "verify OK: documentation, source hashes, behavior, runtime topology, and public module probe"

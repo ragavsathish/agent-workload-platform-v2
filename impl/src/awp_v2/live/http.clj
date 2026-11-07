@@ -1,6 +1,7 @@
 (ns awp-v2.live.http
   (:require [awp-v2.session.api :as session]
             [awp-v2.knowledge.api :as knowledge]
+            [awp-v2.song.api :as song]
             [awp-v2.tasking.api :as tasking]
             [awp-v2.tasking.lifecycle :as task-life]
             [awp-v2.tasking.commands :as task-commands]
@@ -25,6 +26,12 @@
     (.set (.getResponseHeaders exchange) "Cache-Control" "no-store")
     (.sendResponseHeaders exchange code (alength body))
     (with-open [out (.getResponseBody exchange)] (.write out body))))
+
+(defn- send-audio! [^HttpExchange exchange ^bytes body]
+  (.set (.getResponseHeaders exchange) "Content-Type" "audio/mp4")
+  (.set (.getResponseHeaders exchange) "Cache-Control" "no-store")
+  (.sendResponseHeaders exchange 200 (alength body))
+  (with-open [out (.getResponseBody exchange)] (.write out body)))
 
 (defn- parse-body [^HttpExchange exchange]
   (let [length (some-> (.getRequestHeaders exchange) (.getFirst "Content-Length"))]
@@ -72,7 +79,8 @@
 
 (defn- status [result]
   (case (:error result)
-    :incorrect 400 :not-found 404 :forbidden 403 :busy 409 :conflict 409 200))
+    :incorrect 400 :not-found 404 :forbidden 403 :busy 409 :conflict 409
+    :approval-required 409 :rejected 409 :not-ready 409 200))
 
 (defn- task-operation [task-system owner op data]
   (let [task-id (some-> (:task-id data) parse-uuid)]
@@ -101,7 +109,7 @@
       "interrupt" (tasking/interrupt! task-system task-id)
       {:error "not-found"})))
 
-(defn start! [{:keys [system task-system knowledge-system token port host] :or {port 0 host "127.0.0.1"}}]
+(defn start! [{:keys [system task-system knowledge-system song-system token port host] :or {port 0 host "127.0.0.1"}}]
   (when-not (and system (string? token) (not (str/blank? token)))
     (throw (ex-info "system and token required" {})))
   (let [server (HttpServer/create (InetSocketAddress. ^String host (int port)) 0)]
@@ -191,6 +199,39 @@
                                                                 :suggestions (mapv #(update % :kind keyword) (:suggestions data))})
                                  {:error :not-found})]
                     (send! exchange (status result) result))))
+              (catch Throwable _ (send! exchange 400 {:error "invalid request"})))))))
+    (when song-system
+      (.createContext server "/internal/song"
+        (reify HttpHandler
+          (handle [_ exchange]
+            (try
+              (let [auth (.getFirst (.getRequestHeaders exchange) "Authorization")
+                    owner (.getFirst (.getRequestHeaders exchange) "X-AWP-Owner")
+                    op (last (str/split (.getPath (.getRequestURI exchange)) #"/"))]
+                (cond
+                  (not= auth (str "Bearer " token)) (send! exchange 401 {:error "unauthorized"})
+                  (or (str/blank? owner) (> (count owner) 256)) (send! exchange 400 {:error "invalid owner"})
+                  :else
+                  (let [data (parse-body exchange)
+                        id (:generation-id data)
+                        result (case op
+                                 "create" (song/create! song-system owner data)
+                                 "get" (song/get-song song-system owner id)
+                                 "decide" (song/decide! song-system owner id
+                                                        {:decision-id (:decision-id data)
+                                                         :manifest-digest (:manifest-digest data)
+                                                         :choice (some-> (:choice data) keyword)})
+                                 "render" (song/render! song-system owner id)
+                                 "cancel" (song/cancel! song-system owner id)
+                                 "audio" (song/audio song-system owner id)
+                                 "lyrics-result" (song/lyrics-result! song-system owner id
+                                                                     (:lyrics-task-id data) (:manifest data))
+                                 "render-result" (song/render-result! song-system owner id
+                                                                       (:render-task-id data) (:artifact-id data))
+                                 {:error :not-found})]
+                    (if (bytes? result)
+                      (send-audio! exchange result)
+                      (send! exchange (status result) result)))))
               (catch Throwable _ (send! exchange 400 {:error "invalid request"})))))))
     (.setExecutor server (java.util.concurrent.Executors/newVirtualThreadPerTaskExecutor))
     (.start server)

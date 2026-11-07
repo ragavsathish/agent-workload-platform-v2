@@ -27,6 +27,12 @@ git -C "$TARGET" gc -q --prune=now --aggressive
 [[ -f "$TARGET/raw/v1/knowledge-processor.mjs" ]] || {
   echo "FENCE FAILED: pinned extraction evidence missing" >&2; exit 1;
 }
+[[ -f "$TARGET/docs/plan/09-personal-song/spec.feature" ]] || {
+  echo "FENCE FAILED: slice 09 contract missing" >&2; exit 1;
+}
+[[ -f "$TARGET/raw/v1/song-service.py" ]] || {
+  echo "FENCE FAILED: pinned song evidence missing" >&2; exit 1;
+}
 [[ "$(git -C "$TARGET" rev-list --all --count)" == 1 ]] || {
   echo "FENCE FAILED: prior history remains" >&2; exit 1
 }

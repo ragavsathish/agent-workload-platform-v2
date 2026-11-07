@@ -42,6 +42,14 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_audio(self, body: bytes) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "audio/mp4")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
         if length < 0 or length > 131_072:
@@ -97,6 +105,49 @@ class GatewayHandler(BaseHTTPRequestHandler):
         except OSError:
             self._send(503, {"detail": "knowledge authority unavailable"})
 
+    def _song(self, parts: list[str], body: dict) -> None:
+        operation = None
+        payload: dict = {}
+        if parts == ["v1", "music", "generations"] and self.command == "POST":
+            operation = "create"
+            payload = {"request-id": self.headers.get("Idempotency-Key") or str(uuid.uuid4()),
+                       "brief": body.get("brief"), "style": body.get("style"),
+                       "duration-seconds": body.get("durationSeconds"),
+                       "workspace": body.get("workspace") or os.environ.get("AWP_DEFAULT_WORKSPACE")}
+        elif len(parts) >= 4 and parts[:3] == ["v1", "music", "generations"]:
+            payload = {"generation-id": parts[3]}
+            if len(parts) == 4 and self.command == "GET": operation = "get"
+            elif len(parts) == 5 and parts[4] == "render" and self.command == "POST": operation = "render"
+            elif len(parts) == 5 and parts[4] == "cancel" and self.command == "POST": operation = "cancel"
+            elif len(parts) == 5 and parts[4] == "approve" and self.command == "POST":
+                operation = "decide"
+                payload.update({"decision-id": body.get("decisionId"),
+                                "manifest-digest": body.get("manifestDigest"),
+                                "choice": body.get("choice")})
+            elif len(parts) == 5 and parts[4] == "audio" and self.command == "GET": operation = "audio"
+        if operation is None:
+            self._send(404, {"detail": "not found"})
+            return
+        request = urllib.request.Request(
+            f"{self.server.grain.base_url}/internal/song/{operation}",
+            data=json.dumps(payload).encode(), method="POST",
+            headers={"Authorization": f"Bearer {self.server.grain.token}",
+                     "X-AWP-Owner": self.server.owner, "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                if operation == "audio":
+                    audio = response.read(128 * 1024 * 1024 + 1)
+                    if len(audio) > 128 * 1024 * 1024: raise ValueError("audio too large")
+                    self._send_audio(audio)
+                else:
+                    self._send(response.status, json.load(response))
+        except urllib.error.HTTPError as error:
+            try: value = json.load(error)
+            except (ValueError, OSError): value = {"detail": "song request failed"}
+            self._send(error.code, value)
+        except OSError:
+            self._send(503, {"detail": "song authority unavailable"})
+
     def _handle(self) -> None:
         if self.path == "/health":
             self._send(200, {"status": "ready"})
@@ -106,7 +157,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
             return
         parsed = urlsplit(self.path)
         parts = parsed.path.strip("/").split("/")
-        if parts[0] != "v1" or len(parts) < 2 or parts[1] not in {"tasks", "knowledge"}:
+        if parts[0] != "v1" or len(parts) < 2 or parts[1] not in {"tasks", "knowledge", "music"}:
             self._send(404, {"detail": "not found"})
             return
         query = parse_qs(parsed.query)
@@ -117,6 +168,9 @@ class GatewayHandler(BaseHTTPRequestHandler):
             return
         if parts[1] == "knowledge":
             self._knowledge(parts, body)
+            return
+        if parts[1] == "music":
+            self._song(parts, body)
             return
         client = self.server.grain
         if len(parts) == 2 and self.command == "POST":

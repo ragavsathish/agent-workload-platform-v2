@@ -124,6 +124,29 @@ class DeploymentAcceptance(unittest.TestCase):
         self.assertEqual(denied.exception.code, 403)
         denied.exception.close()
 
+        song_url = f"http://127.0.0.1:{gateway.server_port}/v1/music/generations"
+        def create_song(identity, brief="A song about durable work"):
+            request = urllib.request.Request(song_url, method="POST",
+                data=json.dumps({"identity": identity, "brief": brief, "style": "Warm acoustic",
+                                 "durationSeconds": 30, "workspace": "scratch"}).encode(),
+                headers={"Authorization": "Bearer test-gateway-token", "Content-Type": "application/json",
+                         "Idempotency-Key": "one-song-request"})
+            return urllib.request.urlopen(request, timeout=10)
+        with create_song("owner@example.test") as response:
+            created = json.load(response)
+        with create_song("owner@example.test") as response:
+            replay = json.load(response)
+        self.assertEqual(created["id"], replay["id"])
+        self.assertEqual(created["status"], "writing-lyrics")
+        with self.assertRaises(urllib.error.HTTPError) as conflict:
+            create_song("owner@example.test", "Changed song")
+        self.assertEqual(conflict.exception.code, 409)
+        conflict.exception.close()
+        with self.assertRaises(urllib.error.HTTPError) as foreign:
+            create_song("foreign@example.test")
+        self.assertEqual(foreign.exception.code, 403)
+        foreign.exception.close()
+
 
     def test_knowledge_owner_route_forwards_review_and_refuses_foreign(self):
         seen = []
@@ -166,6 +189,54 @@ class DeploymentAcceptance(unittest.TestCase):
         self.assertEqual(denied.exception.code, 403)
         denied.exception.close()
         self.assertEqual(len(seen), 1)
+
+    def test_song_owner_route_forwards_decision_and_private_audio(self):
+        seen = []
+        class InternalHandler(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_POST(self):
+                size = int(self.headers.get("Content-Length", "0"))
+                seen.append((self.path, json.loads(self.rfile.read(size)),
+                             self.headers.get("X-AWP-Owner")))
+                audio = self.path.endswith("/audio")
+                value = b"m4a-data" if audio else json.dumps({"status": "lyrics-ready", "approval": "approved"}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "audio/mp4" if audio else "application/json")
+                self.send_header("Content-Length", str(len(value)))
+                self.end_headers()
+                self.wfile.write(value)
+        internal = ThreadingHTTPServer(("127.0.0.1", 0), InternalHandler)
+        thread = threading.Thread(target=internal.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(lambda: (internal.shutdown(), internal.server_close(), thread.join()))
+        grain = GrainTaskClient(f"http://127.0.0.1:{internal.server_port}", "inner-token", "owner@example.test")
+        gateway = GatewayServer(("127.0.0.1", 0), grain, "outer-token", "owner@example.test")
+        thread2 = threading.Thread(target=gateway.serve_forever, daemon=True)
+        thread2.start()
+        self.addCleanup(lambda: (gateway.shutdown(), gateway.server_close(), thread2.join()))
+        base = f"http://127.0.0.1:{gateway.server_port}/v1/music/generations/song-1"
+        approve = urllib.request.Request(base + "/approve", method="POST",
+            data=json.dumps({"identity": "owner@example.test", "decisionId": "decision-1",
+                             "manifestDigest": "digest-1", "choice": "approved"}).encode(),
+            headers={"Authorization": "Bearer outer-token", "Content-Type": "application/json"})
+        with urllib.request.urlopen(approve, timeout=10) as response:
+            self.assertEqual(json.load(response)["approval"], "approved")
+        self.assertEqual(seen[0], ("/internal/song/decide",
+                                   {"generation-id": "song-1", "decision-id": "decision-1",
+                                    "manifest-digest": "digest-1", "choice": "approved"},
+                                   "owner@example.test"))
+        audio = urllib.request.Request(base + "/audio?identity=owner@example.test",
+                                       headers={"Authorization": "Bearer outer-token"})
+        with urllib.request.urlopen(audio, timeout=10) as response:
+            self.assertEqual(response.headers["Content-Type"], "audio/mp4")
+            self.assertEqual(response.read(), b"m4a-data")
+        self.assertEqual(seen[1][0], "/internal/song/audio")
+        with self.assertRaises(urllib.error.HTTPError) as denied:
+            urllib.request.urlopen(urllib.request.Request(base + "/audio?identity=foreign@example.test",
+                                       headers={"Authorization": "Bearer outer-token"}), timeout=10)
+        self.assertEqual(denied.exception.code, 403)
+        denied.exception.close()
+        self.assertEqual(len(seen), 2)
 
     def test_deploy_007_interrupted_claim_recovery(self):
         class Grain:

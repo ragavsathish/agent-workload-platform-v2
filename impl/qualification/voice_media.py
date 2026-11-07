@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 import wave
 from dataclasses import dataclass, replace
 from fractions import Fraction
@@ -22,6 +23,10 @@ from aiortc import (
     RTCSessionDescription,
 )
 from av import AudioFrame
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]
+                       / "runtime/products/voice-agent/apps/edge"))
+from presentation_response import parse_presentation_response  # noqa: E402
 
 class SyntheticMicrophone(MediaStreamTrack):
     kind = "audio"
@@ -417,6 +422,15 @@ class Qualification:
             raise AssertionError("selected spoken turn was not dispatched exactly once")
         if not any(entry.get("role") == "assistant" and entry.get("text") for entry in entries):
             raise AssertionError("selected history has no safe assistant answer")
+        answer = turn.get("answer")
+        assistant = next((entry for entry in entries
+                          if entry.get("id") == str(new_users[0]["id"])[:-5] + "-assistant"), None)
+        if not isinstance(answer, str) or not assistant or assistant.get("text") != answer:
+            raise AssertionError("selected public answer differs from settled Grain answer")
+        spoken = parse_presentation_response(answer).spoken
+        if not any(message.get("type") == "mcp-app" and message.get("spoken") == spoken
+                   for message in result["server_messages"]):
+            raise AssertionError("spoken media presentation differs from selected safe answer")
         active = self.request("GET", "/api/pi-transcript").json()
         if active.get("entries") != entries:
             raise AssertionError("active transcript differs from selected history")

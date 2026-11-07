@@ -1,6 +1,6 @@
 # Build harness
 
-Cites [the invariants](invariants.md) and [the current slice](../plan/05-deployed-voice-journey/plan.md).
+Cites [the invariants](invariants.md) and [the current slice](../plan/06-public-deployment/plan.md).
 
 Planning and implementation are separate invocations. A planning invocation
 changes the wiki, plan, scenarios, tickets, or decisions. A build invocation

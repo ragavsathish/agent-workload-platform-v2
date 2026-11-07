@@ -13,5 +13,7 @@ Cites [the pinned v1 source inventory](../../raw/v1/manifest.md).
 - [Deployed owner voice journey](deployed-voice-journey.md) defines the spoken
   media and qualification boundary used by [slice 05](../plan/05-deployed-voice-journey/plan.md).
 
+- [Public owner deployment](public-deployment.md) defines authenticated entry, external media, service recovery, and scheduling for [slice 06](../plan/06-public-deployment/plan.md).
+
 The wiki records source-backed current behavior separately from agreed behavior
 and explicit v2 decisions. It does not describe the implementation.

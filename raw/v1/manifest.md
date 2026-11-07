@@ -39,6 +39,15 @@ v1 checkout also has uncommitted work, which is excluded from this baseline.
 | [Host requirements](host-requirements.md) | `products/voice-agent/HOST_REQUIREMENTS.md` | `0a67993a85e3f7b559f71b5aba57a501d8dfce3f86ddcd5d16529fc15c19635a` |
 | [Voice environment example](voice-env.example) | `products/voice-agent/deploy/.env.example` | `8d8b3f4c02c959ad7441274f63e6c886529f8c2d4128692947bf60c217670908` |
 
+| [Deployment composition](deployment-compose.yml) | `products/voice-agent/deploy/compose.yml` | `37fe6c51c3af6e73bba6890b48de73c9f0445cfe58a23d86f5fbf7a1f953c822` |
+| [Owner routes](traefik-routes.yml) | `products/voice-agent/deploy/traefik/routes.yml` | `2be2a1e95bfcfaf69e95c27a6d8798b39fe6ccfa8ef99a2beb939a927f9375d0` |
+| [Tailnet login setup](tailnet-login.py) | `products/voice-agent/tools/ops/login.py` | `4ec8b693172896b614c76b4898d1166095abf165d340bbe2097cdad2cc63ccde` |
+| [Tailnet policy example](tailnet-policy.hujson.example) | `products/voice-agent/deploy/tailscale-policy.hujson.example` | `d4ed0ec94457c98585f32a02652f4775495b4debee825e3aa0adc17da8045fb8` |
+| [Task owner service](service-task-owner.plist) | `products/voice-agent/deploy/launchd/com.sathish.pipecat-pi-durable-owner.plist` | `7a7f4f9bc74b14d621142279b58893bf2d6ada33a38ac5aaed20287fc8b0f6d5` |
+| [Task worker service](service-task-worker.plist) | `products/voice-agent/deploy/launchd/com.sathish.pipecat-worker.plist` | `71c1a4244dfb3ab400792f03a9c2e042055ec91e2decfb61c3ac7b0b13ba2587` |
+| [Conversation service](service-pi-voice.plist) | `products/voice-agent/deploy/launchd/com.sathish.pipecat-pi-voice.plist` | `6e0bcd8863ddac490328736d079a73e6e76ef334ecb3ba493bf397242d88ec9f` |
+| [Voice service lifecycle](voice-makefile) | `products/voice-agent/Makefile` | `0fb81fa45518b15cf037509c1b954499804f844eda90acc50c43417fc81d9977` |
+
 The [tasking wiki](../../docs/wiki/tasking.md) and
 [conversation wiki](../../docs/wiki/session-orchestration.md) cite these sources. The
 [Löyly method snapshot](../loyly-method.md) is copied from the v1 checkout's

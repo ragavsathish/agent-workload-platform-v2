@@ -1,0 +1,576 @@
+name: pipecat-mlx-voice
+
+services:
+  gitea:
+    image: docker.gitea.com/gitea:28.1.0-rootless@sha256:b1a90409ae9afcd5a5725404c3639da7245248848b99e35332968891290b953e
+    restart: unless-stopped
+    environment:
+      GITEA__actions__ENABLED: "true"
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__database__PATH: /var/lib/gitea/data/gitea.db
+      GITEA__packages__ENABLED: "true"
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__server__DISABLE_SSH: "true"
+      GITEA__server__DOMAIN: 127.0.0.1
+      GITEA__server__HTTP_ADDR: 0.0.0.0
+      GITEA__server__LOCAL_ROOT_URL: http://gitea:3000/
+      GITEA__server__PUBLIC_URL_DETECTION: auto
+      GITEA__server__ROOT_URL: ${GITEA_ROOT_URL:-http://127.0.0.1:3001/}
+      GITEA__server__REVERSE_PROXY_AUTHENTICATION_USER: X-WEBAUTH-USER
+      GITEA__service__DISABLE_REGISTRATION: "true"
+      GITEA__service__ENABLE_REVERSE_PROXY_AUTHENTICATION: "true"
+      GITEA__service__ENABLE_REVERSE_PROXY_AUTO_REGISTRATION: "false"
+      GITEA__service__REQUIRE_SIGNIN_VIEW: "false"
+    volumes:
+      - gitea-data:/var/lib/gitea
+      - gitea-config:/etc/gitea
+    networks: [gitea-backend]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  gitea-ingress:
+    image: docker.io/library/caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb
+    restart: unless-stopped
+    depends_on:
+      gitea:
+        condition: service_healthy
+    environment:
+      TAILSCALE_GITEA_ADMIN_LOGIN: ${TAILSCALE_GITEA_ADMIN_LOGIN:-unset@example.invalid}
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    ports: ["127.0.0.1:3001:3000"]
+    volumes:
+      - ./gitea-ingress/Caddyfile:/etc/caddy/Caddyfile:ro
+      - gitea-ingress-socket:/run/gitea-ingress
+    networks: [gitea-backend, host-access]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m"]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.25
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  s3mock-init:
+    image: adobe/s3mock:5.0.0@sha256:c461c8f4234bd63540d2f3a3cabce69d814c78dc890a5af08727525a028e23da
+    entrypoint: ["chown"]
+    command: ["65532:65532", "/s3mockroot"]
+    volumes: [s3mock-data:/s3mockroot]
+    network_mode: none
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+
+  s3mock:
+    image: adobe/s3mock:5.0.0@sha256:c461c8f4234bd63540d2f3a3cabce69d814c78dc890a5af08727525a028e23da
+    restart: unless-stopped
+    depends_on:
+      s3mock-init:
+        condition: service_completed_successfully
+    environment:
+      COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: ${ARTIFACT_BUCKET:-agent-artifacts}
+      COM_ADOBE_TESTING_S3MOCK_STORE_ROOT: /s3mockroot
+      COM_ADOBE_TESTING_S3MOCK_STORE_RETAIN_FILES_ON_EXIT: "true"
+    ports: ["127.0.0.1:9090:9090"]
+    volumes: [s3mock-data:/s3mockroot]
+    networks: [data, host-access]
+    user: "65532:65532"
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m,uid=65532,gid=65532"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9090/"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  trace-render-worker:
+    image: local/playwright-trace-render-worker:compose
+    pull_policy: never
+    build:
+      context: ..
+      dockerfile: apps/trace-render-worker/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      s3mock:
+        condition: service_healthy
+    environment:
+      ARTIFACT_ENDPOINT_URL: http://s3mock:9090
+      ARTIFACT_BUCKET: ${ARTIFACT_BUCKET:-agent-artifacts}
+      ARTIFACT_ACCESS_KEY: ${ARTIFACT_ACCESS_KEY:-local-test}
+      ARTIFACT_SECRET_KEY: ${ARTIFACT_SECRET_KEY:-local-test}
+      INFERENCE_BROKER_BASE_URL: http://host.docker.internal:9443/v1
+      INFERENCE_BROKER_TOKEN_FILE: /run/secrets/broker-token
+      INFERENCE_LLM_MODEL: ${OLLAMA_MODEL}
+      TRACE_RENDER_WORKER_PORT: "9460"
+      TRACE_RENDER_TIMEOUT_MS: "600000"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4318
+      OTEL_LOGS_EXPORTER: none
+      OTEL_METRIC_EXPORT_INTERVAL: "5000"
+    secrets: [broker-token]
+    ports: ["127.0.0.1:9460:9460"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    networks: [data, host-access, monitoring]
+    user: "65532:65532"
+    read_only: true
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,nodev,size=64m,uid=65532,gid=65532"
+      - "/scratch:rw,nosuid,nodev,size=1g,uid=65532,gid=65532"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9460/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  oxigraph-init:
+    image: busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+    entrypoint: ["chown"]
+    command: ["-R", "65532:65532", "/data"]
+    volumes: [oxigraph-data:/data]
+    network_mode: none
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+
+  oxigraph:
+    image: oxigraph/oxigraph:0.5.11@sha256:7532c1f9aa5f28c0dc6a4243198f7f6144017fab7429bf6c164a89fec9411767
+    command: ["serve", "--location", "/data", "--bind", "0.0.0.0:7878"]
+    restart: unless-stopped
+    depends_on:
+      oxigraph-init:
+        condition: service_completed_successfully
+    volumes: [oxigraph-data:/data]
+    ports: ["127.0.0.1:7878:7878"]
+    networks:
+      data:
+      oxigraph-host:
+      oxigraph-tailnet:
+        ipv4_address: 172.30.91.2
+    user: "65532:65532"
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=32m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 1
+    stop_grace_period: 30s
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  fluent-bit:
+    image: fluent/fluent-bit:4.2.0@sha256:aff743e1a5e61d036d10a4472d67cdd7a6b408c92218eb86e3f301e2bac7817a
+    restart: unless-stopped
+    command: ["--config=/fluent-bit/etc/fluent-bit.yaml"]
+    volumes:
+      - ./observability/fluent-bit.yaml:/fluent-bit/etc/fluent-bit.yaml:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    networks: [monitoring]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.25
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  otel-lgtm:
+    image: grafana/otel-lgtm:0.30.1@sha256:bb182ac3174a20923fa58f00d1790fa71eb06cc0150078c0b0e8feb9e6611492
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        export GF_SECURITY_ADMIN_PASSWORD="$$(cat /run/secrets/grafana-admin-password)"
+        exec /otel-lgtm/run-all.sh
+    restart: unless-stopped
+    environment:
+      ENABLE_LOGS_ALL: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_AUTH_PROXY_AUTO_SIGN_UP: "true"
+      GF_AUTH_PROXY_ENABLED: "true"
+      GF_AUTH_PROXY_HEADER_NAME: Tailscale-User-Login
+      GF_AUTH_PROXY_HEADER_PROPERTY: username
+      GF_AUTH_PROXY_SYNC_TTL: "0"
+      GF_AUTH_PROXY_WHITELIST: 172.30.90.2
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_PLUGINS_PREINSTALL: neildengg-grafmaid-panel@1.0.6
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://127.0.0.1:3300/}
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_USERS_AUTO_ASSIGN_ORG_ROLE: Viewer
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      PROMETHEUS_EXTRA_ARGS: --storage.tsdb.retention.time=7d
+    secrets: [grafana-admin-password]
+    ports:
+      - "127.0.0.1:3300:3000"
+      - "127.0.0.1:4318:4318"
+      - "127.0.0.1:9091:9090"
+    volumes:
+      - otel-lgtm-data:/data
+      - ./observability/dashboards.yml:/otel-lgtm/grafana/conf/provisioning/dashboards/pipecat.yml:ro
+      - ./observability/stack-alerts.json:/otel-lgtm/grafana/conf/provisioning/alerting/stack-alerts.json:ro
+      - ./observability/pipecat-overview.json:/otel-lgtm/grafana/conf/provisioning/dashboards/pipecat/pipecat-overview.json:ro
+      - ./observability/system-overview.json:/otel-lgtm/grafana/conf/provisioning/dashboards/pipecat/system-overview.json:ro
+      - ./observability/storage-capacity.json:/otel-lgtm/grafana/conf/provisioning/dashboards/pipecat/storage-capacity.json:ro
+      - ./observability/c4-heatmap.json:/otel-lgtm/grafana/conf/provisioning/dashboards/pipecat/c4-heatmap.json:ro
+      - ./observability/otelcol-config.yaml:/otel-lgtm/otelcol-config.yaml:ro
+    networks:
+      control:
+        ipv4_address: 172.30.90.4
+      monitoring:
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 512
+    mem_limit: 2g
+    cpus: 2
+    healthcheck:
+      test: ["CMD", "cat", "/tmp/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+    logging:
+      driver: none
+
+  grafana-mcp-bootstrap:
+    image: curlimages/curl:8.16.0@sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6
+    depends_on:
+      otel-lgtm:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/bootstrap-grafana-mcp.sh"]
+    environment:
+      GRAFANA_URL: http://otel-lgtm:3000
+      GRAFANA_SERVICE_ACCOUNT_TOKEN_FILE: /var/lib/grafana-mcp/service-account-token
+    secrets: [grafana-admin-password]
+    volumes:
+      - grafana-mcp-token:/var/lib/grafana-mcp
+      - ./observability/bootstrap-grafana-mcp.sh:/bootstrap-grafana-mcp.sh:ro
+    networks: [monitoring]
+    user: "0:0"
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=8m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+
+  grafana-mcp:
+    image: grafana/mcp-grafana:2.0.2@sha256:78d208116ec52b09b44f0eca66892073b39aefcb64483c54d43255c8eab7e97a
+    depends_on:
+      grafana-mcp-bootstrap:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/sh", "/run-grafana-mcp.sh"]
+    environment:
+      GRAFANA_URL: http://otel-lgtm:3000
+      GRAFANA_SERVICE_ACCOUNT_TOKEN_FILE: /var/lib/grafana-mcp/service-account-token
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otel-lgtm:4317
+      OTEL_EXPORTER_OTLP_TRACES_INSECURE: "true"
+      OTEL_LOGS_EXPORTER: none
+    secrets: [grafana-mcp-caller-token]
+    ports: ["127.0.0.1:8000:8000"]
+    volumes:
+      - grafana-mcp-token:/var/lib/grafana-mcp:ro
+      - ./observability/run-grafana-mcp.sh:/run-grafana-mcp.sh:ro
+    networks:
+      control:
+        ipv4_address: 172.30.90.20
+      monitoring:
+      mcp-access:
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m,uid=1000,gid=999"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf \"GET /healthz HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n\" >&3 && grep -q \"200 OK\" <&3'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  agent-gateway:
+    image: local/pipecat-agent-gateway:compose
+    pull_policy: never
+    build:
+      context: ..
+      dockerfile: apps/gateway/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      s3mock:
+        condition: service_healthy
+      otel-lgtm:
+        condition: service_healthy
+      oxigraph:
+        condition: service_started
+    environment:
+      AGENT_GATEWAY_HOST: 0.0.0.0
+      AGENT_GATEWAY_PORT: "9444"
+      AGENT_GATEWAY_TOKEN_FILE: /run/secrets/agent-gateway-token
+      ORCHESTRATOR_ALLOWED_USERS: ${ORCHESTRATOR_ALLOWED_USERS:-}
+      ORCHESTRATOR_WORKSPACE_ROOTS: ${ORCHESTRATOR_WORKSPACE_ROOTS:-}
+      ORCHESTRATOR_DEFER_WORKSPACE_VALIDATION: "true"
+      PI_DURABLE_OWNER_URL: http://host.docker.internal:9448
+      PI_DURABLE_OWNER_TOKEN_FILE: /run/secrets/agent-gateway-token
+      ARTIFACT_ENDPOINT_URL: http://s3mock:9090
+      ARTIFACT_BUCKET: ${ARTIFACT_BUCKET:-agent-artifacts}
+      ARTIFACT_ACCESS_KEY: ${ARTIFACT_ACCESS_KEY:-local-test}
+      ARTIFACT_SECRET_KEY: ${ARTIFACT_SECRET_KEY:-local-test}
+      OXIGRAPH_QUERY_URL: http://oxigraph:7878/query
+      OXIGRAPH_UPDATE_URL: http://oxigraph:7878/update
+      DIGITAL_TWIN_READER_TOKEN_FILE: /run/secrets/digital-twin-reader-token
+      DIGITAL_TWIN_WRITER_TOKEN_FILE: /run/secrets/digital-twin-writer-token
+      ORCHESTRATOR_ALLOWED_WORKSPACES: ${ORCHESTRATOR_ALLOWED_WORKSPACES:?set ORCHESTRATOR_ALLOWED_WORKSPACES in deploy/.env}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4318
+      OTEL_LOGS_EXPORTER: none
+      OTEL_METRIC_EXPORT_INTERVAL: "5000"
+    secrets: [agent-gateway-token, digital-twin-reader-token, digital-twin-writer-token]
+    # Native Pi voice RPC receives only these bearer-protected, loopback-bound
+    # task and read-only personal-knowledge capabilities. They are never exposed
+    # on the Mac LAN.
+    ports: ["127.0.0.1:9444:9444"]
+    networks:
+      control:
+        ipv4_address: 172.30.90.3
+      data:
+      host-access:
+        gw_priority: 1
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  tailscale:
+    image: docker.io/tailscale/tailscale@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065
+    restart: unless-stopped
+    hostname: pipecat-edge
+    environment:
+      TS_USERSPACE: "false"
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SOCKET: /tmp/tailscaled.sock
+      TS_HOSTNAME: pipecat-edge
+      TS_ACCEPT_DNS: "false"
+      TS_AUTH_ONCE: "true"
+      TS_BOOT_TIMEOUT: "10m"
+      TS_DEBUG_FIREWALL_MODE: nftables
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - gitea-ingress-socket:/run/gitea-ingress:ro
+    ports:
+      - "127.0.0.1:${VOICE_LOCAL_PORT:-8080}:8081"
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    # Voice shares this service's network namespace. Pin its capability
+    # endpoints so host and internal control-plane routing remain explicit.
+    extra_hosts:
+      - "inference-broker:host-gateway"
+      - "agent-gateway:172.30.90.3"
+      - "otel-lgtm:172.30.90.4"
+    networks:
+      control:
+        ipv4_address: 172.30.90.2
+      oxigraph-tailnet:
+        ipv4_address: 172.30.91.3
+    read_only: true
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,nodev,size=64m"
+      - "/run:rw,noexec,nosuid,nodev,size=16m"
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 1
+
+  traefik:
+    image: traefik:3.7.13@sha256:24841fe2de7304c149343d877d2923b4c8800a38ba015dea9174c23b20e344a0
+    restart: unless-stopped
+    depends_on:
+      otel-lgtm:
+        condition: service_healthy
+      tailscale:
+        condition: service_started
+      voice-edge:
+        condition: service_healthy
+    network_mode: service:tailscale
+    command: ["--configFile=/etc/traefik/traefik.yml"]
+    volumes:
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/routes.yml:/etc/traefik/routes.yml:ro
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: "65532:65532"
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.25
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  voice-edge:
+    image: local/pipecat-edge:compose
+    pull_policy: never
+    build:
+      context: ..
+      dockerfile: apps/edge/Containerfile
+    restart: unless-stopped
+    depends_on:
+      agent-gateway:
+        condition: service_healthy
+      grafana-mcp:
+        condition: service_healthy
+      tailscale:
+        condition: service_started
+    network_mode: service:tailscale
+    env_file: [../apps/edge/.env]
+    environment:
+      INFERENCE_BROKER_BASE_URL: http://inference-broker:9443/v1
+      AGENT_GATEWAY_BASE_URL: http://agent-gateway:9444/v1
+      GRAFANA_MCP_URL: http://grafana-mcp:8000/mcp
+      GRAFANA_MCP_SERVER_TOKEN_FILE: /run/secrets/grafana-mcp-caller-token
+      PLAYWRIGHT_TRACE_VIEWER_INTERNAL_BASE_URL: http://host.docker.internal:9450
+      EDGE_ALLOW_LOCAL_INGRESS: ${EDGE_ALLOW_LOCAL_INGRESS:-true}
+      EDGE_LOCAL_ORIGINS: http://127.0.0.1:${VOICE_LOCAL_PORT:-8080},http://localhost:${VOICE_LOCAL_PORT:-8080},http://127.0.0.1:8081
+      VOICE_DEFAULT_WORKSPACE: ${VOICE_DEFAULT_WORKSPACE:?set VOICE_DEFAULT_WORKSPACE in deploy/.env}
+      VOICE_INPUT_FILTER: ${VOICE_INPUT_FILTER:-rnnoise}
+      VOICE_DIAGNOSTIC_DIR: /var/lib/voice-diagnostics
+      VOICE_DIAGNOSTIC_MAX_SESSIONS: "5"
+      VOICE_DIAGNOSTIC_MAX_SECONDS: ${VOICE_DIAGNOSTIC_MAX_SECONDS:-1800}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4318
+      OTEL_LOGS_EXPORTER: none
+      OTEL_METRIC_EXPORT_INTERVAL: "5000"
+    secrets: [broker-token, agent-gateway-token, grafana-mcp-caller-token, voxlock-voice-sample]
+    volumes:
+      - voice-diagnostics:/var/lib/voice-diagnostics
+      - ../../../artifacts/test-reports/published:/app/client-dist/knowledge/allure:ro
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=256m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: "65532:65532"
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  gitea-config:
+  gitea-data:
+  otel-lgtm-data:
+  grafana-mcp-token:
+  oxigraph-data:
+  s3mock-data:
+  tailscale-state:
+  gitea-ingress-socket:
+  voice-diagnostics:
+
+networks:
+  control:
+    ipam:
+      config:
+        - subnet: 172.30.90.0/24
+  data:
+    internal: true
+  gitea-backend:
+    internal: true
+  monitoring:
+    internal: true
+  mcp-access:
+  host-access:
+  oxigraph-host:
+  oxigraph-tailnet:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.91.0/29
+
+secrets:
+  broker-token:
+    file: ./secrets/broker-token
+  agent-gateway-token:
+    file: ./secrets/agent-gateway-token
+  digital-twin-reader-token:
+    file: ./secrets/digital-twin-reader-token
+  digital-twin-writer-token:
+    file: ./secrets/digital-twin-writer-token
+  grafana-admin-password:
+    file: ./secrets/grafana-admin-password
+  grafana-mcp-caller-token:
+    file: ./secrets/grafana-mcp-caller-token
+  voxlock-voice-sample:
+    file: ./secrets/voxlock-voice-sample.wav

@@ -1,0 +1,80 @@
+http:
+  middlewares:
+    tailnet-loopback-only:
+      ipAllowList:
+        sourceRange:
+          - "127.0.0.1/32"
+        rejectStatusCode: 404
+    strip-local-ingress-marker:
+      headers:
+        customRequestHeaders:
+          X-Voice-Local-Ingress: ""
+    local-ingress-marker:
+      headers:
+        customRequestHeaders:
+          X-Voice-Local-Ingress: "1"
+    owner-only:
+      forwardAuth:
+        address: http://127.0.0.1:7860/api/ingress-auth
+        trustForwardHeader: false
+    oxigraph-prefix:
+      stripPrefix:
+        prefixes:
+          - /oxigraph
+    metrics-slash:
+      redirectRegex:
+        regex: "^(https?://[^/]+/metrics)$"
+        replacement: "${1}/"
+        permanent: true
+
+  routers:
+    tailnet-oxigraph-query:
+      entryPoints: [tailnet]
+      rule: "HeaderRegexp(`Tailscale-User-Login`, `.+`) && Path(`/oxigraph/query`) && Method(`POST`)"
+      priority: 500
+      middlewares: [tailnet-loopback-only, owner-only, oxigraph-prefix]
+      service: oxigraph
+    local-oxigraph-query:
+      entryPoints: [local]
+      rule: "Path(`/oxigraph/query`) && Method(`POST`)"
+      priority: 500
+      middlewares: [oxigraph-prefix]
+      service: oxigraph
+    metrics-root:
+      entryPoints: [tailnet]
+      rule: "HeaderRegexp(`Tailscale-User-Login`, `.+`) && Path(`/metrics`)"
+      priority: 310
+      middlewares: [tailnet-loopback-only, owner-only, metrics-slash]
+      service: noop@internal
+    metrics:
+      entryPoints: [tailnet]
+      rule: "HeaderRegexp(`Tailscale-User-Login`, `.+`) && PathPrefix(`/metrics/`)"
+      priority: 300
+      middlewares: [tailnet-loopback-only, owner-only]
+      service: grafana
+    live:
+      entryPoints: [tailnet]
+      rule: "HeaderRegexp(`Tailscale-User-Login`, `.+`) && PathPrefix(`/`)"
+      priority: 1
+      middlewares: [tailnet-loopback-only, strip-local-ingress-marker, owner-only]
+      service: voice-edge
+    local-live:
+      entryPoints: [local]
+      rule: "PathPrefix(`/`)"
+      priority: 1
+      middlewares: [local-ingress-marker]
+      service: voice-edge
+
+  services:
+    voice-edge:
+      loadBalancer:
+        servers:
+          - url: http://127.0.0.1:7860
+    grafana:
+      loadBalancer:
+        servers:
+          - url: http://otel-lgtm:3000
+    oxigraph:
+      loadBalancer:
+        servers:
+          - url: http://172.30.91.2:7878

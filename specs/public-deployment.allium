@@ -1,0 +1,149 @@
+-- allium: 3
+-- Cites docs/plan/06-public-deployment/spec.feature and docs/wiki/public-deployment.md.
+
+entity PublicEntry {
+    entry_id: String
+    owner: String
+    status: String
+}
+
+entity MediaJourney {
+    journey_id: String
+    owner: String
+    entry_id: String
+    turn_id: String?
+    media_ready: Boolean
+    response_audio: Boolean
+    status: String
+}
+
+entity ServiceVersion {
+    version_id: String
+    qualified: Boolean
+    active: Boolean
+    status: String
+}
+
+entity ScheduledTask {
+    task_id: String
+    owner: String
+    attempt_id: String?
+    status: String
+}
+
+rule AdmitPublicOwner {
+    when: PublicOwnerAuthenticated(entry_id, owner)
+    let entry = PublicEntry{entry_id: entry_id}
+    requires: exists entry
+    requires: entry.owner = owner
+    requires: entry.status = "ready"
+    ensures: OwnerEntryGranted(entry_id: entry_id, owner: owner)
+}
+
+rule DenyForeignOwner {
+    when: ForeignOwnerPresented(entry_id, caller)
+    let entry = PublicEntry{entry_id: entry_id}
+    requires: exists entry
+    requires: caller != entry.owner
+    ensures: OwnerEntryDenied(entry_id: entry_id, caller: caller)
+}
+
+rule ConfirmExternalMedia {
+    when: ExternalMediaObserved(journey_id, owner, turn_id)
+    let journey = MediaJourney{journey_id: journey_id}
+    requires: exists journey
+    requires: journey.owner = owner
+    requires: journey.status = "connected"
+    requires: journey.media_ready = true
+    ensures: journey.turn_id = turn_id
+    ensures: journey.response_audio = true
+    ensures: journey.status = "completed"
+}
+
+rule MarkMediaFailure {
+    when: MediaPathFailed(journey_id, owner)
+    let journey = MediaJourney{journey_id: journey_id}
+    requires: exists journey
+    requires: journey.owner = owner
+    requires: journey.response_audio = false
+    ensures: journey.status = "unavailable"
+}
+
+rule StartEligibleTask {
+    when: ExecutionCapacityAvailable(task_id, owner, attempt_id)
+    let task = ScheduledTask{task_id: task_id}
+    requires: exists task
+    requires: task.owner = owner
+    requires: task.status = "pending"
+    requires: task.attempt_id = null
+    ensures: task.attempt_id = attempt_id
+    ensures: task.status = "executing"
+}
+
+rule RestoreQualifiedVersion {
+    when: ServiceChangeFailed(version_id, previous_id)
+    let candidate = ServiceVersion{version_id: version_id}
+    let previous = ServiceVersion{version_id: previous_id}
+    requires: exists candidate
+    requires: exists previous
+    requires: previous.qualified = true
+    ensures: candidate.active = false
+    ensures: candidate.status = "failed"
+    ensures: previous.active = true
+}
+
+invariant NoSuccessfulJourneyWithoutMedia {
+    for journey in MediaJourneys:
+        journey.status = "completed" implies journey.media_ready = true and journey.response_audio = true
+}
+
+invariant OneTaskAttemptClaim {
+    for a in ScheduledTasks:
+        for b in ScheduledTasks:
+            a.task_id = b.task_id implies a = b
+}
+
+surface OwnerPublicEntry {
+    facing entry: PublicEntry
+
+    exposes:
+        entry.entry_id
+
+    provides:
+        PublicOwnerAuthenticated(entry_id, owner)
+        ForeignOwnerPresented(entry_id, caller)
+
+    @guarantee TrustedOwnerOnly
+        -- Caller-supplied identity cannot grant owner authority.
+}
+
+surface PublicMediaFeed {
+    facing journey: MediaJourney
+
+    exposes:
+        journey.journey_id
+
+    provides:
+        ExternalMediaObserved(journey_id, owner, turn_id)
+        MediaPathFailed(journey_id, owner)
+}
+
+surface TaskScheduling {
+    facing task: ScheduledTask
+
+    exposes:
+        task.task_id
+
+    provides:
+        ExecutionCapacityAvailable(task_id, owner, attempt_id)
+}
+
+surface ServiceRollout {
+    facing version: ServiceVersion
+
+    exposes:
+        version.version_id
+
+    provides:
+        ServiceChangeFailed(version_id, previous_id)
+}

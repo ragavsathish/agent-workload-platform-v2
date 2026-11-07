@@ -12,6 +12,10 @@ and [the behavioral model](specs/tasking.allium). Grain is the implementation
 framework; its runtime topology and code belong under `impl/`. This slice does
 not yet execute work or replace v1.
 
+The next planned slice covers [task lifecycle and execution](docs/plan/02-task-lifecycle/plan.md)
+with its [behavioral model](specs/task-lifecycle.allium). It is a planning
+baseline; its acceptance tests and implementation have not been built.
+
 ## Read order
 
 1. [Method](docs/wow/way-of-working.md) and [invariants](docs/wow/invariants.md)
@@ -19,6 +23,7 @@ not yet execute work or replace v1.
 3. [Current slice](docs/plan/01-task-admission/plan.md)
 4. [Pinned v1 evidence](raw/v1/manifest.md), when checking a claim
 
-Run `harness/verify.sh` to ratify the current slice. Run
+Run `harness/verify.sh` to ratify implemented slice 01; it does not yet
+ratify planned slice 02. Run
 `harness/fence.sh /path/to/new-room` to create a clean-room checkout for a
 later regeneration experiment.

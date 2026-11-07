@@ -12,6 +12,11 @@ v1 checkout also has uncommitted work, which is excluded from this baseline.
 | [Glossary](glossary.md) | `products/voice-agent/GLOSSARY.md` | `9d023beb48c31d597fc2a9474c390572d2d2dab9eb87c74dd43d80f3d252acaf` |
 | [Task service](task-service.py) | `products/voice-agent/packages/tasking/src/voice_agent/tasking/application/service.py` | `a7b89c4d1e9ac0f0877de0592f1227e6d37c30936fe258b80ad7cd38129ade95` |
 | [Durable owner](durable-owner.ts) | `platform/agent-execution/pi-durable-task/owner.ts` | `8366deb10d49c0984ac9ff0da100b233252ca6adba1f3778434fd533273633fd` |
+| [C8 execution contract](c8-agent-execution.feature) | `docs/spec/contexts/c8-agent-execution/spec.feature` | `7b161e68a53741f7660dd85bfb2430c13872f80a0070f31b66b538afcca516d2` |
+| [Durable task journey](voice-to-durable.feature) | `docs/plan/01-voice-to-durable/spec.feature` | `e3ff10a16e3a993039cb378c66447fb2ce57eb0b5ad18acc3c2fa658796f8af5` |
+| [Durable owner tests](durable-owner.test.ts) | `platform/agent-execution/pi-durable-task/owner.test.ts` | `84ff73948479efbb81ce1bbf0fe408abfb8b829adc85a0873c991201a922a660` |
+| [Session execution](session-execution.ts) | `platform/agent-execution/pi-durable-task/session-execution.ts` | `1be23779277132ee44cbe29ff1d78c841c26af46fe934cdeec0b43eb317bcfb7` |
+| [Progress narration](task-progress.py) | `products/voice-agent/packages/tasking/src/voice_agent/tasking/domain/task_progress.py` | `f3f5146cb67f5dfede911ef857ef074b7d629e30985a09ba8936d4798fbd316a` |
 
 The [tasking wiki](../../docs/wiki/tasking.md) cites these sources. The
 [Löyly method snapshot](../loyly-method.md) is copied from the v1 checkout's

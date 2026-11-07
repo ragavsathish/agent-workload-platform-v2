@@ -1,6 +1,11 @@
 -- allium: 3
--- AWP v2 Tasking admission, distilled from v1 C2 rules @bc-c2-001..003
--- and the agreed retry rule @bc-c2-007. Execution is outside this first slice.
+-- AWP v2 Tasking admission. Source: raw/v1/c2-tasking.feature,
+-- raw/v1/owner-client.feature, and docs/plan/01-task-admission/spec.feature.
+-- The caller is the authenticated principal; input is canonical at this boundary.
+
+config {
+    eligible_workspaces: Set<String>
+}
 
 entity TaskRequest {
     request_id: String
@@ -11,7 +16,10 @@ entity TaskRequest {
 }
 
 rule AdmitTask {
-    when: SubmitTask(owner, request_id, instruction, workspace)
+    when: SubmitTask(caller, owner, request_id, instruction, workspace)
+    requires: caller = owner
+    requires: instruction != ""
+    requires: workspace in eligible_workspaces
     requires: not exists TaskRequest{request_id: request_id}
     ensures: TaskRequest.created(
         request_id: request_id,
@@ -22,13 +30,62 @@ rule AdmitTask {
 }
 
 rule ReuseTask {
-    when: SubmitTask(owner, request_id, instruction, workspace)
+    when: SubmitTask(caller, owner, request_id, instruction, workspace)
     let prior = TaskRequest{request_id: request_id}
+    requires: caller = owner
+    requires: instruction != ""
+    requires: workspace in eligible_workspaces
     requires: exists prior
     requires: prior.owner = owner
     requires: prior.instruction = instruction
     requires: prior.workspace = workspace
     ensures: TaskReused(task_id: prior.task_id)
+}
+
+rule RefuseConflictingRequest {
+    when: SubmitTask(caller, owner, request_id, instruction, workspace)
+    let prior = TaskRequest{request_id: request_id}
+    requires: caller = owner
+    requires: instruction != ""
+    requires: workspace in eligible_workspaces
+    requires: exists prior
+    requires: prior.owner != owner or prior.instruction != instruction or prior.workspace != workspace
+    ensures: AdmissionRefused(reason: conflict)
+}
+
+rule RefuseIneligibleWork {
+    when: SubmitTask(caller, owner, request_id, instruction, workspace)
+    requires: caller = owner
+    requires: instruction = "" or workspace not in eligible_workspaces
+    ensures: AdmissionRefused(reason: ineligible)
+}
+
+rule RefuseImpersonation {
+    when: SubmitTask(caller, owner, request_id, instruction, workspace)
+    requires: caller != owner
+    ensures: AdmissionRefused(reason: forbidden)
+}
+
+rule ShowOwnedTask {
+    when: QueryTask(caller, request_id)
+    let prior = TaskRequest{request_id: request_id}
+    requires: exists prior
+    requires: prior.owner = caller
+    ensures: TaskVisible(task_id: prior.task_id)
+}
+
+rule HideOtherOwnersTask {
+    when: QueryTask(caller, request_id)
+    let prior = TaskRequest{request_id: request_id}
+    requires: exists prior
+    requires: prior.owner != caller
+    ensures: TaskNotFound()
+}
+
+rule HideMissingTask {
+    when: QueryTask(caller, request_id)
+    requires: not exists TaskRequest{request_id: request_id}
+    ensures: TaskNotFound()
 }
 
 invariant OneTaskPerRequest {
@@ -44,9 +101,14 @@ surface TaskAdmission {
         request.task_id
 
     provides:
-        SubmitTask(owner, request_id, instruction, workspace)
+        SubmitTask(caller, owner, request_id, instruction, workspace)
+        QueryTask(caller, request_id)
 
     @guarantee BoundedRefusal
-        -- An ineligible workspace, empty instruction, or conflicting reuse
-        -- is refused without exposing another owner's task or artifact.
+        -- Invalid work and conflicting identity reuse return a bounded reason.
+        -- Another owner cannot admit as this owner or inspect its task.
+
+    @guarantee ConcurrentRetryConverges
+        -- Overlapping identical submissions bind the request identity once.
+        -- Both callers can recover that one task identity; no second task is admitted.
 }

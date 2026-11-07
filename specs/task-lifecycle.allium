@@ -1,0 +1,270 @@
+-- allium: 3
+-- AWP v2 task lifecycle. Sources: docs/plan/02-task-lifecycle/spec.feature,
+-- raw/v1/c2-tasking.feature, raw/v1/c8-agent-execution.feature,
+-- raw/v1/durable-owner.test.ts. The status names are domain observations;
+-- the plan records the unresolved public-state vocabulary.
+
+use "./tasking.allium" as admission
+
+entity AgentTask {
+    task_id: String
+    owner: String
+    workspace: String
+    status: pending | running | sleeping | completed | failed | cancelled
+    recovery_required: Boolean
+    result: Any?
+    failure: String?
+}
+
+entity TaskProgress {
+    task_id: String
+    cursor: Integer
+    summary: String
+}
+
+rule RecordAcceptedTask {
+    when: TaskAccepted(task_id, owner, workspace)
+    requires: not exists AgentTask{task_id: task_id}
+    ensures: AgentTask.created(
+        task_id: task_id,
+        owner: owner,
+        workspace: workspace,
+        status: pending,
+        recovery_required: false)
+}
+
+rule StartExecution {
+    when: DispatchTask(task_id, workspace)
+    let task = AgentTask{task_id: task_id}
+    requires: exists task
+    requires: task.status = pending
+    requires: task.recovery_required = false
+    requires: workspace = task.workspace
+    ensures: task.status = running
+}
+
+rule RecordProgress {
+    when: ProgressReported(task_id, cursor, summary)
+    let task = AgentTask{task_id: task_id}
+    requires: exists task
+    requires: task.status = running
+    requires: cursor > 0
+    ensures: TaskProgress.created(task_id: task_id, cursor: cursor, summary: summary)
+}
+
+rule SleepExecution {
+    when: ExecutionSleeping(task_id)
+    let task = AgentTask{task_id: task_id}
+    requires: exists task
+    requires: task.status = running
+    ensures: task.status = sleeping
+}
+
+rule ResumeExecution {
+    when: ExecutionResumed(task_id)
+    let task = AgentTask{task_id: task_id}
+    requires: exists task
+    requires: task.status = sleeping
+    ensures: task.status = running
+}
+
+rule CompleteTask {
+    when: ExecutionCompleted(task_id, result)
+    let task = AgentTask{task_id: task_id}
+    requires: exists task
+    requires: task.status = running
+    ensures: task.status = completed
+    ensures: task.result = result
+}
+
+rule FailTask {
+    when: ExecutionFailed(task_id, failure)
+    let task = AgentTask{task_id: task_id}
+    requires: exists task
+    requires: task.status = running
+    ensures: task.status = failed
+    ensures: task.failure = failure
+}
+
+rule AbortPendingTask {
+    when: AbortTask(caller, task_id)
+    let task = AgentTask{task_id: task_id}
+    requires: exists task
+    requires: task.owner = caller
+    requires: task.status = pending
+    ensures: task.status = cancelled
+}
+
+rule AbortRunningTask {
+    when: AbortTask(caller, task_id)
+    let task = AgentTask{task_id: task_id}
+    requires: exists task
+    requires: task.owner = caller
+    requires: task.status = running
+    ensures: task.status = cancelled
+}
+
+rule ParkInterruptedTask {
+    when: ExecutionInterrupted(task_id)
+    let task = AgentTask{task_id: task_id}
+    requires: exists task
+    requires: task.status = running
+    ensures: task.status = pending
+    ensures: task.recovery_required = true
+}
+
+rule RetryParkedTask {
+    when: RetryTask(caller, task_id)
+    let task = AgentTask{task_id: task_id}
+    requires: exists task
+    requires: task.owner = caller
+    requires: task.status = pending
+    requires: task.recovery_required = true
+    ensures: task.recovery_required = false
+}
+
+rule HideOtherOwnersTask {
+    when: ReadTask(caller, task_id)
+    let task = AgentTask{task_id: task_id}
+    requires: exists task
+    requires: task.owner != caller
+    ensures: TaskNotFound()
+}
+
+rule ShowOwnedTask {
+    when: ReadTask(caller, task_id)
+    let task = AgentTask{task_id: task_id}
+    requires: exists task
+    requires: task.owner = caller
+    ensures: TaskVisible(task_id: task.task_id)
+}
+
+rule HideMissingTask {
+    when: ReadTask(caller, task_id)
+    requires: not exists AgentTask{task_id: task_id}
+    ensures: TaskNotFound()
+}
+
+rule ShowOwnedProgress {
+    when: ReadProgress(caller, task_id, after_cursor)
+    let task = AgentTask{task_id: task_id}
+    requires: exists task
+    requires: task.owner = caller
+    ensures: ProgressVisible(task_id: task_id, after_cursor: after_cursor)
+}
+
+rule HideOtherOwnersProgress {
+    when: ReadProgress(caller, task_id, after_cursor)
+    let task = AgentTask{task_id: task_id}
+    requires: exists task
+    requires: task.owner != caller
+    ensures: TaskNotFound()
+}
+
+rule HideMissingProgress {
+    when: ReadProgress(caller, task_id, after_cursor)
+    requires: not exists AgentTask{task_id: task_id}
+    ensures: TaskNotFound()
+}
+
+rule RefuseOtherOwnersAbort {
+    when: AbortTask(caller, task_id)
+    let task = AgentTask{task_id: task_id}
+    requires: exists task
+    requires: task.owner != caller
+    ensures: TaskNotFound()
+}
+
+rule RefuseOtherOwnersRetry {
+    when: RetryTask(caller, task_id)
+    let task = AgentTask{task_id: task_id}
+    requires: exists task
+    requires: task.owner != caller
+    ensures: TaskNotFound()
+}
+
+invariant OneTaskPerAcceptedIdentity {
+    for a in AgentTasks:
+        for b in AgentTasks:
+            a.task_id = b.task_id implies a = b
+}
+
+invariant OneProgressItemPerCursor {
+    for a in TaskProgresses:
+        for b in TaskProgresses:
+            a.task_id = b.task_id and a.cursor = b.cursor implies a = b
+}
+
+invariant TerminalOutcomeShape {
+    for task in AgentTasks:
+        task.status = completed implies task.result != null
+        task.status = failed implies task.failure != null
+        task.status = cancelled implies task.result = null
+}
+
+surface TaskLifecycle {
+    facing task: AgentTask
+
+    exposes:
+        task.task_id
+        task.status
+        task.result
+        task.failure
+
+    provides:
+        AbortTask(caller, task_id)
+        RetryTask(caller, task_id)
+        ReadTask(caller, task_id)
+        ReadProgress(caller, task_id, after_cursor)
+
+    @guarantee OwnerScopedObservationAndControl
+        -- State, progress, result, abort, and retry require the owning caller.
+        -- A different caller receives a bounded missing-task answer.
+
+    @guarantee BoundedOrderedProgress
+        -- Progress cursors increase for each task; summaries are bounded and
+        -- contain neither private reasoning nor sensitive tool arguments.
+
+    @guarantee TerminalOutcomeIsStable
+        -- Completed, failed, and cancelled states remain distinct and terminal.
+        -- A late execution answer cannot overwrite cancellation.
+
+    @guarantee SelectedCapabilityOnly
+        -- Execution can use the selected workspace grant and no other writer.
+
+    @guarantee RecoveryKeepsIdentity
+        -- Uncertain dispatch and explicit retry keep the accepted task identity.
+        -- An uncertain external effect is inspected before it is repeated.
+}
+
+surface AdmissionFeed {
+    facing request: admission/TaskRequest
+
+    exposes:
+        request.task_id
+
+    provides:
+        TaskAccepted(task_id, owner, workspace)
+
+    @guarantee AcceptedIdentityPreserved
+        -- The admitted request supplies the identity used by the task lifecycle.
+}
+
+surface ExecutionFeed {
+    facing task: AgentTask
+
+    exposes:
+        task.task_id
+
+    provides:
+        DispatchTask(task_id, workspace)
+        ProgressReported(task_id, cursor, summary)
+        ExecutionSleeping(task_id)
+        ExecutionResumed(task_id)
+        ExecutionCompleted(task_id, result)
+        ExecutionFailed(task_id, failure)
+        ExecutionInterrupted(task_id)
+
+    @guarantee ExecutionIdentityPreserved
+        -- Incoming execution observations refer to the accepted task identity.
+}

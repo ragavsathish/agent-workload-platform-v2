@@ -24,7 +24,8 @@
                                    {:item-id (:item-id item) :kind (:kind item)
                                     :owner (:owner data) :source-id source-id :mode mode
                                     :original-text (:text item) :current-text (:text item)
-                                    :evidence (:evidence item) :entry-type (:entry-type item) :result-id (:result-id data)
+                                    :evidence (:evidence item) :entry-type (:entry-type item)
+                                    :candidate-uri (:candidate-uri item) :result-id (:result-id data)
                                     :model (:model data) :processor-version (:processor-version data)
                                     :status :pending :revision 0 :reviews []}))
                        next suggestions))

@@ -17,6 +17,10 @@
         {:git/url "https://github.com/ObneyAI/orc.git"
          :git/sha "033f0ab7c2be46fd8bddd5fc94e362d074afac34"
          :deps/root "projects/orc-ontology"}
+        obneyai/grain-control-plane
+        {:git/url "https://github.com/ObneyAI/grain.git"
+         :git/sha "dbf5b5229aad09785e40f71e96adf65c90f971d5"
+         :deps/root "projects/grain-control-plane"}
         obneyai/grain-event-store-sqlite-v3
         {:git/url "https://github.com/ObneyAI/grain.git"
          :git/sha "dbf5b5229aad09785e40f71e96adf65c90f971d5"

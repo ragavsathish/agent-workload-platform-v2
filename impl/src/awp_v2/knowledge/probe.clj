@@ -1,5 +1,6 @@
 (ns awp-v2.knowledge.probe
   (:require [awp-v2.knowledge.api :as knowledge]
+            [awp-v2.knowledge.orc-adapter :as orc]
             [clojure.java.io :as io]))
 
 (def owner "probe-owner@example.test")
@@ -30,6 +31,11 @@
           (assert (= :corrected (:status (knowledge/review! system owner "probe-entry"
                                                           {:action-id "probe-review" :expected-revision 0
                                                            :decision :corrected :text "I learned a song"}))))
+          (assert (empty? (orc/owner-concepts system owner)))
+          (assert (= :accepted (:status (knowledge/review! system owner "probe-entry"
+                                                         {:action-id "probe-accept" :expected-revision 1
+                                                          :decision :accepted}))))
+          (orc/sync-owner! system owner)
           (let [requested (knowledge/daily-request! system owner {:journal-date "2026-11-08"
                                                                     :time-zone "Europe/Helsinki"
                                                                     :sources [source]})]
@@ -40,9 +46,11 @@
         "verify"
         (do
           (assert (= "I learned a song" (:current-text (knowledge/item system owner "probe-entry"))))
-          (assert (= 1 (count (:reviews (knowledge/item system owner "probe-entry")))))
+          (assert (= 2 (count (:reviews (knowledge/item system owner "probe-entry")))))
           (assert (= :completed (:status (knowledge/account system owner (slurp (io/file dir "account-id"))))))
           (assert (= :not-found (:error (knowledge/item system "foreign@example.test" "probe-entry"))))
+          (assert (= "I learned a song" (:label (first (orc/owner-concepts system owner)))))
+          (assert (empty? (orc/owner-concepts system "foreign@example.test")))
           (assert (empty? @submitted))
           (println "public knowledge restart probe OK"))
         (throw (ex-info "unknown probe mode" {:mode mode})))

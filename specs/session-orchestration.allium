@@ -1,0 +1,364 @@
+-- allium: 3
+-- Current owner conversation orchestration. Cites:
+-- docs/plan/03-session-orchestration/spec.feature and raw/v1/manifest.md.
+
+entity OrchestratorConversation {
+    conversation_id: String
+    owner: String
+    last_revision: Integer
+}
+
+entity ActiveSelection {
+    owner: String
+    conversation_id: String
+}
+
+entity Turn {
+    turn_id: String
+    conversation_id: String
+    task_id: String?
+    owner: String
+    origin: voice | typed | bootstrap
+    input_digest: String
+    status: accepted | completed | failed | interrupted | uncertain
+}
+
+entity SelectionCommand {
+    command_id: String
+    owner: String
+    operation: fresh | resume
+    target_id: String?
+    selected_id: String
+}
+
+entity TaskAttachment {
+    owner: String
+    task_id: String
+    active: Boolean
+}
+
+entity PublicTranscriptEntry {
+    conversation_id: String
+    revision: Integer
+    role: user | assistant | tool
+    scope: live | saved
+    text: String
+}
+
+entity ContextView {
+    owner: String
+    revision: Integer
+    can_compact: Boolean
+}
+
+rule StartFreshConversation {
+    when: StartFresh(caller, command_id, new_id)
+    requires: not exists SelectionCommand{command_id: command_id}
+    requires: not Busy{owner: caller}
+    requires: not exists OrchestratorConversation{conversation_id: new_id}
+    ensures: OrchestratorConversation.created(
+        conversation_id: new_id,
+        owner: caller,
+        last_revision: 0)
+    ensures: SelectionCommand.created(
+        command_id: command_id,
+        owner: caller,
+        operation: fresh,
+        target_id: new_id,
+        selected_id: new_id)
+    ensures: ActiveSelectionChanged(owner: caller, conversation_id: new_id)
+    ensures: TaskAttachmentReleased(owner: caller)
+}
+
+rule ResumeConversation {
+    when: ResumeSaved(caller, command_id, target_id)
+    let conversation = OrchestratorConversation{conversation_id: target_id}
+    requires: exists conversation
+    requires: conversation.owner = caller
+    requires: not Busy{owner: caller}
+    requires: not exists SelectionCommand{command_id: command_id}
+    ensures: ActiveSelectionChanged(owner: caller, conversation_id: target_id)
+    ensures: TaskAttachmentReleased(owner: caller)
+    ensures: SelectionCommand.created(
+        command_id: command_id,
+        owner: caller,
+        operation: resume,
+        target_id: target_id,
+        selected_id: target_id)
+}
+
+rule ReuseSelectionDecision {
+    when: RetrySelection(caller, command_id, operation, target_id)
+    let prior = SelectionCommand{command_id: command_id}
+    requires: exists prior
+    requires: prior.owner = caller
+    requires: prior.operation = operation
+    requires: prior.target_id = target_id
+    ensures: SelectionReused(conversation_id: prior.selected_id)
+}
+
+rule RefuseConflictingSelection {
+    when: RetrySelection(caller, command_id, operation, target_id)
+    let prior = SelectionCommand{command_id: command_id}
+    requires: exists prior
+    requires: prior.owner = caller
+    requires: prior.operation != operation or prior.target_id != target_id
+    ensures: SelectionRefused(reason: conflict)
+}
+
+rule RefuseBusySelection {
+    when: ChangeSelection(caller, command_id)
+    requires: Busy{owner: caller}
+    ensures: SelectionRefused(reason: busy)
+}
+
+rule RefuseMissingOrForeignResume {
+    when: ResumeSaved(caller, command_id, target_id)
+    let conversation = OrchestratorConversation{conversation_id: target_id}
+    requires: not exists conversation or conversation.owner != caller
+    ensures: SelectionRefused(reason: missing)
+}
+
+rule AcceptOrchestratorTurn {
+    when: SubmitTurn(caller, turn_id, origin, input_digest, prompt)
+    let active = ActiveSelection{owner: caller}
+    let selected = OrchestratorConversation{conversation_id: active.conversation_id}
+    requires: exists active
+    requires: exists selected
+    requires: not Busy{owner: caller}
+    requires: not exists Turn{turn_id: turn_id}
+    requires: prompt != ""
+    requires: not exists TaskAttachment{owner: caller, active: true}
+    ensures: Turn.created(
+        turn_id: turn_id,
+        conversation_id: selected.conversation_id,
+        task_id: null,
+        owner: caller,
+        origin: origin,
+        input_digest: input_digest,
+        status: accepted)
+    ensures: TurnRouted(turn_id: turn_id, conversation_id: selected.conversation_id)
+}
+
+rule ProjectFirstSelection {
+    when: ActiveSelectionChanged(owner, conversation_id)
+    requires: not exists ActiveSelection{owner: owner}
+    ensures: ActiveSelection.created(owner: owner, conversation_id: conversation_id)
+}
+
+rule ProjectChangedSelection {
+    when: ActiveSelectionChanged(owner, conversation_id)
+    let active = ActiveSelection{owner: owner}
+    requires: exists active
+    ensures: active.conversation_id = conversation_id
+}
+
+rule RouteAttachedTaskTurn {
+    when: SubmitTurn(caller, turn_id, origin, input_digest, prompt)
+    let attachment = TaskAttachment{owner: caller, active: true}
+    let active = ActiveSelection{owner: caller}
+    requires: exists attachment
+    requires: exists active
+    requires: not Busy{owner: caller}
+    requires: not exists Turn{turn_id: turn_id}
+    requires: prompt != ""
+    ensures: Turn.created(
+        turn_id: turn_id,
+        conversation_id: active.conversation_id,
+        task_id: attachment.task_id,
+        owner: caller,
+        origin: origin,
+        input_digest: input_digest,
+        status: accepted)
+    ensures: TaskTurnRouted(turn_id: turn_id, task_id: attachment.task_id)
+}
+
+rule ReuseTurnDecision {
+    when: SubmitTurn(caller, turn_id, origin, input_digest, prompt)
+    let prior = Turn{turn_id: turn_id}
+    requires: exists prior
+    requires: prior.owner = caller
+    requires: prior.origin = origin
+    requires: prior.input_digest = input_digest
+    ensures: TurnDecisionReused(turn_id: turn_id)
+}
+
+rule RefuseConflictingTurn {
+    when: SubmitTurn(caller, turn_id, origin, input_digest, prompt)
+    let prior = Turn{turn_id: turn_id}
+    requires: exists prior
+    requires: prior.owner = caller
+    requires: prior.origin != origin or prior.input_digest != input_digest
+    ensures: TurnRefused(reason: conflict)
+}
+
+rule SettleTurn {
+    when: TurnSettled(turn_id, outcome)
+    let turn = Turn{turn_id: turn_id}
+    requires: exists turn
+    requires: turn.status = accepted
+    ensures: turn.status = outcome
+}
+
+rule RequestTurnStop {
+    when: StopTurn(caller, turn_id)
+    let turn = Turn{turn_id: turn_id}
+    requires: exists turn
+    requires: turn.owner = caller
+    requires: turn.status = accepted
+    ensures: TurnInterruptionRequested(turn_id: turn_id)
+}
+
+rule AttachOwnedTask {
+    when: AttachTask(caller, task_id)
+    requires: OwnedTask(owner: caller, task_id: task_id)
+    ensures: TaskAttachmentChanged(owner: caller, task_id: task_id, active: true)
+}
+
+rule DetachTask {
+    when: DetachTaskSession(caller)
+    ensures: TaskAttachmentReleased(owner: caller)
+}
+
+rule CompactSelectedContext {
+    when: CompactContext(caller)
+    let active = ActiveSelection{owner: caller}
+    let context = ContextView{owner: caller}
+    requires: exists active
+    requires: exists context
+    requires: context.can_compact = true
+    ensures: ContextCompactionRequested(owner: caller, conversation_id: active.conversation_id)
+}
+
+rule RecordFirstContextUsage {
+    when: ContextUsageObserved(owner, revision, can_compact)
+    requires: revision >= 0
+    requires: not exists ContextView{owner: owner}
+    ensures: ContextView.created(owner: owner, revision: revision,
+                                 can_compact: can_compact)
+}
+
+rule RecordChangedContextUsage {
+    when: ContextUsageObserved(owner, revision, can_compact)
+    let context = ContextView{owner: owner}
+    requires: exists context
+    requires: revision > context.revision
+    ensures: context.revision = revision
+    ensures: context.can_compact = can_compact
+}
+
+rule ListOwnedConversations {
+    when: ListConversations(caller)
+    ensures: ConversationCatalogVisible(owner: caller)
+}
+
+rule ReadActiveTranscript {
+    when: ReadActiveTranscript(caller)
+    let active = ActiveSelection{owner: caller}
+    requires: exists active
+    ensures: PublicHistoryVisible(conversation_id: active.conversation_id)
+}
+
+rule ReadContextUsage {
+    when: ReadContextUsage(caller)
+    let context = ContextView{owner: caller}
+    requires: exists context
+    ensures: ContextUsageVisible(owner: caller, revision: context.revision,
+                                 can_compact: context.can_compact)
+}
+
+rule ShowOwnedHistory {
+    when: ReadHistory(caller, conversation_id)
+    let conversation = OrchestratorConversation{conversation_id: conversation_id}
+    requires: exists conversation
+    requires: conversation.owner = caller
+    ensures: PublicHistoryVisible(conversation_id: conversation_id)
+}
+
+rule HideForeignHistory {
+    when: ReadHistory(caller, conversation_id)
+    let conversation = OrchestratorConversation{conversation_id: conversation_id}
+    requires: not exists conversation or conversation.owner != caller
+    ensures: ConversationNotFound()
+}
+
+rule PublishSafeTranscriptEntry {
+    when: SafeTranscriptObserved(conversation_id, revision, role, scope, text)
+    requires: revision > 0
+    ensures: PublicTranscriptEntry.created(
+        conversation_id: conversation_id,
+        revision: revision,
+        role: role,
+        scope: scope,
+        text: text)
+}
+
+invariant OneDecisionPerCommand {
+    for a in SelectionCommands:
+        for b in SelectionCommands:
+            a.command_id = b.command_id implies a = b
+}
+
+invariant OneTurnPerIdentity {
+    for a in Turns:
+        for b in Turns:
+            a.turn_id = b.turn_id implies a = b
+}
+
+invariant OneActiveSelectionPerOwner {
+    for a in ActiveSelections:
+        for b in ActiveSelections:
+            a.owner = b.owner implies a = b
+}
+
+surface OwnerConversation {
+    facing selection: ActiveSelection
+
+    exposes:
+        selection.conversation_id
+
+    provides:
+        StartFresh(caller, command_id, new_id)
+        ResumeSaved(caller, command_id, target_id)
+        RetrySelection(caller, command_id, operation, target_id)
+        ChangeSelection(caller, command_id)
+        SubmitTurn(caller, turn_id, origin, input_digest, prompt)
+        StopTurn(caller, turn_id)
+        AttachTask(caller, task_id)
+        DetachTaskSession(caller)
+        CompactContext(caller)
+        ListConversations(caller)
+        ReadActiveTranscript(caller)
+        ReadContextUsage(caller)
+        ReadHistory(caller, conversation_id)
+
+    @guarantee OwnerOnlySelectionAndHistory
+        -- Foreign or missing conversation identities expose no saved content.
+
+    @guarantee SelectionDoesNotOwnToolsOrTasks
+        -- Conversation changes do not create a tool environment or change task identity.
+
+    @guarantee PublicProjectionOnly
+        -- Transcript views exclude private reasoning and tool payloads.
+
+    @guarantee AttachedTurnHistoryBoundary
+        -- Attached task turns may appear live but not in saved orchestrator history.
+
+    @guarantee UncertainTurnIsNotReplayed
+        -- A lost answer is inspected before an external turn is repeated.
+}
+
+surface TurnObservationFeed {
+    facing turn: Turn
+
+    exposes:
+        turn.turn_id
+
+    provides:
+        TurnSettled(turn_id, outcome)
+        SafeTranscriptObserved(conversation_id, revision, role, text)
+        ContextUsageObserved(owner, revision, can_compact)
+
+    @guarantee SafeFactsOnly
+        -- Private reasoning and tool payloads are never supplied as public facts.
+}

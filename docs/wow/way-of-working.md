@@ -14,4 +14,4 @@ from the scenarios while the implementation is red. An independent gate checks
 the result. A later generation can remove `impl/` and rebuild from the durable
 documents through a clean-room fence.
 
-The current slice is [task admission](../plan/01-task-admission/plan.md).
+The current planned slice is [conversation orchestration](../plan/03-session-orchestration/plan.md).

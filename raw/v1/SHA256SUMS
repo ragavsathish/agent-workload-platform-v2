@@ -1,0 +1,5 @@
+35c8bf5484ed611d15c0ba91a9179cd11e649b95d43671d4be249cacd903eaa3  raw/v1/c2-tasking.feature
+a22e7da478127a8d3e2b9c91bc7b75dc1fbb184afa648cc82ac4ad77c19ce6e0  raw/v1/owner-client.feature
+9d023beb48c31d597fc2a9474c390572d2d2dab9eb87c74dd43d80f3d252acaf  raw/v1/glossary.md
+a7b89c4d1e9ac0f0877de0592f1227e6d37c30936fe258b80ad7cd38129ade95  raw/v1/task-service.py
+8366deb10d49c0984ac9ff0da100b233252ca6adba1f3778434fd533273633fd  raw/v1/durable-owner.ts

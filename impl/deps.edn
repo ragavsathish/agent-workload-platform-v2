@@ -1,0 +1,18 @@
+{:paths ["src"]
+ :deps {org.clojure/clojure {:mvn/version "1.12.0"}
+        obneyai/grain-core-v2
+        {:git/url "https://github.com/ObneyAI/grain.git"
+         :git/sha "dbf5b5229aad09785e40f71e96adf65c90f971d5"
+         :deps/root "projects/grain-core-v2"}
+        obneyai/grain-event-model
+        {:git/url "https://github.com/ObneyAI/grain.git"
+         :git/sha "dbf5b5229aad09785e40f71e96adf65c90f971d5"
+         :deps/root "projects/grain-event-model"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :main-opts ["-m" "awp-v2.test-runner"]}
+           :verify {:extra-deps
+                    {obneyai/grain-code-agent-tools
+                     {:git/url "https://github.com/ObneyAI/grain.git"
+                      :git/sha "dbf5b5229aad09785e40f71e96adf65c90f971d5"
+                      :deps/root "projects/grain-code-agent-tools"}}
+                    :main-opts ["-m" "awp-v2.verify-model"]}}}

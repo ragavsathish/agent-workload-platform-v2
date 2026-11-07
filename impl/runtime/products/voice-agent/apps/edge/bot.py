@@ -915,6 +915,12 @@ async def run_bot(
         )
         await worker.queue_frames([LLMRunFrame()])
 
+    @worker.event_handler("on_pipeline_error")
+    async def on_pipeline_error(_worker, _frame):
+        # An error may contain provider diagnostics or user content. Publish only
+        # a bounded, generic state over the authenticated media channel.
+        await worker.rtvi.send_server_message({"type": "voice-error", "status": "unavailable"})
+
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         try:

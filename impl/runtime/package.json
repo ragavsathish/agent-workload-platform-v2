@@ -3,6 +3,6 @@
   "name": "awp-v2-live-runtime",
   "packageManager": "pnpm@10.18.2",
   "scripts": {
-    "build": "pnpm --filter @agent-workload-platform/gondolin-session build && pnpm --filter @agent-workload-platform/voice-pi-agent build"
+    "build": "pnpm --filter @agent-workload-platform/gondolin-session build && pnpm --filter @agent-workload-platform/pi-durable-task build && pnpm --filter @agent-workload-platform/voice-pi-agent build"
   }
 }

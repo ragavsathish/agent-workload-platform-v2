@@ -1,4 +1,5 @@
 packages:
   - 'platform/observability/otel'
   - 'platform/agent-execution/gondolin-session'
+  - 'platform/agent-execution/pi-durable-task'
   - 'products/voice-agent/apps/pi-agent'

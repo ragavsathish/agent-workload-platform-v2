@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import subprocess
 import wave
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from fractions import Fraction
+from pathlib import Path
+from typing import Awaitable, Callable
 
 import httpx
 import numpy as np
@@ -74,6 +77,12 @@ def resample_24k_to_16k(pcm: bytes) -> bytes:
     return np.clip(target, -32768, 32767).astype(np.int16).tobytes()
 
 
+def audible_sample_bytes(samples: np.ndarray) -> int:
+    """Count non-silent PCM equivalents; RTP silence must not satisfy audio checks."""
+    threshold = 0.015 if np.issubdtype(samples.dtype, np.floating) else 500
+    return 2 * int(np.count_nonzero(np.abs(samples.astype(np.float32)) > threshold))
+
+
 async def synthesize(utterance: str, broker_url: str, token: str) -> bytes:
     async with httpx.AsyncClient(timeout=300) as client:
         response = await client.post(
@@ -94,19 +103,21 @@ async def run_voice_session(
     utterances: list[str], identity: str, origin: str, timeout: float,
     *, edge_url: str = "http://127.0.0.1:7860", broker_url: str = "",
     broker_token: str = "", audio_wav: str = "", local_ingress: bool = False,
+    before_input: Callable[[], Awaitable[None]] | None = None,
+    after_input: Callable[[], Awaitable[None]] | None = None,
 ) -> list[dict[str, object]]:
-    if not utterances:
-        raise ValueError("voice session requires at least one utterance")
     if audio_wav:
         with wave.open(audio_wav, "rb") as source:
             if (source.getnchannels(), source.getsampwidth(), source.getframerate()) != (1, 2, 16000):
                 raise ValueError("audio WAV must be mono PCM16 at 16 kHz")
             audio = source.readframes(source.getnframes())
         pcms = [audio for _ in utterances]
-    else:
+    elif utterances:
         if not broker_url or not broker_token:
             raise ValueError("broker URL and token are required to synthesize the utterance")
         pcms = [await synthesize(utterance, broker_url, broker_token) for utterance in utterances]
+    else:
+        pcms = []
     peer = RTCPeerConnection()
     microphone = SyntheticMicrophone()
     peer.addTrack(microphone)
@@ -168,7 +179,7 @@ async def run_voice_session(
                 except MediaStreamError:
                     return
                 if isinstance(frame, AudioFrame):
-                    output_bytes += len(frame.to_ndarray().tobytes())
+                    output_bytes += audible_sample_bytes(frame.to_ndarray())
 
         asyncio.create_task(consume())
 
@@ -200,6 +211,8 @@ async def run_voice_session(
         # synthetic microphone interrupt it: browser users naturally wait for this
         # cue, and the black-box probe must exercise the same turn boundary.
         await asyncio.wait_for(welcome_done.wait(), timeout=timeout)
+        if before_input is not None:
+            await before_input()
         results: list[dict[str, object]] = []
         for utterance, pcm in zip(utterances, pcms, strict=True):
             event_start = len(events)
@@ -210,6 +223,9 @@ async def run_voice_session(
             awaiting_response = True
             microphone.play(pcm)
             await microphone.wait_until_drained(timeout)
+            if after_input is not None:
+                await after_input()
+                return results
             # Give VAD one second of trailing silence after each utterance.
             await asyncio.sleep(1.0)
             try:
@@ -251,6 +267,11 @@ class Qualification:
     timeout: float
     local_ingress: bool = False
     audio_wav: str = ""
+    stt_outage_file: str = ""
+    hold_turn_file: str = ""
+    task_id: str = ""
+    task_evidence_file: str = ""
+    dispatch_evidence_file: str = ""
     restart_argv: tuple[str, ...] = ()
 
     @classmethod
@@ -274,6 +295,11 @@ class Qualification:
             timeout=float(env.get("VOICE_TIMEOUT", "120")),
             local_ingress=env.get("VOICE_LOCAL_INGRESS") == "1",
             audio_wav=env.get("VOICE_AUDIO_WAV", ""),
+            stt_outage_file=env.get("VOICE_STT_OUTAGE_FILE", ""),
+            hold_turn_file=env.get("VOICE_HOLD_TURN_FILE", ""),
+            task_id=env.get("VOICE_TASK_ID", ""),
+            task_evidence_file=env.get("VOICE_TASK_EVIDENCE_FILE", ""),
+            dispatch_evidence_file=env.get("VOICE_DISPATCH_EVIDENCE_FILE", ""),
             restart_argv=tuple(json.loads(env.get("VOICE_RESTART_ARGV_JSON", "[]"))),
         )
 
@@ -288,13 +314,48 @@ class Qualification:
         response.raise_for_status()
         return response
 
-    def media(self, utterances: list[str] | None = None) -> list[dict[str, object]]:
+    def media(self, utterances: list[str] | None = None,
+              before_input: Callable[[], Awaitable[None]] | None = None,
+              after_input: Callable[[], Awaitable[None]] | None = None) -> list[dict[str, object]]:
         return asyncio.run(run_voice_session(
-            utterances or [self.utterance], self.identity, self.origin, self.timeout,
+            [self.utterance] if utterances is None else utterances,
+            self.identity, self.origin, self.timeout,
             edge_url=self.edge_url, broker_url=self.broker_url,
             broker_token=self.broker_token, audio_wav=self.audio_wav,
-            local_ingress=self.local_ingress,
+            local_ingress=self.local_ingress, before_input=before_input,
+            after_input=after_input,
         ))
+
+    def grain_turn(self, turn_id: str) -> dict[str, object]:
+        with httpx.Client(timeout=10) as client:
+            response = client.post(
+                self.grain_url + "/internal/session/turn",
+                headers={"authorization": f"Bearer {self.grain_token}",
+                         "x-awp-owner": self.identity, "content-type": "application/json"},
+                json={"turn-id": turn_id},
+            )
+        response.raise_for_status()
+        return response.json()
+
+    def grain_routing(self) -> dict[str, object]:
+        with httpx.Client(timeout=10) as client:
+            response = client.post(
+                self.grain_url + "/internal/session/routing",
+                headers={"authorization": f"Bearer {self.grain_token}",
+                         "x-awp-owner": self.identity, "content-type": "application/json"},
+                json={},
+            )
+        response.raise_for_status()
+        return response.json()
+
+    def dispatch_count(self, turn_id: str) -> int:
+        if not self.dispatch_evidence_file:
+            raise RuntimeError("exact dispatch proof requires VOICE_DISPATCH_EVIDENCE_FILE")
+        evidence = Path(self.dispatch_evidence_file)
+        if not evidence.exists():
+            return 0
+        return sum(json.loads(line).get("turnId") == turn_id
+                   for line in evidence.read_text().splitlines())
 
     def grain_selection(self) -> str:
         with httpx.Client(timeout=10) as client:
@@ -327,7 +388,16 @@ class Qualification:
         if self.grain_selection() != session_id:
             raise AssertionError("public fresh selection is not bound to v2 Grain")
         before = self.request("GET", f"/api/pi-sessions/{session_id}").json()
-        result = self.media()[0]
+        previous_ids: set[object] = set()
+
+        async def snapshot_before_speech() -> None:
+            async with httpx.AsyncClient(timeout=10) as client:
+                response = await client.get(self.edge_url + "/api/pi-transcript",
+                                            headers=self.headers())
+                response.raise_for_status()
+                previous_ids.update(entry.get("id") for entry in response.json().get("entries", []))
+
+        result = self.media(before_input=snapshot_before_speech)[0]
         assert_result(result)
         if not result["transcriptions"]:
             raise AssertionError("no recognized utterance was observed on the live channel")
@@ -335,8 +405,16 @@ class Qualification:
         if after == before:
             raise AssertionError("selected public history did not change after live media")
         entries = after.get("entries", [])
-        if not any(entry.get("role") == "user" for entry in entries):
-            raise AssertionError("selected history has no recognized owner turn")
+        new_users = [entry for entry in entries if entry.get("role") == "user"
+                     and entry.get("id") not in previous_ids
+                     and str(entry.get("id", "")).endswith("-user")]
+        if len(new_users) != 1:
+            raise AssertionError(f"expected one accepted spoken turn, found {len(new_users)}")
+        turn = self.grain_turn(str(new_users[0]["id"])[:-5])
+        if turn.get("status") != "completed" or turn.get("conversation-id") != session_id:
+            raise AssertionError("accepted spoken turn did not complete in selected Grain conversation")
+        if self.dispatch_count(str(new_users[0]["id"])[:-5]) != 1:
+            raise AssertionError("selected spoken turn was not dispatched exactly once")
         if not any(entry.get("role") == "assistant" and entry.get("text") for entry in entries):
             raise AssertionError("selected history has no safe assistant answer")
         active = self.request("GET", "/api/pi-transcript").json()
@@ -359,6 +437,9 @@ class Qualification:
         before = self.request("GET", f"/api/pi-sessions/{session_id}").json()
         if not before.get("entries"):
             raise AssertionError("spoken turn has no saved public history before restart")
+        turn_ids = [str(entry["id"])[:-5] for entry in before.get("entries", [])
+                    if entry.get("role") == "user" and str(entry.get("id", "")).endswith("-user")]
+        dispatch_counts = {turn_id: self.dispatch_count(turn_id) for turn_id in turn_ids}
         subprocess.run(self.restart_argv, check=True, timeout=120)
         for _ in range(60):
             try:
@@ -367,6 +448,9 @@ class Qualification:
                     self.request("POST", f"/api/pi-sessions/{session_id}/resume")
                     resumed = self.request("GET", "/api/pi-transcript").json()
                     if resumed.get("entries") == before.get("entries"):
+                        if any(self.dispatch_count(turn_id) != count
+                               for turn_id, count in dispatch_counts.items()):
+                            raise AssertionError("restart redispatched a completed spoken turn")
                         if self.grain_selection() != session_id:
                             raise AssertionError("resumed selection disagrees with v2 Grain")
                         return
@@ -378,15 +462,172 @@ class Qualification:
 
     def voice_003(self) -> None:
         self.assert_v2_binding()
-        raise RuntimeError("voice-003 requires a controlled streaming disconnect and recorded turn inspection")
+        import time
+
+        if not self.hold_turn_file:
+            raise RuntimeError("voice-003 requires VOICE_HOLD_TURN_FILE on an isolated Pi service")
+
+        session = self.request("POST", "/api/pi-sessions/new",
+                               headers={"idempotency-key": "voice-003-" + os.urandom(12).hex()}).json()
+        session_id = session["id"]
+        prior_ids: set[object] = set()
+        interrupted: list[str] = []
+
+        async def snapshot_before_speech() -> None:
+            async with httpx.AsyncClient(timeout=10) as client:
+                response = await client.get(self.edge_url + "/api/pi-transcript",
+                                            headers=self.headers())
+                response.raise_for_status()
+                prior_ids.update(entry.get("id") for entry in response.json().get("entries", []))
+            Path(self.hold_turn_file).write_text("hold\n")
+
+        async def disconnect_on_accepted() -> None:
+            async with httpx.AsyncClient(timeout=5) as client:
+                for _ in range(120):
+                    response = await client.get(self.edge_url + "/api/pi-transcript",
+                                                headers=self.headers())
+                    response.raise_for_status()
+                    users = [entry for entry in response.json().get("entries", [])
+                             if entry.get("role") == "user"
+                             and entry.get("id") not in prior_ids
+                             and str(entry.get("id", "")).endswith("-user")]
+                    if users:
+                        turn_id = str(users[-1]["id"])[:-5]
+                        turn = self.grain_turn(turn_id)
+                        if turn.get("status") != "accepted":
+                            raise AssertionError("turn settled before controlled disconnect")
+                        interrupted.append(turn_id)
+                        return
+                    await asyncio.sleep(0.1)
+            raise AssertionError("spoken input did not reach an accepted Grain turn")
+
+        utterance = os.getenv("VOICE_INTERRUPT_UTTERANCE", "Explain the detailed steps and tradeoffs for a complex project.")
+        try:
+            self.media([utterance], before_input=snapshot_before_speech,
+                       after_input=disconnect_on_accepted)
+        finally:
+            Path(self.hold_turn_file).unlink(missing_ok=True)
+        if len(interrupted) != 1:
+            raise AssertionError("controlled disconnect did not capture one turn")
+        turn_id = interrupted[0]
+        for _ in range(60):
+            turn = self.grain_turn(turn_id)
+            if turn.get("status") != "accepted":
+                break
+            time.sleep(0.5)
+        else:
+            raise AssertionError("disconnected turn remained accepted")
+        if turn.get("status") not in {"completed", "uncertain"}:
+            raise AssertionError("disconnected turn has no inspectable outcome")
+        if turn.get("stop-requested?") is not True:
+            raise AssertionError("disconnected destination received no interruption request")
+        if turn.get("conversation-id") != session_id or turn.get("task-id") is not None:
+            raise AssertionError("disconnected turn lost selected destination")
+        after_disconnect = self.request("GET", f"/api/pi-sessions/{session_id}").json()
+        utterance_entry = next((entry for entry in after_disconnect.get("entries", [])
+                                if entry.get("id") == turn_id + "-user"), None)
+        if utterance_entry is None:
+            raise AssertionError("interrupted turn is absent from public history")
+        utterance_text = utterance_entry.get("text")
+        prior_matching = sum(entry.get("role") == "user" and entry.get("text") == utterance_text
+                             for entry in after_disconnect.get("entries", []))
+        self.media([])  # Reconnect the media peer without replaying input.
+        after_reconnect = self.request("GET", f"/api/pi-sessions/{session_id}").json()
+        reconnect_user_ids = [entry.get("id") for entry in after_reconnect.get("entries", [])
+                              if entry.get("role") == "user"]
+        after_matching = sum(entry.get("role") == "user" and entry.get("text") == utterance_text
+                             for entry in after_reconnect.get("entries", []))
+        if reconnect_user_ids.count(turn_id + "-user") != 1 or after_matching != prior_matching:
+            raise AssertionError("reconnect redispatched the interrupted spoken utterance")
+        if self.grain_turn(turn_id).get("status") != turn.get("status"):
+            raise AssertionError("reconnect changed interrupted turn outcome")
+        if self.dispatch_count(turn_id) != 1:
+            raise AssertionError("interrupted turn was dispatched more than once")
+        if self.grain_selection() != session_id:
+            raise AssertionError("reconnect changed selected Grain conversation")
 
     def voice_004(self) -> None:
         self.assert_v2_binding()
-        raise RuntimeError("voice-004 requires a deployed eligible task and task-side evidence")
+        if not self.task_id or not self.task_evidence_file:
+            raise RuntimeError("voice-004 requires an eligible Pi Durable worker and task-side evidence")
+        session = self.request("POST", "/api/pi-sessions/new",
+                               headers={"idempotency-key": "voice-004-" + os.urandom(12).hex()}).json()
+        session_id = session["id"]
+        self.request("POST", "/api/pi-message", json={
+            "message": f"Attach this voice conversation to running task {self.task_id} using attach_task_session."
+        })
+        routing = self.grain_routing()
+        if routing.get("task-id") != self.task_id or routing.get("conversation-id") != session_id:
+            raise AssertionError("eligible task did not attach to selected Grain conversation")
+        before = self.request("GET", f"/api/pi-sessions/{session_id}").json()
+        evidence = Path(self.task_evidence_file)
+        previous_records = len(evidence.read_text().splitlines()) if evidence.exists() else 0
+        result = self.media()[0]
+        assert_result(result)
+        if not result["transcriptions"]:
+            raise AssertionError("task-bound spoken utterance was not recognized")
+        after = self.request("GET", f"/api/pi-sessions/{session_id}").json()
+        saved_before = {entry.get("id") for entry in before.get("entries", [])}
+        new_saved_users = [entry for entry in after.get("entries", [])
+                           if entry.get("role") == "user" and entry.get("id") not in saved_before]
+        if new_saved_users:
+            raise AssertionError("orchestrator saved history claimed task-bound spoken input")
+        records = [json.loads(line) for line in evidence.read_text().splitlines()[previous_records:]]
+        recognized = [item.get("data", {}).get("text") for item in result["transcriptions"]
+                      if isinstance(item.get("data"), dict)]
+        hashes = {hashlib.sha256(text.strip().encode()).hexdigest()
+                  for text in recognized if isinstance(text, str) and text.strip()}
+        if not hashes:
+            raise AssertionError("recognized task prompt has no inspectable text")
+        if not any(record.get("taskId") == self.task_id and record.get("promptSha256") in hashes
+                   for record in records):
+            raise AssertionError("task worker did not settle the recognized spoken prompt")
 
     def voice_005(self) -> None:
         self.assert_v2_binding()
-        raise RuntimeError("voice-005 requires isolated speech provider outage injection")
+        if not self.stt_outage_file:
+            raise RuntimeError("voice-005 requires a private VOICE_STT_OUTAGE_FILE on an isolated broker")
+        session = self.request("POST", "/api/pi-sessions/new",
+                               headers={"idempotency-key": "voice-005-" + os.urandom(12).hex()}).json()
+        session_id = session["id"]
+        outage = Path(self.stt_outage_file)
+        baseline_user_ids: set[object] = set()
+
+        async def disable_stt() -> None:
+            async with httpx.AsyncClient(timeout=10) as client:
+                response = await client.get(self.edge_url + f"/api/pi-sessions/{session_id}",
+                                            headers=self.headers())
+                response.raise_for_status()
+                baseline_user_ids.update(entry.get("id") for entry in response.json().get("entries", [])
+                                         if entry.get("role") == "user")
+            outage.write_text("unavailable\n")
+
+        try:
+            result = replace(self, timeout=min(self.timeout, 45)).media(
+                before_input=disable_stt)[0]
+        finally:
+            outage.unlink(missing_ok=True)
+        if result["response_completed"] or result["output_bytes"]:
+            raise AssertionError(
+                "speech outage reported a successful spoken response: "
+                f"completed={result['response_completed']}, output_bytes={result['output_bytes']}, "
+                f"events={result['events']}, "
+                f"messages={[message.get('type') for message in result['server_messages']]}"
+            )
+        if not any(message.get("type") == "voice-error" for message in result["server_messages"]):
+            raise AssertionError("speech outage was not visible to the owner media client")
+        during = self.request("GET", f"/api/pi-sessions/{session_id}").json()
+        during_user_ids = {entry.get("id") for entry in during.get("entries", [])
+                           if entry.get("role") == "user"}
+        if during_user_ids != baseline_user_ids:
+            raise AssertionError("failed recognition admitted a spoken turn")
+        recovered = self.media()[0]
+        assert_result(recovered)
+        after = self.request("GET", f"/api/pi-sessions/{session_id}").json()
+        after_user_ids = {entry.get("id") for entry in after.get("entries", [])
+                          if entry.get("role") == "user"}
+        if after_user_ids == during_user_ids:
+            raise AssertionError("speech capability did not recover")
 
     def voice_006(self) -> None:
         self.assert_v2_binding()

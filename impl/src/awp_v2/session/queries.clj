@@ -75,5 +75,5 @@
   (let [state (authorized-state context)
         turn (get-in state [:turns (:turn-id query)])]
     (if turn
-      {:query/result (select-keys turn [:turn-id :status :conversation-id :task-id :answer])}
+      {:query/result (select-keys turn [:turn-id :status :conversation-id :task-id :answer :stop-requested?])}
       (missing))))

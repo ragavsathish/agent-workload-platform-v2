@@ -138,6 +138,9 @@ async def transcribe(
     _: None = Depends(authenticate),
 ) -> dict[str, str]:
     with telemetry.observe("inference.stt"):
+        outage = os.getenv("VOICE_QUALIFICATION_STT_OUTAGE_FILE")
+        if outage and os.path.exists(outage):
+            raise HTTPException(status_code=503, detail="speech recognition is unavailable")
         audio = await read_bounded_audio(file)
         telemetry.record("inference.stt.audio", outcome="accepted")
         transcript = await transcribe_audio(audio)
@@ -320,6 +323,10 @@ async def pi_chat(request: Request, _: None = Depends(authenticate)) -> Streamin
             raise HTTPException(status_code=400, detail="invalid turn identity")
         if payload.get("tools"):
             raise HTTPException(status_code=400, detail="external tools are not accepted by Pi voice")
+        dispatch_evidence = os.getenv("VOICE_QUALIFICATION_DISPATCH_EVIDENCE_FILE")
+        if dispatch_evidence:
+            with open(dispatch_evidence, "a", encoding="utf-8") as evidence:
+                evidence.write(json.dumps({"turnId": turn_id}) + "\n")
         client: httpx.AsyncClient = request.app.state.http
         completion_id = f"chatcmpl-pi-{uuid.uuid4().hex}"
         created = int(time.time())

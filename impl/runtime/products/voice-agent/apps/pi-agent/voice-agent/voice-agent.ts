@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 
 import {
   calculateContextTokens,
@@ -504,6 +505,10 @@ export class VoiceAgent {
       try {
         session.sessionManager.appendCustomEntry(VOICE_TURN_ORIGIN_CUSTOM_TYPE, { origin });
         await session.prompt(prompt, { expandPromptTemplates: false, source: "rpc" });
+        const qualificationHold = process.env.VOICE_QUALIFICATION_HOLD_TURN_FILE;
+        if (qualificationHold && existsSync(qualificationHold)) {
+          await Effect.runPromise(Effect.sleep(8_000));
+        }
         await session.waitForIdle();
       } finally {
         clearTimeout(timeout);

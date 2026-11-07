@@ -10,6 +10,7 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 import httpx
@@ -22,6 +23,7 @@ RUNTIME = IMPL / "runtime"
 EDGE = RUNTIME / "products/voice-agent/apps/edge"
 BROKER = RUNTIME / "products/voice-agent/apps/broker"
 PI = RUNTIME / "products/voice-agent/apps/pi-agent"
+TASK = RUNTIME / "platform/agent-execution/pi-durable-task"
 
 
 def ready(url: str, headers: dict[str, str] | None = None) -> bool:
@@ -45,9 +47,13 @@ def main() -> int:
     parser.add_argument("--test", help="one unittest method, for focused diagnosis")
     args = parser.parse_args()
     state = args.state_dir.resolve()
+    run_task = args.test is None or "voice_004" in args.test
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
-    for name in ("tasking", "sessions", "pi-sessions", "workspace", "voice-diagnostics"):
-        (state / name).mkdir(exist_ok=True, mode=0o700)
+    state.chmod(0o700)
+    for name in ("tasking", "sessions", "pi-sessions", "workspace", "voice-diagnostics", "task-sockets"):
+        directory = state / name
+        directory.mkdir(exist_ok=True, mode=0o700)
+        directory.chmod(0o700)
     host = {key: value for key, value in dotenv_values(args.host_env).items()
             if value is not None}
     owner = args.owner or host.get("JOURNAL_REVIEW_OWNER_IDENTITY")
@@ -59,6 +65,7 @@ def main() -> int:
         raise SystemExit("configured Gondolin assets do not exist")
     broker_token = secrets.token_urlsafe(40)
     grain_token = secrets.token_urlsafe(40)
+    task_id = str(uuid.uuid4())
     origin = f"http://127.0.0.1:{args.edge_port}"
     common = {**os.environ, **host,
               "AWP_OWNER_IDENTITY": owner,
@@ -74,10 +81,20 @@ def main() -> int:
               "PI_VOICE_SERVICE_URL": f"http://127.0.0.1:{args.pi_port}",
               "PI_VOICE_SESSION_DIR": str(state / "pi-sessions"),
               "PI_VOICE_CWD": str(state / "workspace"),
+              "PI_TASK_SESSION_SOCKET_DIR": str(state / "task-sockets"),
+              "PI_SESSION_DIR": str(state / "pi-sessions"),
+              "PI_TASK_SESSION_IDLE_SECONDS": "300",
+              "WORKER_PI_EXECUTION_MODE": "gondolin",
+              "AWP_QUALIFICATION_TASK_ID": task_id,
+              "AWP_QUALIFICATION_TASK_WORKSPACE": str(state / "workspace"),
+              "VOICE_QUALIFICATION_TASK_EVIDENCE_FILE": str(state / "task-evidence.jsonl"),
+              "VOICE_QUALIFICATION_DISPATCH_EVIDENCE_FILE": str(state / "dispatch-evidence.jsonl"),
               "INFERENCE_BROKER_PORT": str(args.broker_port),
               "INFERENCE_BROKER_BASE_URL": f"http://127.0.0.1:{args.broker_port}/v1",
               "VOICE_LLM_BACKEND": "pi",
               "VOICE_DIAGNOSTIC_DIR": str(state / "voice-diagnostics"),
+              "VOICE_QUALIFICATION_STT_OUTAGE_FILE": str(state / "stt.outage"),
+              "VOICE_QUALIFICATION_HOLD_TURN_FILE": str(state / "hold-turn"),
               "AWP_WEBRTC_LOOPBACK_ONLY": "1",
               "VOICE_DEFAULT_WORKSPACE": host.get("VOICE_DEFAULT_WORKSPACE", "agent-workload-platform"),
               "EDGE_ALLOWED_USERS": owner,
@@ -85,6 +102,13 @@ def main() -> int:
     if common.get("AGENT_GATEWAY_TOKEN_FILE") and not common.get("AGENT_GATEWAY_TOKEN"):
         common["AGENT_GATEWAY_TOKEN"] = Path(common["AGENT_GATEWAY_TOKEN_FILE"]).read_text().strip()
     common["PYTHONPATH"] = str(IMPL / "qualification") + ":" + str(BROKER / "src") + ":" + str(RUNTIME / "products/voice-agent/packages/telemetry/src")
+    if run_task:
+        with (state / "task-seed.log").open("ab") as log:
+            subprocess.run(["clojure", "-J--add-opens=java.base/java.nio=ALL-UNNAMED",
+                            "-J--add-exports=java.base/sun.nio.ch=ALL-UNNAMED",
+                            "-M", "-m", "awp-v2.qualify.task-seed"],
+                           cwd=IMPL, env=common, stdout=log,
+                           stderr=subprocess.STDOUT, check=True, timeout=120)
     commands = [
         ("grain", ["clojure", "-J--add-opens=java.base/java.nio=ALL-UNNAMED",
                    "-J--add-exports=java.base/sun.nio.ch=ALL-UNNAMED",
@@ -95,6 +119,8 @@ def main() -> int:
         ("edge", [str(EDGE / ".venv/bin/python"), "bot.py", "-t", "webrtc",
                   "--host", "127.0.0.1", "--port", str(args.edge_port)], EDGE),
     ]
+    if run_task:
+        commands.append(("task", ["node", str(TASK / "dist/qualification-worker.js")], RUNTIME))
     processes: list[subprocess.Popen] = []
     logs = []
     checks = [
@@ -105,6 +131,8 @@ def main() -> int:
          {"authorization": f"Bearer {broker_token}"}, True),
         (f"http://127.0.0.1:{args.edge_port}/api/features", {}, True),
     ]
+    if run_task:
+        checks.append((str(state / "task-sockets" / f"{task_id}.sock"), {}, True))
     try:
         for (name, command, cwd), (url, headers, expect_200) in zip(commands, checks, strict=True):
             log = (state / f"{name}.log").open("ab")
@@ -124,6 +152,11 @@ def main() -> int:
             for _ in range(180):
                 if process.poll() is not None:
                     raise RuntimeError(f"{name} exited; inspect {state / (name + '.log')}")
+                if name == "task":
+                    if Path(url).exists() and "durable task worker ready" in (state / "task.log").read_text(errors="replace"):
+                        break
+                    time.sleep(1)
+                    continue
                 if expect_200 and ready(url, headers):
                     break
                 if not expect_200:
@@ -164,6 +197,11 @@ def main() -> int:
                               "VOICE_OWNER_IDENTITY": owner,
                               "VOICE_BROKER_URL": f"http://127.0.0.1:{args.broker_port}",
                               "VOICE_BROKER_TOKEN": broker_token,
+                              "VOICE_STT_OUTAGE_FILE": str(state / "stt.outage"),
+                              "VOICE_HOLD_TURN_FILE": str(state / "hold-turn"),
+                              "VOICE_TASK_ID": task_id if run_task else "",
+                              "VOICE_TASK_EVIDENCE_FILE": str(state / "task-evidence.jsonl") if run_task else "",
+                              "VOICE_DISPATCH_EVIDENCE_FILE": str(state / "dispatch-evidence.jsonl"),
                               "VOICE_UTTERANCE": "Describe this selected conversation briefly."})
         qualification["VOICE_RESTART_ARGV_JSON"] = json.dumps([
             str(EDGE / ".venv/bin/python"), str(IMPL / "qualification/restart_local_pi.py"),

@@ -1,7 +1,9 @@
 import asyncio
 import unittest
 
-from voice_media import Qualification, SyntheticMicrophone, assert_result
+import numpy as np
+
+from voice_media import Qualification, SyntheticMicrophone, assert_result, audible_sample_bytes
 
 
 class MediaDriverUnitTest(unittest.TestCase):
@@ -32,6 +34,10 @@ class MediaDriverUnitTest(unittest.TestCase):
     def test_audio_is_required_for_spoken_success(self):
         with self.assertRaisesRegex(AssertionError, "Voice response"):
             assert_result({"response_completed": True, "output_bytes": 0})
+
+    def test_silent_webrtc_rtp_is_not_audible_response(self):
+        self.assertEqual(audible_sample_bytes(np.zeros(320, dtype=np.int16)), 0)
+        self.assertEqual(audible_sample_bytes(np.array([0, 400, 700, -900], dtype=np.int16)), 4)
 
 
 if __name__ == "__main__":

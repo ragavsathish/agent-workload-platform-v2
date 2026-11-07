@@ -10,6 +10,13 @@ for file in docs/wiki/*.md docs/plan/*/*.md; do
   fi
 done
 
+for id in $(rg -o '@lifecycle-[0-9]+' docs/plan/02-task-lifecycle/spec.feature | tr -d '@'); do
+  if ! rg -q "$id" impl/test/awp_v2/lifecycle_acceptance_test.clj; then
+    echo "Acceptance scenario $id has no named test" >&2
+    exit 1
+  fi
+done
+
 for file in docs/wiki/*.md docs/plan/*/*.md docs/wow/*.md; do
   if ! rg -q '\]\([^)]*\)|Cites ' "$file"; then
     echo "Reference rule failed: $file has no citation" >&2

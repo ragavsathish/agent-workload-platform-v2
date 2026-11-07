@@ -5,7 +5,7 @@ cd "$ROOT"
 
 "$ROOT/harness/check-docs.sh"
 shasum -a 256 -c raw/v1/SHA256SUMS
-allium check specs/tasking.allium
+allium check specs
 "$ROOT/impl/test.sh"
 (cd "$ROOT/impl" && clojure -M:verify)
 "$ROOT/harness/probe.sh"

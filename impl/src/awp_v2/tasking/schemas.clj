@@ -5,12 +5,29 @@
 (defschemas commands
   {:tasking/submit-task
    [:map [:request-id :uuid] [:owner :string]
-    [:instruction :string] [:workspace :string]]})
+    [:instruction :string] [:workspace :string]]
+   :tasking/dispatch-task [:map [:task-id :uuid] [:workspace :string]]
+   :tasking/record-progress [:map [:task-id :uuid] [:summary :string]]
+   :tasking/complete-task [:map [:task-id :uuid] [:result :any]]
+   :tasking/fail-task [:map [:task-id :uuid] [:failure :string]]
+   :tasking/interrupt-task [:map [:task-id :uuid]]
+   :tasking/abort-task [:map [:task-id :uuid]]
+   :tasking/retry-task [:map [:task-id :uuid]]})
 
 (defevent :tasking/task-accepted
   "One canonical owner request was admitted."
   {:schema [:map [:request-id :uuid] [:task-id :uuid]
             [:owner :string] [:instruction :string] [:workspace :string]]})
 
+(defevent :tasking/task-transitioned
+  "Durable controlled-worker transition."
+  {:schema [:map [:task-id :uuid] [:action :keyword]
+            [:status :keyword] [:recovery-required? :boolean]
+            [:cursor {:optional true} :int]
+            [:summary {:optional true} :string]
+            [:result {:optional true} :any]
+            [:failure {:optional true} :string]]})
+
 (defschemas queries
-  {:tasking/task [:map [:request-id :uuid]]})
+  {:tasking/task [:map [:request-id :uuid]]
+   :tasking/progress [:map [:task-id :uuid] [:after :int] [:limit :int]]})

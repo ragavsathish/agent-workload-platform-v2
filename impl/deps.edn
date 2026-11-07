@@ -7,7 +7,11 @@
         obneyai/grain-event-model
         {:git/url "https://github.com/ObneyAI/grain.git"
          :git/sha "dbf5b5229aad09785e40f71e96adf65c90f971d5"
-         :deps/root "projects/grain-event-model"}}
+         :deps/root "projects/grain-event-model"}
+        obneyai/grain-event-store-sqlite-v3
+        {:git/url "https://github.com/ObneyAI/grain.git"
+         :git/sha "dbf5b5229aad09785e40f71e96adf65c90f971d5"
+         :deps/root "components/event-store-sqlite-v3"}}
  :aliases {:test {:extra-paths ["test"]
                   :main-opts ["-m" "awp-v2.test-runner"]}
            :verify {:extra-deps

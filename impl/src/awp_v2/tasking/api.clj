@@ -1,6 +1,7 @@
 (ns awp-v2.tasking.api
   (:require [ai.obney.grain.command-processor-v2.interface :as cp]
             [ai.obney.grain.event-model-validator.interface :as validator]
+            [ai.obney.grain.event-store-sqlite-v3.interface]
             [ai.obney.grain.event-store-v3.interface :as es]
             [ai.obney.grain.kv-store.interface :as kv]
             [ai.obney.grain.kv-store-lmdb.interface :as lmdb]
@@ -8,6 +9,7 @@
             [ai.obney.grain.read-model-processor-v2.interface :as rmp]
             [awp-v2.tasking.commands]
             [awp-v2.tasking.event-model]
+            [awp-v2.tasking.lifecycle :as lifecycle]
             [awp-v2.tasking.queries]
             [awp-v2.tasking.read-models :as read-models]
             [clojure.java.io :as io]
@@ -15,21 +17,33 @@
   (:import [java.nio.file Files]
            [java.time OffsetDateTime]))
 
-(defn open-system [{:keys [eligible-workspaces]}]
+(defn open-system [{:keys [eligible-workspaces storage-dir tenant-id workspace-roots]}]
   (validator/verify-or-throw!)
-  (let [dir (.toFile (Files/createTempDirectory "awp-v2-tasking-" (make-array java.nio.file.attribute.FileAttribute 0)))
-        store (es/start {:conn {:type :in-memory}})
+  (let [owned? (nil? storage-dir)
+        dir (if storage-dir
+              (io/file storage-dir)
+              (.toFile (Files/createTempDirectory "awp-v2-tasking-"
+                                                  (make-array java.nio.file.attribute.FileAttribute 0))))
+        _ (.mkdirs dir)
+        store (es/start {:conn {:type :sqlite
+                                :database-file (str (io/file dir "events.sqlite"))}})
         cache (kv/start (lmdb/->KV-Store-LMDB {:storage-dir (.getPath dir) :db-name "tasking"}))]
-    {:event-store store :cache cache :cache-dir dir
-     :tenant-id (random-uuid)
-     :eligible-workspaces eligible-workspaces}))
+    {:event-store store :cache cache :cache-dir dir :owned-dir? owned?
+     :closed? (atom false)
+     :tenant-id (or tenant-id
+                    (java.util.UUID/nameUUIDFromBytes
+                      (.getBytes (.getCanonicalPath dir) "UTF-8")))
+     :eligible-workspaces eligible-workspaces
+     :workspace-roots workspace-roots}))
 
-(defn close-system! [{:keys [event-store cache cache-dir]}]
-  (kv/stop cache)
-  (es/stop event-store)
-  (doseq [f (reverse (file-seq cache-dir))]
-    (io/delete-file f true))
-  (rmp/l1-clear!))
+(defn close-system! [{:keys [event-store cache cache-dir owned-dir? closed?]}]
+  (when (compare-and-set! closed? false true)
+    (kv/stop cache)
+    (es/stop event-store)
+    (rmp/l1-clear!)
+    (when owned-dir?
+      (doseq [f (reverse (file-seq cache-dir))]
+        (io/delete-file f true)))))
 
 (defn- context [system actor-id]
   (assoc system :actor-id actor-id))
@@ -59,3 +73,27 @@
 
 (defn accepted-count [system]
   (count (read-models/requests system)))
+
+(defn dispatch! [system task-id workspace]
+  (lifecycle/issue! system :tasking/dispatch-task {:task-id task-id :workspace workspace}))
+
+(defn report-progress! [system task-id summary]
+  (lifecycle/issue! system :tasking/record-progress {:task-id task-id :summary summary}))
+
+(defn complete! [system task-id result]
+  (lifecycle/issue! system :tasking/complete-task {:task-id task-id :result result}))
+
+(defn fail! [system task-id failure]
+  (lifecycle/issue! system :tasking/fail-task {:task-id task-id :failure failure}))
+
+(defn interrupt! [system task-id]
+  (lifecycle/issue! system :tasking/interrupt-task {:task-id task-id}))
+
+(defn abort! [system actor-id task-id]
+  (lifecycle/issue! (context system actor-id) :tasking/abort-task {:task-id task-id}))
+
+(defn retry! [system actor-id task-id]
+  (lifecycle/issue! (context system actor-id) :tasking/retry-task {:task-id task-id}))
+
+(defn progress [system actor-id task-id after limit]
+  (lifecycle/progress-query (context system actor-id) task-id after limit))

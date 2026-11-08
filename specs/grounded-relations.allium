@@ -1,0 +1,149 @@
+-- allium: 3
+-- Cites docs/plan/19-grounded-relations/spec.feature,
+-- docs/wiki/knowledge-relations.md, and raw/orc/ontology-exploration.clj.
+
+entity GroundedConcept {
+    concept_id: String
+    owner: String
+    revision: Integer
+    status: String
+}
+
+entity RelationAttempt {
+    result_id: String
+    owner: String
+    source_id: String
+    source_digest: String
+    model_id: String
+    prompt_id: String
+    policy_id: String
+    status: String
+}
+
+entity RelationProposal {
+    relation_id: String
+    result_id: String
+    owner: String
+    source_id: String
+    left_id: String
+    right_id: String
+    left_revision: Integer
+    right_revision: Integer
+    kind: broader | related
+    evidence: String
+    status: String
+    revision: Integer
+    replaces_id: String
+}
+
+rule RecordRelationAttempt {
+    when: RelationAttemptEnded(result_id, owner, source_id, source_digest, model_id, prompt_id, policy_id, status)
+    requires: not exists RelationAttempt{result_id: result_id}
+    requires: source_digest != ""
+    requires: model_id != ""
+    requires: prompt_id != ""
+    requires: policy_id != ""
+    ensures: RelationAttempt.created(result_id: result_id, owner: owner, source_id: source_id, source_digest: source_digest, model_id: model_id, prompt_id: prompt_id, policy_id: policy_id, status: status)
+}
+
+rule StageRelationProposal {
+    when: RelationCandidateStaged(relation_id, result_id, owner, source_id, left_id, right_id, left_revision, right_revision, kind, evidence)
+    let attempt = RelationAttempt{result_id: result_id}
+    let left = GroundedConcept{concept_id: left_id}
+    let right = GroundedConcept{concept_id: right_id}
+    requires: exists attempt
+    requires: attempt.owner = owner
+    requires: attempt.source_id = source_id
+    requires: attempt.status = completed
+    requires: exists left
+    requires: exists right
+    requires: left.owner = owner
+    requires: right.owner = owner
+    requires: left.status = accepted
+    requires: right.status = accepted
+    requires: left.revision = left_revision
+    requires: right.revision = right_revision
+    requires: left_id != right_id
+    requires: evidence != ""
+    requires: not exists RelationProposal{relation_id: relation_id}
+    ensures: RelationProposal.created(relation_id: relation_id, result_id: result_id, owner: owner, source_id: source_id, left_id: left_id, right_id: right_id, left_revision: left_revision, right_revision: right_revision, kind: kind, evidence: evidence, status: pending, revision: 0, replaces_id: "")
+}
+
+rule AcceptRelationProposal {
+    when: RelationAccepted(relation_id, owner, expected_revision)
+    let relation = RelationProposal{relation_id: relation_id}
+    let left = GroundedConcept{concept_id: relation.left_id}
+    let right = GroundedConcept{concept_id: relation.right_id}
+    requires: exists relation
+    requires: relation.owner = owner
+    requires: relation.status = pending
+    requires: relation.revision = expected_revision
+    requires: exists left
+    requires: exists right
+    requires: left.owner = owner
+    requires: right.owner = owner
+    requires: left.status = accepted
+    requires: right.status = accepted
+    ensures: relation.status = accepted
+    ensures: relation.revision = expected_revision + 1
+}
+
+rule RejectRelationProposal {
+    when: RelationRejected(relation_id, owner, expected_revision)
+    let relation = RelationProposal{relation_id: relation_id}
+    requires: exists relation
+    requires: relation.owner = owner
+    requires: relation.status = pending
+    requires: relation.revision = expected_revision
+    ensures: relation.status = rejected
+    ensures: relation.revision = expected_revision + 1
+}
+
+rule CorrectRelationProposal {
+    when: RelationCorrected(relation_id, replacement_id, owner, expected_revision, left_id, right_id, kind, evidence)
+    let original = RelationProposal{relation_id: relation_id}
+    let left = GroundedConcept{concept_id: left_id}
+    let right = GroundedConcept{concept_id: right_id}
+    requires: exists original
+    requires: original.owner = owner
+    requires: original.status = pending
+    requires: original.revision = expected_revision
+    requires: exists left
+    requires: exists right
+    requires: left.owner = owner
+    requires: right.owner = owner
+    requires: left.status = accepted
+    requires: right.status = accepted
+    requires: left_id != right_id
+    requires: evidence != ""
+    requires: not exists RelationProposal{relation_id: replacement_id}
+    ensures: original.status = rejected
+    ensures: original.revision = expected_revision + 1
+    ensures: RelationProposal.created(relation_id: replacement_id, result_id: original.result_id, owner: owner, source_id: original.source_id, left_id: left_id, right_id: right_id, left_revision: left.revision, right_revision: right.revision, kind: kind, evidence: evidence, status: pending, revision: 0, replaces_id: relation_id)
+}
+
+rule RevokeRelationProposal {
+    when: RelationRevoked(relation_id, owner, expected_revision)
+    let relation = RelationProposal{relation_id: relation_id}
+    requires: exists relation
+    requires: relation.owner = owner
+    requires: relation.status = accepted
+    requires: relation.revision = expected_revision
+    ensures: relation.status = revoked
+    ensures: relation.revision = expected_revision + 1
+}
+
+surface OwnerRelationReview {
+    facing relation: RelationProposal
+    exposes:
+        relation.relation_id
+        relation.status
+        relation.revision
+    provides:
+        RelationAttemptEnded(result_id, owner, source_id, source_digest, model_id, prompt_id, policy_id, status)
+        RelationCandidateStaged(relation_id, result_id, owner, source_id, left_id, right_id, left_revision, right_revision, kind, evidence)
+        RelationAccepted(relation_id, owner, expected_revision)
+        RelationRejected(relation_id, owner, expected_revision)
+        RelationCorrected(relation_id, replacement_id, owner, expected_revision, left_id, right_id, kind, evidence)
+        RelationRevoked(relation_id, owner, expected_revision)
+}

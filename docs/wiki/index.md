@@ -29,7 +29,7 @@ Cites [the pinned v1 source inventory](../../raw/v1/manifest.md).
 - [Owner workspace](owner-client.md) defines the owner-facing conversation, task, and presentation behaviors for [slice 24](../plan/24-owner-client/plan.md).
 - [Task routing](task-routing.md) defines owner-authorized attachment, turn routing, reconciliation, and restart behavior for [slice 25](../plan/25-task-routing-integration/plan.md).
 - [Task request and agent task](tasking.md) defines admission identity, canonical input, and owner isolation for [slice 26](../plan/26-stable-task-admission/plan.md), extending the initial admission scenarios from [slice 01](../plan/01-task-admission/plan.md).
-- [Owner workspace](owner-client.md) defines native microphone permission timing and trusted page mediation for [slice 27](../plan/27-native-voice-permission/plan.md).
+- [Native owner client](owner-client.md) defines trusted-page microphone permission timing for [slice 27](../plan/27-native-voice-permission/plan.md) and iOS Simulator build qualification for [slice 28](../plan/28-ios-owner-client/plan.md).
 
 The wiki records source-backed current behavior separately from agreed behavior
 and explicit v2 decisions. It does not describe the implementation.

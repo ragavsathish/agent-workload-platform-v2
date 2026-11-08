@@ -17,3 +17,5 @@ Model `qwen3.5:4b-mlx` was run against one synthetic source with two synthetic a
 **Relation model quality: open.** No independently reviewed, privacy-approved relation cases and frozen threshold run are available. No semantic precision, recall, or deployment claim is made from the synthetic example. The private knowledge cutover and external tailnet qualifications remain independent and open.
 
 **Live model staging: open.** The ORC sheet produced one candidate, but the full model-to-Grain path has only observed safe failed attempts. Deterministic staging, review, replay, and projection checks passed.
+
+This is the slice 19 snapshot. [Slice 20 qualification](relation-model-reliability-report.md) later captured the parser failure and recorded three complete synthetic model-to-Grain staging passes using tool-backed structured output. The semantic relation quality gate remains open.

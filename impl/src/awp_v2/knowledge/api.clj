@@ -178,11 +178,24 @@
 
 (defn taxonomy-relation-attempt! [system actor {:keys [owner result-id source-id source-digest
                                                         model-version prompt-version policy-version
-                                                        status trace-id candidates] :as data}]
+                                                        status trace-id candidates attempt-id
+                                                        request-digest failure-category
+                                                        endpoint-ids endpoint-revisions recorded-at] :as data}]
   (if (and (every? #(nonblank-bounded? % 256)
-                   [owner result-id source-id source-digest model-version prompt-version policy-version])
+                   [owner result-id source-id source-digest model-version prompt-version policy-version
+                    attempt-id request-digest])
            (= owner actor)
            (#{:completed :empty :invalid :timeout :failed} status)
+           (#{:none :invalid-candidate :timeout :provider-error :output-schema
+              :execution-failed} failure-category)
+           (if (#{:completed :empty} status) (= :none failure-category)
+               (not= :none failure-category))
+           (vector? endpoint-ids) (= 2 (count endpoint-ids))
+           (= 2 (count (set endpoint-ids)))
+           (every? #(nonblank-bounded? % 256) endpoint-ids)
+           (vector? endpoint-revisions) (= 2 (count endpoint-revisions))
+           (every? #(and (integer? %) (<= 0 %)) endpoint-revisions)
+           (try (OffsetDateTime/parse recorded-at) true (catch Exception _ false))
            (vector? candidates) (<= (count candidates) 2)
            (or (= :completed status) (empty? candidates))
            (or (not= :completed status) (seq candidates))
@@ -190,7 +203,9 @@
                (and (not= :completed status)
                     (or (nil? trace-id) (nonblank-bounded? trace-id 256))))
            (= (set (keys data)) #{:owner :result-id :source-id :source-digest :model-version
-                                  :prompt-version :policy-version :status :trace-id :candidates}))
+                                  :prompt-version :policy-version :status :trace-id :candidates
+                                  :attempt-id :request-digest :failure-category
+                                  :endpoint-ids :endpoint-revisions :recorded-at}))
     (issue! system actor :taxonomy-relation-attempt (assoc data :digest (digest data)))
     {:error :incorrect}))
 

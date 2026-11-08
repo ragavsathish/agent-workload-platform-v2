@@ -96,6 +96,15 @@ git -C "$TARGET" gc -q --prune=now --aggressive
 [[ -f "$TARGET/specs/grounded-relations.allium" ]] || {
   echo "FENCE FAILED: slice 19 behavior missing" >&2; exit 1;
 }
+[[ -f "$TARGET/docs/plan/20-relation-model-reliability/spec.feature" ]] || {
+  echo "FENCE FAILED: slice 20 contract missing" >&2; exit 1;
+}
+[[ -f "$TARGET/raw/relation-stage-observations.md" ]] || {
+  echo "FENCE FAILED: pinned relation staging evidence missing" >&2; exit 1;
+}
+[[ -f "$TARGET/specs/relation-model-reliability.allium" ]] || {
+  echo "FENCE FAILED: slice 20 behavior missing" >&2; exit 1;
+}
 [[ "$(git -C "$TARGET" rev-list --all --count)" == 1 ]] || {
   echo "FENCE FAILED: prior history remains" >&2; exit 1
 }

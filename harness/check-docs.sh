@@ -89,6 +89,13 @@ for id in $(rg -o '@relation-[0-9]+' docs/plan/19-grounded-relations/spec.featur
   fi
 done
 
+for id in $(rg -o '@reliability-[0-9]+' docs/plan/20-relation-model-reliability/spec.feature | tr -d '@'); do
+  if ! rg -q "$id" impl/test/awp_v2/relation_model_reliability_acceptance_test.clj; then
+    echo "Acceptance scenario $id has no named check" >&2
+    exit 1
+  fi
+done
+
 for id in $(rg -o '@incident-[0-9]+' docs/plan/11-operational-incidents/spec.feature | tr -d '@'); do
   if ! rg -q "$id" impl/test/awp_v2/incident_acceptance_test.clj; then
     echo "Acceptance scenario $id has no named test" >&2

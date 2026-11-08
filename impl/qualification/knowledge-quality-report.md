@@ -17,4 +17,4 @@ Cites the [slice plan](../../docs/plan/17-knowledge-quality/plan.md), [quality p
 
 **Public tailnet deployment: open.** It remains an independent external-device qualification.
 
-The bounded ORC path now proposes concepts and relation candidates. Relation model quality still requires independently reviewed cases and a frozen production run. One synthetic ORC relation inference returned a candidate; two model calls failed safely, and live staging remains unqualified. See the [slice 19 report](grounded-relations-report.md). The previous model configuration remains the rollback target for any future candidate run.
+The bounded ORC path now proposes concepts and relation candidates. Relation model quality still requires independently reviewed cases and a frozen production run. The [slice 19 report](grounded-relations-report.md) records a raw candidate and two failed full-path calls. [Slice 20 qualification](relation-model-reliability-report.md) later records three synthetic full-path staging passes after a targeted parser-mode change. These integration passes do not qualify semantic model quality or private owner cutover.

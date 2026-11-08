@@ -81,6 +81,12 @@ git -C "$TARGET" gc -q --prune=now --aggressive
 [[ -f "$TARGET/specs/knowledge-quality.allium" ]] || {
   echo "FENCE FAILED: slice 17 behavior missing" >&2; exit 1;
 }
+[[ -f "$TARGET/docs/plan/18-private-knowledge-continuity/spec.feature" ]] || {
+  echo "FENCE FAILED: slice 18 contract missing" >&2; exit 1;
+}
+[[ -f "$TARGET/specs/private-knowledge-continuity.allium" ]] || {
+  echo "FENCE FAILED: slice 18 behavior missing" >&2; exit 1;
+}
 [[ "$(git -C "$TARGET" rev-list --all --count)" == 1 ]] || {
   echo "FENCE FAILED: prior history remains" >&2; exit 1
 }

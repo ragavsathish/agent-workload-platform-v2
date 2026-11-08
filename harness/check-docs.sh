@@ -74,6 +74,14 @@ for id in $(rg -o '@quality-[0-9]+' docs/plan/17-knowledge-quality/spec.feature 
   fi
 done
 
+for id in $(rg -o '@continuity-[0-9]+' docs/plan/18-private-knowledge-continuity/spec.feature | tr -d '@'); do
+  test_id="${id//-/_}"
+  if ! rg -q "$test_id" impl/knowledge-migration/test_continuity.py; then
+    echo "Acceptance scenario $id has no named check" >&2
+    exit 1
+  fi
+done
+
 for id in $(rg -o '@incident-[0-9]+' docs/plan/11-operational-incidents/spec.feature | tr -d '@'); do
   if ! rg -q "$id" impl/test/awp_v2/incident_acceptance_test.clj; then
     echo "Acceptance scenario $id has no named test" >&2

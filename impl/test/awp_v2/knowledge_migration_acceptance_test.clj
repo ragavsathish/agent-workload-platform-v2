@@ -378,11 +378,22 @@
   (let [sys (system)
         imported {:snapshot-id "typed-1" :digest "typed-digest"
                   :resources [{:legacy-id "g|entry" :owner owner :source-id "old:m" :kind "journal"
-                               :value {:subject "urn:entry" :text "Legacy learning" :sourceRefs ["old:m"]}}
+                               :value {:graph "urn:test:journal" :subject "urn:entry" :text "Legacy learning"
+                                       :sourceRefs ["old:m"]
+                                       :quads [{:p {:value "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"}
+                                                :o {:value "https://schema.org/CreativeWork"}}
+                                               {:p {:value "https://schema.org/additionalType"}
+                                                :o {:value "urn:test:learning"}}]}}
                               {:legacy-id "g|fact" :owner owner :source-id "old:m" :kind "accepted"
-                               :value {:subject "urn:fact" :label "Stable identifiers" :sourceRefs ["old:m"]}}
+                               :value {:graph "urn:test:accepted" :subject "urn:fact" :label "Stable identifiers"
+                                       :sourceRefs ["old:m"]
+                                       :quads [{:p {:value "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"}
+                                                :o {:value "https://schema.org/Claim"}}]}}
                               {:legacy-id "g|daily" :owner owner :source-id "old:m" :kind "daily"
-                               :value {:subject "urn:daily" :text "A prior day." :sourceRefs ["old:m"]}}]}]
+                               :value {:graph "urn:test:journal" :subject "urn:daily" :text "A prior day."
+                                       :sourceRefs ["old:m"]
+                                       :quads [{:p {:value "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"}
+                                                :o {:value "urn:test:DailyJournal"}}]}}]}]
     (try
       (migration/import-into-grain! sys owner imported)
       (migration/select-grain-import! sys owner imported)

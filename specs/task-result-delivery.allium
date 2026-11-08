@@ -1,0 +1,105 @@
+-- allium: 3
+-- Cites docs/plan/12-task-result-delivery/spec.feature and docs/wiki/task-result-delivery.md.
+
+entity TaskResult {
+    task_id: String
+    owner: String
+    workspace_kind: repository | scratch
+    status: running | completed | failed
+    answer: String?
+}
+
+entity CapturedArtifact {
+    task_id: String
+    kind: patch | workspace
+    reference: String
+    byte_length: Integer
+}
+
+entity ArtifactRead {
+    task_id: String
+    owner: String
+    kind: patch | workspace
+    outcome: available | unavailable
+}
+
+rule StartTaskResult {
+    when: TaskExecutionStarted(task_id, owner, workspace_kind)
+    requires: not exists TaskResult{task_id: task_id}
+    ensures: TaskResult.created(task_id: task_id, owner: owner, workspace_kind: workspace_kind, status: running, answer: null)
+}
+
+rule CaptureRepositoryPatch {
+    when: RepositoryExecutionFinished(task_id, owner, answer, reference, byte_length)
+    let task = TaskResult{task_id: task_id}
+    requires: exists task
+    requires: task.owner = owner
+    requires: task.workspace_kind = repository
+    requires: task.status = running
+    requires: byte_length >= 0
+    ensures: CapturedArtifact.created(task_id: task_id, kind: patch, reference: reference, byte_length: byte_length)
+    ensures: task.status = completed
+    ensures: task.answer = answer
+}
+
+rule CaptureScratchWorkspace {
+    when: ScratchExecutionFinished(task_id, owner, answer, reference, byte_length)
+    let task = TaskResult{task_id: task_id}
+    requires: exists task
+    requires: task.owner = owner
+    requires: task.workspace_kind = scratch
+    requires: task.status = running
+    requires: byte_length >= 0
+    ensures: CapturedArtifact.created(task_id: task_id, kind: workspace, reference: reference, byte_length: byte_length)
+    ensures: task.status = completed
+    ensures: task.answer = answer
+}
+
+rule FailCapture {
+    when: WorkProductCaptureFailed(task_id, owner)
+    let task = TaskResult{task_id: task_id}
+    requires: exists task
+    requires: task.owner = owner
+    requires: task.status = running
+    ensures: task.status = failed
+}
+
+rule ReadDeclaredArtifact {
+    when: ArtifactRequested(task_id, owner, kind)
+    let task = TaskResult{task_id: task_id}
+    let artifact = CapturedArtifact{task_id: task_id, kind: kind}
+    requires: exists task
+    requires: exists artifact
+    requires: task.owner = owner
+    requires: task.status = completed
+    requires: task.workspace_kind = repository implies kind = patch
+    requires: task.workspace_kind = scratch implies kind = workspace
+    ensures: ArtifactRead.created(task_id: task_id, owner: owner, kind: kind, outcome: available)
+}
+
+rule RecordArtifactLookupFailure {
+    when: DeclaredArtifactUnavailable(task_id, owner, kind)
+    let task = TaskResult{task_id: task_id}
+    let artifact = CapturedArtifact{task_id: task_id, kind: kind}
+    requires: exists task
+    requires: exists artifact
+    requires: task.owner = owner
+    requires: task.status = completed
+    ensures: ArtifactRead.created(task_id: task_id, owner: owner, kind: kind, outcome: unavailable)
+    ensures: task.status = completed
+}
+
+surface TaskResultDelivery {
+    facing task: TaskResult
+    exposes:
+        task.task_id
+        task.status
+        task.answer
+    provides:
+        TaskExecutionStarted(task_id, owner, workspace_kind)
+        RepositoryExecutionFinished(task_id, owner, answer, reference, byte_length)
+        ScratchExecutionFinished(task_id, owner, answer, reference, byte_length)
+        WorkProductCaptureFailed(task_id, owner)
+        ArtifactRequested(task_id, owner, kind)
+        DeclaredArtifactUnavailable(task_id, owner, kind)
+}

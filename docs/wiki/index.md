@@ -20,6 +20,7 @@ Cites [the pinned v1 source inventory](../../raw/v1/manifest.md).
 - [Personal song](personal-song.md) defines lyric review, approval, rendering, private audio, and cancellation for [slice 09](../plan/09-personal-song/plan.md).
 - [Personal knowledge taxonomy](knowledge-taxonomy.md) defines category hierarchy, owner-reviewed relations, model proposals, and quality qualification for [slice 10](../plan/10-knowledge-taxonomy/plan.md).
 - [Operational incidents](operational-incidents.md) defines managed alert epochs, bounded investigations, and owner review for [slice 11](../plan/11-operational-incidents/plan.md).
+- [Task result delivery](task-result-delivery.md) defines bounded answer presentation and owner-scoped patch or scratch workspace retrieval for [slice 12](../plan/12-task-result-delivery/plan.md).
 
 The wiki records source-backed current behavior separately from agreed behavior
 and explicit v2 decisions. It does not describe the implementation.

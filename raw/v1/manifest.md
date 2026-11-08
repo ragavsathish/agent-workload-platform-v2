@@ -102,3 +102,15 @@ All snapshots below are byte copies from the same pinned v1 commit named above.
 | [Managed alert rules](stack-alerts.json) | `products/voice-agent/deploy/observability/stack-alerts.json` | `7b3da8c847184b80ddafe9f5a7b8322a188c137552b0d89e14e8bf171524a287` |
 | [Monitor service](stack-alert-monitor-service.plist) | `products/voice-agent/deploy/launchd/com.sathish.pipecat-stack-alert-monitor.plist` | `2ae55f0ba2b4360440522ee0b118ed9c6cc6ed0b127deb9a0b3ca29f1ca93420` |
 | [C4 incident contract](c4-operational-incidents.feature) | `docs/spec/contexts/c4-operational-incidents/spec.feature` | `72257eac54cf7ba55d56f6b678e2d43e250a035d2ee6612c199fdcafa687eaa8` |
+
+## Slice 12 evidence
+
+All snapshots below are byte copies from the pinned v1 commit named above. The already pinned C2 contract, task service, gateway, and owner client snapshots also inform this slice.
+
+| Snapshot | Original path | SHA-256 |
+| --- | --- | --- |
+| [Task artifact store](task-artifacts.py) | `products/voice-agent/packages/tasking/src/voice_agent/tasking/infrastructure/artifacts.py` | `652b1c0fd776d8d0ee9af23c4570f4a3549f36000821af4d2a67f061a4af2bff` |
+| [Task workspace effect](task-workspace-effect.py) | `products/voice-agent/apps/worker/src/voice_worker/workspace_effect.py` | `c475eba44d3e11b7a73dec7d3cc63429aaadb0b3b1f7af2b1b4be3e98d50edf1` |
+| [Artifact store tests](task-artifacts-test.py) | `products/voice-agent/packages/tasking/tests/infrastructure/test_artifacts.py` | `5e6959b03d3b947bc4b1ebf372027d92881501780049f2bca654dbf9178bc0f6` |
+| [Task service tests](task-service-test.py) | `products/voice-agent/packages/tasking/tests/application/test_service.py` | `01bca528522ff69c74e4cac75efda114c51ad6c18433dbe7d3de33e144a66ad2` |
+| [Owner route tests](task-gateway-test.py) | `products/voice-agent/apps/gateway/tests/test_gateway.py` | `1500d8e584945c82f4af27f05c6c62ae9c8094f5b8ba86da48ade6105d6ac24b` |

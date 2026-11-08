@@ -166,6 +166,14 @@ for id in $(rg -o '@deployment-readiness-[0-9]+' docs/plan/37-deployment-readine
   fi
 done
 
+for id in $(rg -o '@candidate-01[234]' docs/plan/38-edge-client-asset-deployment/spec.feature | tr -d '@'); do
+  test_id="${id//-/_}"
+  if ! rg -q "$test_id" impl/deployment/test_public_candidate.py; then
+    echo "Acceptance scenario $id has no named candidate check" >&2
+    exit 1
+  fi
+done
+
 for id in $(rg -o '@owner-client-[0-9]+' docs/plan/24-owner-client/spec.feature | tr -d '@'); do
   test_id="${id//-/_}"
   if ! rg -q "$id|$test_id" \

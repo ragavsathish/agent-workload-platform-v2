@@ -35,10 +35,11 @@ COPY apps/edge/otel_bridge.py ./
 COPY apps/edge/grafana_mcp.py ./
 COPY apps/edge/presentation_response.py ./
 COPY packages/telemetry/src ./src
+COPY apps/client/build/web ./client-dist
 
 USER 65532:65532
 EXPOSE 7860
 HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=6 \
-    CMD ["/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7860/api/features', timeout=3).read()"]
+    CMD ["/app/.venv/bin/python", "-c", "import urllib.request; [urllib.request.urlopen('http://127.0.0.1:7860' + path, timeout=3).read() for path in ('/', '/api/features')]"]
 ENTRYPOINT ["/app/.venv/bin/python", "bot.py"]
 CMD ["-t", "webrtc", "--host", "127.0.0.1", "--port", "7860"]

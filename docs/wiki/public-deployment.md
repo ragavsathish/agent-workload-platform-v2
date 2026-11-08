@@ -6,6 +6,8 @@ Cites the [pinned host contract](../../raw/v1/host-requirements.md), [owner rout
 
 The owner reaches one private, authenticated public origin. The entry verifies the caller's identity before offering the live connection or any selected history. Only the configured owner may enter; an untrusted caller cannot gain owner authority by sending identity or local-access markers. A separate inner service credential does not establish owner identity. Public voice and selected history share the same owner decision. The [host contract](../../raw/v1/host-requirements.md) and [source routes](../../raw/v1/traefik-routes.yml) establish the v1 boundary; [D20](../plan/06-public-deployment/decisions.md) carries it into this slice.
 
+The authenticated browser entry serves the complete owner workspace, including its page shell and bootstrap assets. Missing browser assets make owner entry unavailable even when the API services are healthy. A local page check proves packaging and route availability only; it does not qualify public identity or media.
+
 A successful signaling exchange is only the start of a voice connection. The owner must be able to send and receive live media from a distinct device through a reachable media path. A same-host route or a status page does not prove that path. A failed media path is reported as unavailable; it must not produce a completed spoken turn. The [deployed voice rules](deployed-voice-journey.md) govern turn identity, response audio, and saved history, and [D21](../plan/06-public-deployment/decisions.md) makes independent media reachability an explicit gate.
 
 ## Service availability and recovery

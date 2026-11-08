@@ -99,6 +99,30 @@ class PublicCandidateAcceptance(unittest.TestCase):
         self.assertIn("owner-login", result["missing"])
         self.assertIn("separate-owner-peer", result["missing"])
 
+    def test_candidate_012_edge_image_contains_flutter_web_bundle(self):
+        containerfile = (candidate.ROOT / "impl/runtime/products/voice-agent/apps/edge/Containerfile").read_text()
+        self.assertIn("COPY apps/client/build/web ./client-dist", containerfile)
+
+    def test_candidate_013_preflight_requires_web_build_and_image_rule(self):
+        web = self.root / "web"
+        containerfile = self.root / "Containerfile"
+        containerfile.write_text("FROM python\n")
+        self.assertEqual(candidate.edge_client_prerequisites(web, containerfile),
+                         ["client-web-build", "edge-client-image-assets"])
+        web.mkdir()
+        (web / "index.html").write_text("<!doctype html>")
+        containerfile.write_text("COPY apps/client/build/web ./client-dist\n")
+        self.assertEqual(candidate.edge_client_prerequisites(web, containerfile), [])
+
+    def test_candidate_014_loopback_owner_page_does_not_qualify_public_entry(self):
+        local_page_status, local_api_status = 200, 200
+        self.assertEqual((local_page_status, local_api_status), (200, 200))
+        public = candidate.release_decision(local_ready=True, owner_login=None,
+            origin=None, owner_peer=None, foreign_peer=None, media_passed=False,
+            v1_healthy=True)
+        self.assertEqual(public["status"], "prepared-only")
+        self.assertFalse(public["public_qualified"])
+
     def test_rendered_compose_has_project_scoped_state_and_no_host_ports(self):
         if not shutil.which("docker"):
             self.skipTest("Docker is unavailable")

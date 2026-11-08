@@ -286,6 +286,7 @@ def native_dependencies(service_env: Path) -> list[str]:
     """Check the startup dependencies the native voice service actually uses."""
     service = load_env(service_env)
     missing: list[str] = []
+    missing.extend(edge_client_prerequisites())
     assets = service.get("GONDOLIN_BROWSER_ASSETS", "")
     if not assets or not Path(assets).exists():
         missing.append("gondolin-assets")
@@ -320,6 +321,24 @@ def native_dependencies(service_env: Path) -> list[str]:
                         missing.append("candidate-repository")
             except Exception:
                 missing.append("candidate-repository")
+    return missing
+
+
+def edge_client_prerequisites(web_root: Path | None = None,
+                              containerfile: Path | None = None) -> list[str]:
+    """Require the built browser bundle and the image rule that packages it."""
+    product = ROOT / "impl/runtime/products/voice-agent"
+    web_root = web_root or product / "apps/client/build/web"
+    containerfile = containerfile or product / "apps/edge/Containerfile"
+    missing: list[str] = []
+    if not (web_root / "index.html").is_file():
+        missing.append("client-web-build")
+    try:
+        packaging = containerfile.read_text()
+    except OSError:
+        packaging = ""
+    if "COPY apps/client/build/web ./client-dist" not in packaging:
+        missing.append("edge-client-image-assets")
     return missing
 
 

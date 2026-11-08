@@ -33,6 +33,7 @@ Cites [the pinned v1 source inventory](../../raw/v1/manifest.md).
 - [Current conversation orchestration](session-orchestration.md) defines durable context compaction and Pi branch reconciliation for [slice 29](../plan/29-session-compaction-reconciliation/plan.md).
 - [Current conversation orchestration](session-orchestration.md) also defines stable typed-turn retry identity for [slice 35](../plan/35-stable-owner-turn-retry/plan.md) and owner-safe reload recovery for [slice 36](../plan/36-owner-turn-reload-recovery/plan.md).
 - [Deployment levels](deployment-levels.md) also defines truthful durable health observations for [slice 37](../plan/37-deployment-readiness-projection/plan.md).
+- [Public owner deployment](public-deployment.md) also defines complete browser asset delivery for [slice 38](../plan/38-edge-client-asset-deployment/plan.md).
 
 The wiki records source-backed current behavior separately from agreed behavior
 and explicit v2 decisions. It does not describe the implementation.

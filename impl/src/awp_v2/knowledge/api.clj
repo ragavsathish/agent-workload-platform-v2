@@ -12,6 +12,7 @@
             [awp-v2.knowledge.queries]
             [awp-v2.knowledge.read-models :as models]
             [awp-v2.knowledge.schemas]
+            [awp-v2.knowledge.taxonomy :as taxonomy]
             [awp-v2.session.read-models :as session-models]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -25,7 +26,10 @@
   (.formatHex (java.util.HexFormat/of)
               (.digest (MessageDigest/getInstance "SHA-256") (.getBytes (pr-str value) "UTF-8"))))
 (defn- stable-id [value] (str (UUID/nameUUIDFromBytes (.getBytes value "UTF-8"))))
-(declare recover! daily-result! ingest-worker-result! ingest-daily-worker-result! schedule-worker!)
+(declare recover! daily-result! ingest-worker-result! ingest-daily-worker-result! schedule-worker!
+         taxonomy-propose! taxonomy-review! taxonomy-map! taxonomy-item taxonomy-current
+         taxonomy-relation! taxonomy-relations taxonomy-relation-review! taxonomy-model-outcome!
+         taxonomy-proposals)
 (defn open-system [{:keys [storage-dir] :as options}]
   (validator/verify-or-throw!)
   (let [owned? (nil? storage-dir)
@@ -73,6 +77,70 @@
 (defn profile [system actor] (read! system actor :profile {}))
 (defn account [system actor account-id] (read! system actor :account {:account-id account-id}))
 (defn accounts [system actor] (read! system actor :accounts {}))
+(defn taxonomy-item [system actor proposal-id]
+  (read! system actor :taxonomy-item {:proposal-id proposal-id}))
+(defn taxonomy-proposals [system actor] (read! system actor :taxonomy-proposals {}))
+(defn taxonomy-current [system actor] (read! system actor :taxonomy-current {}))
+(defn taxonomy-relations [system actor] (read! system actor :taxonomy-relations {}))
+(defn taxonomy-outcomes [system actor] (read! system actor :taxonomy-outcomes {}))
+
+(defn- nonblank-bounded? [value max-length]
+  (and (string? value) (<= 1 (count value) max-length) (not (str/blank? value))))
+(defn taxonomy-propose!
+  [system actor {:keys [proposal-id result-id source-id category-id taxonomy-version text evidence
+                        model-version prompt-version] :as data}]
+  (if (and (every? #(nonblank-bounded? % 256)
+                   [proposal-id result-id source-id category-id taxonomy-version model-version prompt-version])
+           (nonblank-bounded? text 1000) (nonblank-bounded? evidence 1000)
+           (taxonomy/publishable? taxonomy-version category-id))
+    (issue! system actor :taxonomy-proposal
+            (assoc (select-keys data [:proposal-id :result-id :source-id :category-id :taxonomy-version
+                                      :text :evidence :model-version :prompt-version :candidate-uri :trace-id])
+                   :digest (digest (select-keys data [:proposal-id :result-id :source-id :category-id
+                                                       :taxonomy-version :text :evidence :model-version
+                                                       :prompt-version :candidate-uri :trace-id]))))
+    {:error :incorrect}))
+
+(defn taxonomy-review! [system actor proposal-id action-id expected-revision decision]
+  (if (and (nonblank-bounded? proposal-id 256) (nonblank-bounded? action-id 256)
+           (integer? expected-revision) (<= 0 expected-revision)
+           (#{:accepted :rejected :revoked} decision))
+    (issue! system actor :taxonomy-review {:proposal-id proposal-id :action-id action-id
+                                           :expected-revision expected-revision :decision decision
+                                           :at (str (OffsetDateTime/now))})
+    {:error :incorrect}))
+
+(defn taxonomy-map! [system actor proposal-id to-version category-id decision-id]
+  (if (and (every? #(nonblank-bounded? % 256) [proposal-id to-version category-id decision-id])
+           (taxonomy/publishable? to-version category-id))
+    (issue! system actor :taxonomy-map {:proposal-id proposal-id :to-version to-version
+                                        :category-id category-id :decision-id decision-id})
+    {:error :incorrect}))
+
+(defn taxonomy-model-outcome! [system actor result-id source-id status model-version prompt-version]
+  (if (and (every? #(nonblank-bounded? % 256) [result-id source-id model-version prompt-version])
+           (#{:empty :timeout :invalid :failed} status))
+    (issue! system actor :taxonomy-model-outcome
+            {:result-id result-id :source-id source-id :status status
+             :model-version model-version :prompt-version prompt-version
+             :digest (digest [result-id source-id status model-version prompt-version])})
+    {:error :incorrect}))
+
+(defn taxonomy-relation! [system actor {:keys [relation-id left-id right-id relation-kind source-id evidence] :as data}]
+  (if (and (every? #(nonblank-bounded? % 256) [relation-id left-id right-id source-id])
+           (nonblank-bounded? evidence 1000) (#{:broader :related} relation-kind))
+    (issue! system actor :taxonomy-relation (select-keys data [:relation-id :left-id :right-id
+                                                               :relation-kind :source-id :evidence]))
+    {:error :incorrect}))
+
+(defn taxonomy-relation-review! [system actor relation-id action-id expected-revision decision]
+  (if (and (every? #(nonblank-bounded? % 256) [relation-id action-id])
+           (integer? expected-revision) (<= 0 expected-revision)
+           (#{:accepted :rejected :revoked} decision))
+    (issue! system actor :taxonomy-relation-review
+            {:relation-id relation-id :action-id action-id :expected-revision expected-revision
+             :decision decision :at (str (OffsetDateTime/now))})
+    {:error :incorrect}))
 
 (defn- valid-turn? [{:keys [source-id conversation-id message-id transcript captured-at status origin]}]
   (and (= :completed status) (= :owner origin)

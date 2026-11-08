@@ -37,6 +37,29 @@
                   (update-in [:items item-id :reviews] conj
                              (select-keys data [:action-id :decision :text :expected-revision :at]))
                   (assoc-in [:actions action-id] data)))
+    :taxonomy-proposal (-> state
+                           (assoc-in [:taxonomy-proposals (:proposal-id data)]
+                                     (assoc (dissoc data :digest) :status :pending :revision 0 :reviews [] :mappings {}))
+                           (assoc-in [:taxonomy-result-ids (:result-id data)] (:digest data)))
+    :taxonomy-review (-> state
+                         (assoc-in [:taxonomy-proposals (:proposal-id data) :status] (:decision data))
+                         (update-in [:taxonomy-proposals (:proposal-id data) :revision] inc)
+                         (update-in [:taxonomy-proposals (:proposal-id data) :reviews] conj
+                                    (select-keys data [:action-id :expected-revision :decision :at]))
+                         (assoc-in [:taxonomy-actions (:action-id data)] data))
+    :taxonomy-map (assoc-in state [:taxonomy-proposals (:proposal-id data) :mappings (:to-version data)]
+                            (select-keys data [:to-version :category-id :decision-id]))
+    :taxonomy-model-outcome (-> state
+                                (assoc-in [:taxonomy-outcomes (:result-id data)] (dissoc data :digest))
+                                (assoc-in [:taxonomy-result-ids (:result-id data)] (:digest data)))
+    :taxonomy-relation (assoc-in state [:taxonomy-relations (:relation-id data)]
+                                 (assoc data :status :pending :revision 0 :reviews []))
+    :taxonomy-relation-review (-> state
+                                  (assoc-in [:taxonomy-relations (:relation-id data) :status] (:decision data))
+                                  (update-in [:taxonomy-relations (:relation-id data) :revision] inc)
+                                  (update-in [:taxonomy-relations (:relation-id data) :reviews] conj
+                                             (select-keys data [:action-id :expected-revision :decision :at]))
+                                  (assoc-in [:taxonomy-actions (:action-id data)] data))
     :legacy-snapshot (assoc-in state [:legacy-snapshots (:snapshot-id data)] (select-keys data [:snapshot-id :digest]))
     :legacy-resource (assoc-in state [:legacy-resources (:snapshot-id data) (:legacy-id data)] (:resource data))
     :legacy-switch (assoc state :read-source :import :selected-snapshot (:snapshot-id data))
@@ -57,7 +80,7 @@
     state))
 
 (defreadmodel :knowledge state
-  {:events #{:knowledge/fact} :version 1 :schema [:map-of :string :map]}
+  {:events #{:knowledge/fact} :version 2 :schema [:map-of :string :map]}
   "Owner-scoped knowledge state from immutable decisions."
   [state event]
   (let [owner (:owner event)]

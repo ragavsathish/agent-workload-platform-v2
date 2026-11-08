@@ -9,6 +9,7 @@
             [awp-v2.knowledge.api :as knowledge]
             [awp-v2.knowledge.projection :as projection]
             [awp-v2.knowledge.read-models :as models]
+            [awp-v2.knowledge.taxonomy :as taxonomy]
             [clojure.string :as str]
             [litellm.router :as router])
   (:import [java.security MessageDigest]
@@ -26,6 +27,10 @@
   (stable-uuid (str "awp-v2:knowledge:candidates:" owner ":" source-id)))
 (defn item-uri [owner item-id]
   (str "urn:awp:v2:knowledge:item:" (digest (str owner ":" item-id))))
+(defn taxonomy-item-uri [owner proposal-id]
+  (str "urn:awp:v2:knowledge:taxonomy-item:" (digest (str owner ":" proposal-id))))
+(defn taxonomy-category-uri [version category-id]
+  (str "urn:awp:v2:knowledge:category:" version ":" category-id))
 
 (defn- failed! [result]
   (when (:cognitect.anomalies/category result)
@@ -91,6 +96,115 @@
                    (when-let [concept (ontology/get-concept-by-uri system id (item-uri owner item-id))]
                      (assoc concept :awp-status (:status item) :awp-source-id (:source-id item)))))
            vec))))
+
+(defn- ensure-concept! [system ontology-id uri label description provenance]
+  (if-let [existing (ontology/get-concept-by-uri system ontology-id uri)]
+    (do (when (or (not= label (:label existing)) (not= description (:description existing)))
+          (failed! (ontology/update-concept! system ontology-id (:id existing)
+                                            {:label label :description description}
+                                            {:command/id (stable-uuid (str uri ":" label ":" description))})))
+        (ontology/get-concept-by-uri system ontology-id uri))
+    (do (failed! (ontology/create-concept!
+                  system ontology-id {:command/id (stable-uuid uri) :uri uri :label label
+                                      :description description :scope :custom :provenance provenance}))
+        (ontology/get-concept-by-uri system ontology-id uri))))
+
+(defn- ensure-relationship! [system id source-uri target-uri predicate metadata]
+  (let [source (ontology/get-concept-by-uri system id source-uri)
+        field (case predicate "skos:broader" :broader "skos:related" :related)]
+    (when-not (contains? (get source field #{}) target-uri)
+      (failed! (ontology/create-relationship!
+                system {:command/id (stable-uuid (str id ":" source-uri ":" target-uri ":" predicate))
+                        :source-ontology-id id :target-ontology-id id
+                        :source-uri source-uri :target-uri target-uri
+                        :predicate predicate :metadata metadata})))))
+
+(defn sync-taxonomy-owner!
+  "Project category hierarchy and currently accepted owner decisions into ORC's shared Grain event store.
+   Retained stale ORC concepts are filtered by taxonomy-owner-concepts and taxonomy owner queries."
+  [system owner]
+  (let [id (ensure-ontology! system owner)
+        state (models/owner-state system owner)
+        accepted (->> (:taxonomy-proposals state) vals (filter #(= :accepted (:status %)))
+                      (sort-by :proposal-id))
+        relations (->> (:taxonomy-relations state) vals
+                       (filter #(and (= :accepted (:status %))
+                                     (= :accepted (get-in state [:taxonomy-proposals (:left-id %) :status]))
+                                     (= :accepted (get-in state [:taxonomy-proposals (:right-id %) :status]))))
+                       (sort-by :relation-id))]
+    (doseq [category (taxonomy/categories "personal-v1")]
+      (let [uri (taxonomy-category-uri "personal-v1" (:category-id category))]
+        (ensure-concept! system id uri (:category-id category) (:definition category)
+                         {:kind :source-extracted :owner-hash (digest owner)
+                          :taxonomy-version "personal-v1" :category-id (:category-id category)})))
+    (doseq [category (taxonomy/categories "personal-v1") :when (:parent-id category)]
+      (ensure-relationship! system id
+                            (taxonomy-category-uri "personal-v1" (:category-id category))
+                            (taxonomy-category-uri "personal-v1" (:parent-id category))
+                            "skos:broader" {:taxonomy-version "personal-v1"}))
+    (doseq [proposal accepted]
+      (let [uri (taxonomy-item-uri owner (:proposal-id proposal))
+            category-uri (taxonomy-category-uri (:taxonomy-version proposal) (:category-id proposal))]
+        (ensure-concept! system id uri (:text proposal) (:evidence proposal)
+                         {:kind :source-extracted :owner-hash (digest owner)
+                          :source-id (:source-id proposal) :proposal-id (:proposal-id proposal)
+                          :result-id (:result-id proposal) :model (:model-version proposal)
+                          :prompt-version (:prompt-version proposal)
+                          :taxonomy-version (:taxonomy-version proposal)
+                          :review-action (-> proposal :reviews last :action-id)})
+        (ensure-relationship! system id uri category-uri "skos:broader"
+                              {:proposal-id (:proposal-id proposal)})))
+    (doseq [relation relations]
+      (ensure-relationship! system id (taxonomy-item-uri owner (:left-id relation))
+                            (taxonomy-item-uri owner (:right-id relation))
+                            (case (:relation-kind relation) :broader "skos:broader" :related "skos:related")
+                            {:relation-id (:relation-id relation)
+                             :review-action (-> relation :reviews last :action-id)}))
+    {:ontology-id id :category-count (count (taxonomy/categories "personal-v1"))
+     :item-count (count accepted) :relation-count (count relations)}))
+
+(defn taxonomy-owner-concepts [system owner]
+  (let [id (ontology-id owner)
+        state (models/owner-state system owner)]
+    (if-not (ontology/ontology-exists? system id)
+      []
+      (->> (:taxonomy-proposals state)
+           vals (filter #(= :accepted (:status %))) (sort-by :proposal-id)
+           (keep (fn [proposal]
+                   (when-let [concept (ontology/get-concept-by-uri
+                                       system id (taxonomy-item-uri owner (:proposal-id proposal)))]
+                     (assoc concept :awp-proposal-id (:proposal-id proposal)
+                                    :awp-source-id (:source-id proposal)))))
+           vec))))
+
+(defn taxonomy-owner-concept [system owner proposal-id]
+  (some #(when (= proposal-id (:awp-proposal-id %)) %) (taxonomy-owner-concepts system owner)))
+
+(defn taxonomy-owner-search [system owner query-text]
+  (if-not (and (string? query-text) (not (str/blank? query-text)))
+    []
+    (let [needle (str/lower-case query-text)]
+      (->> (taxonomy-owner-concepts system owner)
+           (filter #(str/includes? (str/lower-case (:label %)) needle)) vec))))
+
+(defn taxonomy-owner-traverse [system owner proposal-id]
+  (let [visible (set (map :awp-proposal-id (taxonomy-owner-concepts system owner)))]
+    (if-not (contains? visible proposal-id)
+      []
+      (->> (knowledge/taxonomy-relations system owner)
+           (filter #(and (contains? visible (:left-id %))
+                         (contains? visible (:right-id %))
+                         (or (= proposal-id (:left-id %)) (= proposal-id (:right-id %)))))
+           vec))))
+
+(defn taxonomy-owner-export [system owner]
+  (let [concepts (taxonomy-owner-concepts system owner)
+        visible (set (map :awp-proposal-id concepts))]
+    {:ontology-id (ontology-id owner)
+     :concepts concepts
+     :relations (->> (knowledge/taxonomy-relations system owner)
+                     (filter #(and (contains? visible (:left-id %))
+                                   (contains? visible (:right-id %)))) vec)}))
 
 (defn explore-source-candidates!
   "Explicit, gated ORC model exploration. Its separate ontology is never a published review view."
@@ -277,3 +391,37 @@
                           :task-id task-id :source-id source-id :mode :classification
                           :status :completed :suggestions candidates
                           :model model :processor-version "orc-exploration-v1"}))))))
+
+(defn stage-taxonomy-candidates!
+  "Stage selected bounded ORC LLM concepts as Grain taxonomy proposals.
+   Each selection supplies a category; ORC concepts and their relationships never self-publish."
+  [system owner source-id model selections]
+  (let [source (get-in (models/owner-state system owner) [:sources source-id])
+        id (candidate-ontology-id owner source-id)
+        candidate-ontology (ontology/get-ontology system id)
+        expected-name (str "AWP candidate " (digest (str owner ":" source-id ":" model)))
+        expected-count (some->> (:description candidate-ontology)
+                                (re-find #"expected=(\d+)") second parse-long)
+        concepts (when candidate-ontology (ontology/get-concepts system {:ontology-id id}))]
+    (if-not (and source (= expected-name (:name candidate-ontology))
+                 (vector? selections) (<= (count selections) 2)
+                 (= (count selections) (count (set (map :uri selections))))
+                 (or (nil? expected-count) (= expected-count (count concepts))))
+      {:error :incorrect}
+      (let [resolved
+            (mapv (fn [{:keys [uri category-id evidence]}]
+                    (let [concept (when (string? uri) (ontology/get-concept-by-uri system id uri))]
+                      (when (and concept (string? evidence) (not (str/blank? evidence))
+                                 (= evidence (:description concept))
+                                 (str/includes? (:transcript source) evidence)
+                                 (taxonomy/publishable? "personal-v1" category-id))
+                        {:proposal-id (str "orc-taxonomy:" (subs (digest (str owner ":" source-id ":" uri)) 0 32))
+                         :result-id (str "orc-taxonomy:" (digest (str owner ":" source-id ":" model ":" uri)))
+                         :source-id source-id :category-id category-id :taxonomy-version "personal-v1"
+                         :text (:label concept) :evidence evidence :model-version model
+                         :prompt-version "orc-bounded-v1" :candidate-uri uri
+                         :trace-id (get-in concept [:provenance :trace-id])}))) selections)]
+        (if (some nil? resolved)
+          {:error :incorrect}
+          {:status :staged
+           :proposals (mapv #(knowledge/taxonomy-propose! system owner %) resolved)})))))

@@ -16,25 +16,40 @@
                              :legacy-snapshot "StartImport"
                              :legacy-resource "ImportResource"
                              :legacy-switch "PassGate"
-                             :legacy-rollback "StartImport"}]
+                             :legacy-rollback "StartImport"
+                             :taxonomy-proposal "RecordModelProposal"
+                             :taxonomy-review "DecideModelProposal"
+                             :taxonomy-map "MapCategoryVersion"
+                             :taxonomy-model-outcome "RecordModelOutcome"
+                             :taxonomy-relation "ProposeRelation"
+                             :taxonomy-relation-review "DecideRelation"}]
               [(keyword "knowledge" (name op))
                {:description (name op)
                 :schema [:map [:owner :string] [:data :map]]
                 :reads #{:knowledge/state} :produces #{:knowledge/fact}
-                :grain/allium [{:spec (if (#{:legacy-snapshot :legacy-resource :legacy-switch :legacy-rollback} op)
-                                         "specs/knowledge-extraction-migration.allium"
-                                         "specs/personal-knowledge.allium")
+                :grain/allium [{:spec (cond
+                                       (#{:legacy-snapshot :legacy-resource :legacy-switch :legacy-rollback} op)
+                                       "specs/knowledge-extraction-migration.allium"
+                                       (#{:taxonomy-proposal :taxonomy-review :taxonomy-map :taxonomy-model-outcome
+                                          :taxonomy-relation :taxonomy-relation-review} op)
+                                       "specs/knowledge-taxonomy.allium"
+                                       :else "specs/personal-knowledge.allium")
                                 :kind :rule :name rule}]}]))
    :events {:knowledge/fact {:description "One knowledge decision or external outcome."
                              :schema [:map [:owner :string] [:kind :keyword] [:data :map]]}}
    :read-models {:knowledge/state {:description "Owner source, work, review, and account state."
-                                   :consumes #{:knowledge/fact} :schema [:map-of :string :map] :version 1}}
+                                   :consumes #{:knowledge/fact} :schema [:map-of :string :map] :version 2}}
    :queries (into {} (for [[op schema] {:tasks [:map [:owner :string] [:source-id :string]]
                                         :suggestions [:map [:owner :string]]
                                         :item [:map [:owner :string] [:item-id :string]]
                                         :profile [:map [:owner :string]]
                                         :account [:map [:owner :string] [:account-id :string]]
-                                        :accounts [:map [:owner :string]]}]
+                                        :accounts [:map [:owner :string]]
+                                        :taxonomy-item [:map [:owner :string] [:proposal-id :string]]
+                                        :taxonomy-proposals [:map [:owner :string]]
+                                        :taxonomy-current [:map [:owner :string]]
+                                        :taxonomy-relations [:map [:owner :string]]
+                                        :taxonomy-outcomes [:map [:owner :string]]}]
                        [(keyword "knowledge" (name op))
                         {:description (name op) :schema schema :reads #{:knowledge/state}}]))
    :flows {:knowledge/intake {:description "A completed turn becomes independently tracked work."

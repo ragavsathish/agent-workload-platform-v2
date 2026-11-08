@@ -54,6 +54,13 @@ entity ModelQualityGate {
     status: String
 }
 
+entity ModelOutcome {
+    result_id: String
+    owner: String
+    source_id: String
+    status: String
+}
+
 rule DefineTaxonomyVersion {
     when: TaxonomyDefined(version_id)
     requires: not exists TaxonomyVersion{version_id: version_id}
@@ -85,6 +92,12 @@ rule RecordModelProposal {
     requires: exists category
     requires: not exists ModelProposal{proposal_id: proposal_id}
     ensures: ModelProposal.created(proposal_id: proposal_id, result_id: result_id, owner: owner, source_id: source_id, category_id: category_id, taxonomy_version: taxonomy_version, evidence: evidence, model_version: model_version, prompt_version: prompt_version, status: "pending", revision: 0)
+}
+
+rule RecordModelOutcome {
+    when: ModelAttemptEnded(result_id, owner, source_id, status)
+    requires: not exists ModelOutcome{result_id: result_id}
+    ensures: ModelOutcome.created(result_id: result_id, owner: owner, source_id: source_id, status: status)
 }
 
 rule DecideModelProposal {
@@ -123,6 +136,20 @@ rule RecordReviewedRelation {
     ensures: ReviewedRelation.created(relation_id: relation_id, owner: owner, source_id: source_id, left_id: left_id, right_id: right_id, relation_kind: relation_kind, evidence: evidence, status: "accepted")
 }
 
+rule ProposeRelation {
+    when: RelationProposed(relation_id, owner, source_id, left_id, right_id, relation_kind, evidence)
+    let left = ModelProposal{proposal_id: left_id}
+    let right = ModelProposal{proposal_id: right_id}
+    requires: exists left
+    requires: exists right
+    requires: left.owner = owner
+    requires: right.owner = owner
+    requires: left.status = "accepted"
+    requires: right.status = "accepted"
+    requires: not exists ReviewedRelation{relation_id: relation_id}
+    ensures: ReviewedRelation.created(relation_id: relation_id, owner: owner, source_id: source_id, left_id: left_id, right_id: right_id, relation_kind: relation_kind, evidence: evidence, status: "pending")
+}
+
 rule RevokeReviewedRelation {
     when: RelationRevoked(relation_id, owner)
     let relation = ReviewedRelation{relation_id: relation_id}
@@ -130,6 +157,15 @@ rule RevokeReviewedRelation {
     requires: relation.owner = owner
     requires: relation.status = "accepted"
     ensures: relation.status = "revoked"
+}
+
+rule DecideRelation {
+    when: RelationReviewed(relation_id, owner, decision)
+    let relation = ReviewedRelation{relation_id: relation_id}
+    requires: exists relation
+    requires: relation.owner = owner
+    requires: relation.status = "pending"
+    ensures: relation.status = decision
 }
 
 rule OpenModelQualityGate {
@@ -162,10 +198,13 @@ surface ProposalReview {
         proposal.proposal_id
     provides:
         ProposalValidated(proposal_id, result_id, owner, source_id, category_id, taxonomy_version, evidence, model_version, prompt_version)
+        ModelAttemptEnded(result_id, owner, source_id, status)
         ProposalReviewed(proposal_id, owner, expected_revision, decision)
         ProposalRevoked(proposal_id, owner, expected_revision)
         RelationAccepted(relation_id, owner, source_id, left_id, right_id, relation_kind, evidence)
+        RelationProposed(relation_id, owner, source_id, left_id, right_id, relation_kind, evidence)
         RelationRevoked(relation_id, owner)
+        RelationReviewed(relation_id, owner, decision)
 }
 
 surface ModelQualityReview {

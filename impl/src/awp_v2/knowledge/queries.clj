@@ -26,3 +26,20 @@
     {:query/result account} (missing)))
 (defquery :knowledge accounts {:grain.event-model/reads #{:knowledge/state}} [ctx]
   {:query/result (->> (get (active (state ctx)) :accounts) vals (sort-by :account-id) vec)})
+(defquery :knowledge taxonomy-item {:grain.event-model/reads #{:knowledge/state}} [ctx]
+  (if-let [value (get-in (state ctx) [:taxonomy-proposals (get-in ctx [:query :proposal-id])])]
+    {:query/result value} (missing)))
+(defquery :knowledge taxonomy-proposals {:grain.event-model/reads #{:knowledge/state}} [ctx]
+  {:query/result (->> (:taxonomy-proposals (state ctx)) vals (sort-by :proposal-id) vec)})
+(defquery :knowledge taxonomy-current {:grain.event-model/reads #{:knowledge/state}} [ctx]
+  {:query/result (->> (:taxonomy-proposals (state ctx)) vals
+                      (filter #(= :accepted (:status %))) (sort-by :proposal-id) vec)})
+(defquery :knowledge taxonomy-relations {:grain.event-model/reads #{:knowledge/state}} [ctx]
+  (let [s (state ctx)]
+    {:query/result (->> (:taxonomy-relations s) vals
+                        (filter #(and (= :accepted (:status %))
+                                      (= :accepted (get-in s [:taxonomy-proposals (:left-id %) :status]))
+                                      (= :accepted (get-in s [:taxonomy-proposals (:right-id %) :status]))))
+                        (sort-by :relation-id) vec)}))
+(defquery :knowledge taxonomy-outcomes {:grain.event-model/reads #{:knowledge/state}} [ctx]
+  {:query/result (->> (:taxonomy-outcomes (state ctx)) vals (sort-by :result-id) vec)})

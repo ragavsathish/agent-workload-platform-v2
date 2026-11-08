@@ -16,7 +16,13 @@
    :knowledge/legacy-snapshot command-schema
    :knowledge/legacy-resource command-schema
    :knowledge/legacy-switch command-schema
-   :knowledge/legacy-rollback command-schema})
+   :knowledge/legacy-rollback command-schema
+   :knowledge/taxonomy-proposal command-schema
+   :knowledge/taxonomy-review command-schema
+   :knowledge/taxonomy-map command-schema
+   :knowledge/taxonomy-model-outcome command-schema
+   :knowledge/taxonomy-relation command-schema
+   :knowledge/taxonomy-relation-review command-schema})
 (defevent :knowledge/fact "One committed source, extraction, review, or account fact."
   {:schema [:map [:owner :string] [:kind :keyword] [:data :map]]})
 (defschemas queries
@@ -25,4 +31,9 @@
    :knowledge/item [:map [:owner :string] [:item-id :string]]
    :knowledge/profile [:map [:owner :string]]
    :knowledge/account [:map [:owner :string] [:account-id :string]]
-   :knowledge/accounts [:map [:owner :string]]})
+   :knowledge/accounts [:map [:owner :string]]
+   :knowledge/taxonomy-item [:map [:owner :string] [:proposal-id :string]]
+   :knowledge/taxonomy-proposals [:map [:owner :string]]
+   :knowledge/taxonomy-current [:map [:owner :string]]
+   :knowledge/taxonomy-relations [:map [:owner :string]]
+   :knowledge/taxonomy-outcomes [:map [:owner :string]]})

@@ -185,3 +185,12 @@ identifiers, and private-file digests are deliberately absent here.
 | [Journal review server](journal-review-mcp-server.ts) | `products/voice-agent/apps/journal-review-mcp/src/server.ts` | `735c09e0610d2c94548e0e770f7e88d06ec2b37d13232e0701cebe3387ff1160` |
 | [Annotation finalizer](journal-annotation-finalize.mjs) | `products/voice-agent/apps/pi-agent/digital-twin/eval/journal-annotation-finalize.mjs` | `89b4fc7e74dd19bbaea525b359c5b46a614b5bea5f610d952c166951c54f9578` |
 | [Owner-turn draft maker](codex-owner-turn-review.mjs) | `products/voice-agent/apps/pi-agent/digital-twin/eval/codex-owner-turn-review.mjs` | `f59dc608f6f017dc98d157d9888b0d6f878009c37465d34904262ae8e46e5b46` |
+
+## Slice 22 public candidate host observation
+
+The [read-only host observation](public-candidate-host-observation.md) records
+the running v1 service namespace, occupied addresses, and its installed
+entry version at the planning time. It contains no private owner or tailnet
+identifier. It is an operational observation, not a byte copy from the pinned
+v1 source tree. The prior public deployment source and rules remain pinned in
+the earlier manifest sections.

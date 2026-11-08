@@ -1,0 +1,135 @@
+-- allium: 3
+-- Cites docs/plan/22-public-v2-candidate/spec.feature and docs/wiki/public-v2-candidate.md.
+
+entity Candidate {
+    candidate_id: String
+    owner: String
+    origin: String?
+    state_id: String
+    status: String
+    existing_healthy: Boolean
+}
+
+entity CandidateJourney {
+    journey_id: String
+    candidate_id: String
+    owner: String
+    turn_id: String?
+    media_ready: Boolean
+    response_audio: Boolean
+    status: String
+}
+
+entity CandidateRelease {
+    version_id: String
+    candidate_id: String
+    qualified: Boolean
+    active: Boolean
+    status: String
+}
+
+rule AdmitIsolatedCandidate {
+    when: CandidateProposed(candidate_id, owner, state_id)
+    let candidate = Candidate{candidate_id: candidate_id}
+    requires: exists candidate
+    requires: candidate.owner = owner
+    requires: candidate.state_id = state_id
+    requires: candidate.existing_healthy = true
+    requires: candidate.status = "preflight-passed"
+    ensures: candidate.status = "started"
+}
+
+rule GrantExactOwner {
+    when: VerifiedOwnerArrived(candidate_id, owner)
+    let candidate = Candidate{candidate_id: candidate_id}
+    requires: exists candidate
+    requires: candidate.owner = owner
+    requires: candidate.origin != null
+    requires: candidate.status = "ready"
+    ensures: CandidateOwnerGranted(candidate_id: candidate_id, owner: owner)
+}
+
+rule DenyForeignOwner {
+    when: ForeignPeerArrived(candidate_id, caller)
+    let candidate = Candidate{candidate_id: candidate_id}
+    requires: exists candidate
+    requires: caller != candidate.owner
+    ensures: CandidateOwnerDenied(candidate_id: candidate_id, caller: caller)
+}
+
+rule ConfirmCandidateSpeech {
+    when: ExternalMediaObserved(journey_id, candidate_id, owner, turn_id)
+    let journey = CandidateJourney{journey_id: journey_id}
+    requires: exists journey
+    requires: journey.candidate_id = candidate_id
+    requires: journey.owner = owner
+    requires: journey.media_ready = true
+    requires: journey.response_audio = true
+    requires: journey.status = "connected"
+    ensures: journey.turn_id = turn_id
+    ensures: journey.status = "completed"
+}
+
+rule MarkCandidateMediaUnavailable {
+    when: MediaPathFailed(journey_id, candidate_id)
+    let journey = CandidateJourney{journey_id: journey_id}
+    requires: exists journey
+    requires: journey.candidate_id = candidate_id
+    requires: journey.response_audio = false
+    ensures: journey.status = "unavailable"
+}
+
+rule RestoreQualifiedCandidate {
+    when: CandidateChangeFailed(candidate_id, failed_id, previous_id)
+    let failed = CandidateRelease{version_id: failed_id}
+    let previous = CandidateRelease{version_id: previous_id}
+    requires: exists failed
+    requires: exists previous
+    requires: failed.candidate_id = candidate_id
+    requires: previous.candidate_id = candidate_id
+    requires: previous.qualified = true
+    ensures: failed.active = false
+    ensures: failed.status = "failed"
+    ensures: previous.active = true
+}
+
+invariant CompletedSpeechHasMedia {
+    for journey in CandidateJourneys:
+        journey.status = "completed" implies journey.media_ready = true and journey.response_audio = true
+}
+
+surface CandidateOwnerEntry {
+    facing candidate: Candidate
+
+    exposes:
+        candidate.candidate_id
+
+    provides:
+        CandidateProposed(candidate_id, owner, state_id)
+        VerifiedOwnerArrived(candidate_id, owner)
+        ForeignPeerArrived(candidate_id, caller)
+
+    @guarantee ExactOwnerOnly
+        -- Caller-provided owner claims cannot grant access.
+}
+
+surface CandidateMedia {
+    facing journey: CandidateJourney
+
+    exposes:
+        journey.journey_id
+
+    provides:
+        ExternalMediaObserved(journey_id, candidate_id, owner, turn_id)
+        MediaPathFailed(journey_id, candidate_id)
+}
+
+surface CandidateVersion {
+    facing version: CandidateRelease
+
+    exposes:
+        version.version_id
+
+    provides:
+        CandidateChangeFailed(candidate_id, failed_id, previous_id)
+}

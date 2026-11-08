@@ -202,11 +202,26 @@
       (when-let [abort-driver (:abort-driver system)] (abort-driver turn-id)))
     result))
 
-(defn compact! [system actor command-id & [{:keys [tokens contextWindow]}]]
+(defn compact! [system actor command-id & [{:keys [baseline-leaf-id baseline-entry-count]}]]
   (if (valid-command-id? command-id)
-    (issue! system actor :compact (cond-> {:command-id command-id :at (now)}
-                                (some? tokens) (assoc :tokens tokens
-                                                      :contextWindow contextWindow)))
+    (issue! system actor :compact-start
+            {:command-id command-id :baseline-leaf-id baseline-leaf-id
+             :baseline-entry-count baseline-entry-count :at (now)})
+    {:error :incorrect}))
+
+(defn compact-complete! [system actor command-id
+                         {:keys [entry-id parent-id entry-count tokens contextWindow]}]
+  (if (and (valid-command-id? command-id)
+           (valid-command-id? entry-id)
+           (valid-command-id? parent-id)
+           (integer? entry-count)
+           (pos? entry-count)
+           (or (nil? tokens) (and (integer? tokens) (<= 0 tokens)))
+           (or (nil? contextWindow) (and (integer? contextWindow) (pos? contextWindow))))
+    (issue! system actor :compact-complete
+            {:command-id command-id :entry-id entry-id :parent-id parent-id
+             :entry-count entry-count :tokens tokens :contextWindow contextWindow
+             :at (now)})
     {:error :incorrect}))
 (defn attach! [system actor task-id & [command-id]]
   (if (or (nil? command-id) (valid-command-id? command-id))

@@ -17,7 +17,7 @@ type VoiceAgentPort = {
   startFreshSession(commandId?: string): Promise<{ id: string }>;
   resumeSession(sessionId: string, commandId?: string): Promise<{ id: string } | undefined>;
   contextSnapshot(): Promise<PublicContextUsage>;
-  compact(): Promise<PublicContextUsage>;
+  compact(commandId: string): Promise<PublicContextUsage>;
   abort(): Promise<void>;
   attachTaskSession(taskId: string, commandId?: string): Promise<{ taskId: string; isStreaming: boolean }>;
   taskRoutingSnapshot(): Promise<{ taskId: string | null }>;
@@ -222,7 +222,9 @@ export function createVoiceHttpServer(options: {
     }
     if (route.kind === "compact") {
       try {
-        return sendJson(response, 200, await agent.compact());
+        const commandId = request.headers["x-awp-command-id"];
+        return sendJson(response, 200,
+          await agent.compact(typeof commandId === "string" ? commandId : ""));
       } catch (error) {
         return sendJson(response, 409, {
           detail: errorMessage(error, "Pi context compaction failed"),

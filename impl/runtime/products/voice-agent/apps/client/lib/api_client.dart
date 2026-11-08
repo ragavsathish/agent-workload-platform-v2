@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:http/http.dart' as http;
 
@@ -17,6 +18,37 @@ class VoiceApi {
   static const _configuredOrigin = String.fromEnvironment('VOICE_API_ORIGIN');
   final http.Client _client;
   final Uri? _privateWorkspaceOrigin;
+  String? _pendingCompactionId;
+  Future<String>? _compactionIdentityLookup;
+
+  String _newCommandId() {
+    final random = Random.secure();
+    return List<int>.generate(
+      24,
+      (_) => random.nextInt(256),
+    ).map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  Future<String> _compactionIdentity() {
+    final pending = _pendingCompactionId;
+    if (pending != null) return Future.value(pending);
+    return _compactionIdentityLookup ??= () async {
+      // Grain's owner context survives client reload, so resume its active ID first.
+      final current = await context();
+      final recovered = current.compactionCommandId;
+      final id =
+          recovered != null &&
+              {
+                'queued',
+                'pending',
+                'uncertain',
+              }.contains(current.compactionStatus)
+          ? recovered
+          : _newCommandId();
+      _pendingCompactionId = id;
+      return id;
+    }().whenComplete(() => _compactionIdentityLookup = null);
+  }
 
   Uri _uri(String path) => _configuredOrigin.isEmpty
       ? Uri.base.resolve(path)
@@ -58,7 +90,10 @@ class VoiceApi {
             headers: headers,
             body: body == null ? null : jsonEncode(body),
           )
-        : await _client.get(uri, headers: {'Cache-Control': 'no-store'});
+        : await _client.get(
+            uri,
+            headers: {'Cache-Control': 'no-store', ...requestHeaders},
+          );
     Object? decoded;
     try {
       decoded = jsonDecode(response.body);
@@ -75,9 +110,19 @@ class VoiceApi {
 
   Future<ContextUsage> context() async =>
       ContextUsage.fromJson(await _json('/api/pi-context'));
-  Future<ContextUsage> compact() async => ContextUsage.fromJson(
-    await _json('/api/pi-context/compact', method: 'POST'),
-  );
+  Future<ContextUsage> compact() async {
+    final commandId = await _compactionIdentity();
+    final result = ContextUsage.fromJson(
+      await _json(
+        '/api/pi-context/compact',
+        method: 'POST',
+        requestHeaders: {'x-awp-command-id': commandId},
+      ),
+    );
+    if (result.compactionStatus == 'completed') _pendingCompactionId = null;
+    return result;
+  }
+
   Future<TranscriptSnapshot> transcript() async =>
       TranscriptSnapshot.fromJson(await _json('/api/pi-transcript'));
   Future<List<PiSessionSummary>> sessions() async {

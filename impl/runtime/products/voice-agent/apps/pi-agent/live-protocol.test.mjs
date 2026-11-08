@@ -243,9 +243,125 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
   assert.match(voiceStream, /Pi heard spoken/u);
   assert.match(voiceStream, /"type":"done"/u);
   assert.equal(modelCalls, 2);
+  // Seed the authoritative Grain eligibility projection from a controlled completed turn.
+  const eligibilityMessages = [
+    { role: "system", content: "Answer briefly." },
+    { role: "user", content: "compactable" },
+  ];
+  await grainClient.call("submit", {
+    "turn-id": "protocol-compactable", origin: "typed", messages: eligibilityMessages,
+  });
+  await grainClient.call("observe", {
+    "turn-id": "protocol-compactable",
+    observation: {
+      kind: "context-usage", tokens: 50_000, contextWindow: 16_000,
+      estimated: false, canCompact: true,
+    },
+  });
+  await grainClient.call("settle", {
+    "turn-id": "protocol-compactable", status: "completed", answer: "eligible",
+  });
+  assert.equal((await call("GET", "/v1/context")).body.canCompact, true);
+
+  const compactableSession = agent.activeSession();
+  const compactManager = compactableSession.sessionManager;
+  const compactionBaselineLeafId = compactManager.getLeafId();
+  let controlledCompactions = 0;
+  let controlledCompactionBaseline;
+  compactableSession.compact = async () => {
+    controlledCompactions += 1;
+    controlledCompactionBaseline = compactManager.getLeafId();
+    compactManager.appendCompaction("controlled summary", null, 50_000);
+    return { estimatedTokensAfter: 1_000 };
+  };
+  const realGrainCall = grainClient.call.bind(grainClient);
+  let loseCompactSettlement = true;
+  grainClient.call = async (operation, data) => {
+    if (operation === "compact-complete" && loseCompactSettlement) {
+      loseCompactSettlement = false;
+      throw new Error("controlled lost Grain settlement response");
+    }
+    return realGrainCall(operation, data);
+  };
+  const compactionCommandId = "protocol-compact-lost-settlement";
+  const unsettledCompaction = await call("POST", "/v1/context/compact", {}, {
+    "x-awp-command-id": compactionCommandId,
+  });
+  assert.equal(unsettledCompaction.status, 409);
+  assert.equal(controlledCompactions, 1);
+  const pendingReceipt = (await call("GET", "/v1/context")).body;
+  assert.equal(pendingReceipt.compactionCommandId, compactionCommandId);
+  assert.equal(pendingReceipt.compactionStatus, "pending");
+  assert.equal(pendingReceipt.compactionBaselineLeafId, compactionBaselineLeafId);
+  assert.equal(typeof pendingReceipt.compactionBaselineEntryCount, "number");
+
+  const persistedSessionPath = SessionManager.findById(cwd, selected.id, sessionDir);
+  assert.ok(persistedSessionPath);
+  const restartedManager = SessionManager.open(persistedSessionPath, sessionDir, cwd);
+  const persistedBranch = restartedManager.getBranch();
+  const persistedCompaction = persistedBranch.at(-1);
+  const persistedEntryCount = restartedManager.getEntryCount();
+  assert.equal(persistedCompaction.type, "compaction");
+  assert.equal(persistedCompaction.parentId, compactionBaselineLeafId);
+  assert.equal(persistedEntryCount, pendingReceipt.compactionBaselineEntryCount + 1);
+  const restartedAgent = new VoiceAgent(settings, runtime,
+    { identity: "one-voice-vm-restarted", close: async () => {} }, [], null, null,
+    restartedManager, new PublicTranscript(), grainClient);
+  const compactionReconciled = await restartedAgent.compact(compactionCommandId);
+  assert.equal(compactionReconciled.compactionStatus, "completed");
+  assert.equal(controlledCompactions, 1);
+  assert.equal(restartedAgent.activeSession().sessionManager.getEntryCount(), persistedEntryCount);
+  assert.equal(restartedAgent.activeSession().sessionManager.getLeafId(), persistedCompaction.id);
+  await restartedAgent.compact(compactionCommandId);
+  assert.equal(controlledCompactions, 1);
+  await restartedAgent.close();
+
+  await grainClient.call("submit", {
+    "turn-id": "protocol-queue-eligibility", origin: "typed", messages: eligibilityMessages,
+  });
+  await grainClient.call("observe", {
+    "turn-id": "protocol-queue-eligibility",
+    observation: {
+      kind: "context-usage", tokens: 50_000, contextWindow: 16_000,
+      estimated: false, canCompact: true,
+    },
+  });
+  await grainClient.call("settle", {
+    "turn-id": "protocol-queue-eligibility", status: "completed", answer: "eligible again",
+  });
+  const queuedTurnPromise = call("POST", "/v1/turn", { messages: [
+    { role: "system", content: "Answer briefly." }, { role: "user", content: "slow" },
+  ] }, { "x-awp-turn-id": "protocol-queued-turn", "x-awp-origin": "typed" });
+  for (let attempt = 0; attempt < 100 && !agent.activeTurnId; attempt++) {
+    await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+  }
+  assert.equal(typeof agent.activeTurnId, "string");
+  const queuedReceipt = await call("POST", "/v1/context/compact", {}, {
+    "x-awp-command-id": "protocol-compact-queued",
+  });
+  assert.equal(queuedReceipt.status, 200);
+  assert.equal(queuedReceipt.body.compactionStatus, "queued");
+  assert.equal(queuedReceipt.body.compactionCommandId, "protocol-compact-queued");
+  const queuedTurnResult = await queuedTurnPromise;
+  assert.equal(queuedTurnResult.status, 200);
+  assert.equal(queuedTurnResult.body.text, "Pi heard slow");
+  let queuedCompletion = queuedReceipt.body;
+  for (let attempt = 0; attempt < 100 && queuedCompletion.compactionStatus !== "completed"; attempt++) {
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    queuedCompletion = (await call("GET", "/v1/context")).body;
+  }
+  assert.equal(queuedCompletion.compactionStatus, "completed");
+  assert.equal(queuedCompletion.compactionCommandId, "protocol-compact-queued");
+  assert.equal(controlledCompactions, 2);
+  assert.notEqual(controlledCompactionBaseline, compactionBaselineLeafId);
+  const queuedBranch = compactManager.getBranch();
+  assert.equal(queuedBranch.at(-1).type, "compaction");
+  assert.equal(queuedBranch.at(-1).parentId, controlledCompactionBaseline);
+
   const transcript = await call("GET", "/v1/transcript");
   assert.deepEqual(transcript.body.entries.map((entry) => entry.text),
-    ["typed", "Pi heard typed", "uncertain", "spoken", "Pi heard spoken"]);
+    ["typed", "Pi heard typed", "uncertain", "spoken", "Pi heard spoken",
+      "compactable", "eligible", "compactable", "eligible again", "slow", "Pi heard slow"]);
   const catalog = await call("GET", "/v1/sessions");
   assert.equal(catalog.body.sessions[0].id, selected.id);
   const attachedRoute = await call("POST", "/v1/tasks/attach", { taskId },
@@ -274,7 +390,7 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
   assert.equal(attached.status, 200);
   assert.equal(attached.body.text, "Task heard prompt");
   assert.deepEqual(taskPrompts, ["task prompt"]);
-  assert.equal(modelCalls, 2);
+  assert.equal(modelCalls, 3);
   const attachedHistory = await call("GET", `/v1/sessions/${selected.id}`);
   assert.ok(!attachedHistory.body.entries.some((entry) => entry.text === "task prompt"));
   const fresh = await call("POST", "/v1/sessions/new", {},
@@ -284,7 +400,8 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
   assert.equal(agent.remoteTask.attachedTaskId, undefined);
   const history = await call("GET", `/v1/sessions/${selected.id}`);
   assert.deepEqual(history.body.entries.map((entry) => entry.text),
-    ["typed", "Pi heard typed", "uncertain", "spoken", "Pi heard spoken"]);
+    ["typed", "Pi heard typed", "uncertain", "spoken", "Pi heard spoken",
+      "compactable", "eligible", "compactable", "eligible again", "slow", "Pi heard slow"]);
   const resume = await call("POST", `/v1/sessions/${selected.id}/resume`, {},
     { "x-awp-command-id": "protocol-resume" });
   assert.equal(resume.body.id, selected.id);
@@ -303,11 +420,11 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
   for (let attempt = 0; attempt < 40; attempt++) {
     activeTurn = await grainClient.call("turn", { "turn-id": "protocol-interrupted" })
       .catch(() => undefined);
-    if (activeTurn?.status === "accepted" && modelCalls >= 3) break;
+    if (activeTurn?.status === "accepted" && modelCalls >= 4) break;
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
   }
   assert.equal(activeTurn?.status, "accepted");
-  assert.equal(modelCalls, 3);
+  assert.equal(modelCalls, 4);
   const stop = await call("POST", "/v1/turn/abort", {});
   assert.equal(stop.status, 200);
   await interruptedResponse.body.cancel();
@@ -338,7 +455,7 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
     { role: "system", content: "Answer briefly." }, { role: "user", content: "held until route repair" },
   ] }, { "x-awp-turn-id": "protocol-held-routing", "x-awp-origin": "typed" });
   assert.equal(heldTurn.status, 502);
-  assert.equal(modelCalls, 3);
+  assert.equal(modelCalls, 4);
   assert.deepEqual(taskPrompts, ["task prompt"]);
   const reconciled = await call("POST", "/v1/tasks/detach", {},
     { "x-awp-command-id": "protocol-reconcile-detach" });

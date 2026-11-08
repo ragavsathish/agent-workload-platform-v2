@@ -157,6 +157,38 @@
       :compact-queued
       (update owner-state :queued-compactions (fnil conj []) (:command-id data))
 
+      :context-compaction-queued
+      (-> owner-state
+          (assoc :pending-compaction (:command-id data)
+                 :last-compaction-id (:command-id data))
+          (assoc-in [:compactions (:command-id data)]
+                    (assoc data :status :queued))
+          (update-in [:contexts id :revision] (fnil inc 0))
+          (assoc-in [:contexts id :canCompact] false))
+
+      :context-compaction-started
+      (-> owner-state
+          (assoc :pending-compaction (:command-id data)
+                 :last-compaction-id (:command-id data))
+          (assoc-in [:compactions (:command-id data)]
+                    (assoc data :status :pending))
+          (update-in [:contexts id :revision] (fnil inc 0))
+          (assoc-in [:contexts id :canCompact] false))
+
+      :context-compaction-completed
+      (-> owner-state
+          (assoc :pending-compaction nil)
+          (assoc-in [:compactions (:command-id data) :status] :completed)
+          (assoc-in [:compactions (:command-id data) :entry-id] (:entry-id data))
+          (assoc-in [:contexts id :revision]
+                    (inc (get-in owner-state [:contexts id :revision] 0)))
+          (assoc-in [:contexts id :canCompact] false)
+          (cond-> (contains? data :tokens)
+            (assoc-in [:contexts id :tokens] (:tokens data)))
+          (cond-> (contains? data :contextWindow)
+            (assoc-in [:contexts id :contextWindow] (:contextWindow data)))
+          (assoc-in [:contexts id :estimated] true))
+
       :context-compacted
       (-> owner-state
           (assoc :queued-compactions [])
@@ -182,7 +214,7 @@
       owner-state)))
 
 (defreadmodel :session state
-  {:events #{:session/fact} :version 1 :schema [:map-of :string :map]}
+  {:events #{:session/fact} :version 2 :schema [:map-of :string :map]}
   "Owner selections, turns, safe transcript entries, and context from facts."
   [state event]
   (let [owner (:owner event)

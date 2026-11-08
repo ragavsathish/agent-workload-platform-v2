@@ -16,6 +16,7 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final paths = <String>[];
+      final requests = <http.Request>[];
       String snapshot(String text) => jsonEncode({
         'revision': 1,
         'entries': [
@@ -33,6 +34,7 @@ void main() {
       });
       final api = VoiceApi(
         client: MockClient((request) async {
+          requests.add(request);
           paths.add('${request.method} ${request.url.path}');
           if (request.method == 'POST') return http.Response('{}', 200);
           switch (request.url.path) {
@@ -58,7 +60,14 @@ void main() {
             case '/api/tasks':
               return http.Response('[]', 200);
             case '/api/pi-context':
-              return http.Response(jsonEncode({'canCompact': false}), 200);
+              return http.Response(
+                jsonEncode({
+                  'canCompact': false,
+                  'compactionCommandId': 'persisted-compaction-29',
+                  'compactionStatus': 'pending',
+                }),
+                200,
+              );
             default:
               return http.Response('{}', 404);
           }
@@ -69,6 +78,16 @@ void main() {
       await tester.pumpWidget(MaterialApp(home: PiWorkspaceView(api: api)));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 10));
+      expect(find.text('Reconcile'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('compact-session')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 10));
+      expect(
+        requests
+            .singleWhere((request) => request.url.path.endsWith('/compact'))
+            .headers['x-awp-command-id'],
+        'persisted-compaction-29',
+      );
       await tester.tap(find.byKey(const Key('session-history')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('session-saved-1')));
@@ -459,7 +478,59 @@ void main() {
     expect(after.tokens, 10);
     expect(requests.map((r) => '${r.method} ${r.url.path}'), [
       'GET /api/pi-context',
+      'GET /api/pi-context',
       'POST /api/pi-context/compact',
     ]);
+    expect(
+      requests.last.headers['x-awp-command-id'],
+      matches(RegExp(r'^[a-f0-9]{48}$')),
+    );
   });
+
+  test(
+    '@owner-client-009 retries and reload resumes the same compaction identity',
+    () async {
+      final firstRequests = <http.Request>[];
+      final firstApi = VoiceApi(
+        client: MockClient((request) async {
+          firstRequests.add(request);
+          if (request.url.path == '/api/pi-context') {
+            return http.Response(jsonEncode({'canCompact': true}), 200);
+          }
+          return http.Response(jsonEncode({'detail': 'response lost'}), 409);
+        }),
+      );
+      addTearDown(firstApi.close);
+      await expectLater(firstApi.compact(), throwsA(isA<ApiException>()));
+      final firstId = firstRequests.last.headers['x-awp-command-id'];
+      await expectLater(firstApi.compact(), throwsA(isA<ApiException>()));
+      expect(firstRequests.last.headers['x-awp-command-id'], firstId);
+
+      final resumedRequests = <http.Request>[];
+      final resumedApi = VoiceApi(
+        client: MockClient((request) async {
+          resumedRequests.add(request);
+          return http.Response(
+            jsonEncode(
+              request.url.path == '/api/pi-context'
+                  ? {
+                      'canCompact': false,
+                      'compactionCommandId': firstId,
+                      'compactionStatus': 'pending',
+                    }
+                  : {
+                      'canCompact': false,
+                      'compactionCommandId': firstId,
+                      'compactionStatus': 'completed',
+                    },
+            ),
+            200,
+          );
+        }),
+      );
+      addTearDown(resumedApi.close);
+      expect((await resumedApi.compact()).compactionStatus, 'completed');
+      expect(resumedRequests.last.headers['x-awp-command-id'], firstId);
+    },
+  );
 }

@@ -58,7 +58,17 @@
   [context]
   (let [state (authorized-state context)]
     (if-let [id (:selection state)]
-      {:query/result (assoc (get-in state [:contexts id]) :conversation-id id)}
+      (let [command-id (:last-compaction-id state)
+            compaction (get-in state [:compactions command-id])
+            pending? (contains? #{:queued :pending :uncertain} (:status compaction))]
+        {:query/result (assoc (get-in state [:contexts id])
+                              :conversation-id id
+                              :compactionCommandId (when (or pending? (= :completed (:status compaction))) command-id)
+                              :compactionStatus (name (or (:status compaction) :idle))
+                              :compactionBaselineLeafId (when (= :pending (:status compaction))
+                                                          (:baseline-leaf-id compaction))
+                              :compactionBaselineEntryCount (when (= :pending (:status compaction))
+                                                              (:baseline-entry-count compaction)))})
       (missing))))
 
 (defquery :session routing

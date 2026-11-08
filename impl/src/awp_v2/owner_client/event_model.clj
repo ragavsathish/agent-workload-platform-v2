@@ -11,7 +11,8 @@
                 :session/routing
                 :tasking/list :tasking/task :tasking/progress :tasking/artifact}
      :commands #{:session/fresh :session/resume :session/submit :session/stop
-                 :session/compact :session/attach :session/detach
+                 :session/compact-start :session/compact-complete
+                 :session/attach :session/detach
                  :session/voice-ended :tasking/submit-task :tasking/abort-task}
      :grain/allium [{:spec "specs/owner-client.allium"
                      :kind :surface :name "OwnerWorkspace"}]}}

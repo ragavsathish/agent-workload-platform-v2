@@ -614,7 +614,9 @@ class _PiWorkspaceViewState extends State<PiWorkspaceView> {
   }
 
   Future<void> _compact() async {
-    if (_compactBusy || _context?.canCompact != true) return;
+    final resumable = _context?.compactionCommandId != null &&
+        {'queued', 'pending', 'uncertain'}.contains(_context?.compactionStatus);
+    if (_compactBusy || (_context?.canCompact != true && !resumable)) return;
     setState(() {
       _compactBusy = true;
       _error = null;
@@ -624,6 +626,12 @@ class _PiWorkspaceViewState extends State<PiWorkspaceView> {
       if (mounted) setState(() => _context = value);
     } on Object catch (error) {
       if (mounted) setState(() => _error = '$error');
+      try {
+        final value = await widget.api.context();
+        if (mounted) setState(() => _context = value);
+      } on Object {
+        // Keep the previous owner-scoped receipt visible if refresh is unavailable.
+      }
     } finally {
       if (mounted) setState(() => _compactBusy = false);
     }
@@ -1671,7 +1679,13 @@ class _Composer extends StatelessWidget {
                   ),
                   TextButton.icon(
                     key: const Key('compact-session'),
-                    onPressed: usage?.canCompact == true && !compactBusy
+                    onPressed:
+                        (usage?.canCompact == true ||
+                                (usage?.compactionCommandId != null &&
+                                    {'queued', 'pending', 'uncertain'}.contains(
+                                      usage?.compactionStatus,
+                                    ))) &&
+                            !compactBusy
                         ? onCompact
                         : null,
                     icon: compactBusy
@@ -1681,7 +1695,14 @@ class _Composer extends StatelessWidget {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.compress_rounded, size: 16),
-                    label: const Text('Compact'),
+                    label: Text(
+                      usage?.compactionCommandId != null &&
+                              {'queued', 'pending', 'uncertain'}.contains(
+                                usage?.compactionStatus,
+                              )
+                          ? 'Reconcile'
+                          : 'Compact',
+                    ),
                   ),
                 ],
               ),

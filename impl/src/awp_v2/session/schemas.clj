@@ -10,7 +10,8 @@
    :session/settle command-schema
    :session/observe command-schema
    :session/stop command-schema
-   :session/compact command-schema
+   :session/compact-start command-schema
+   :session/compact-complete command-schema
    :session/attach command-schema
    :session/detach command-schema
    :session/voice-ended command-schema})

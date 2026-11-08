@@ -391,8 +391,12 @@ async def broker_pi_message(message: str, turn_id: str):
     return parse_presentation_response(raw)
 
 
-async def broker_context_request(method: str, path: str) -> dict[str, object]:
+async def broker_context_request(
+    method: str, path: str, command_id: str | None = None
+) -> dict[str, object]:
     headers = {"Authorization": f"Bearer {required_env('INFERENCE_BROKER_TOKEN')}"}
+    if command_id is not None:
+        headers["x-awp-command-id"] = command_id
     timeout = float(os.getenv("PI_VOICE_TIMEOUT_SECONDS", "120")) + 10
     async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=5.0)) as client:
         response = await client.request(
@@ -1689,8 +1693,15 @@ if __name__ == "__main__":
     @app.post("/api/pi-context/compact")
     async def compact_pi_context(request: Request):
         validate_http_identity(request)
+        command_id = request.headers.get("x-awp-command-id")
+        if command_id is not None and (
+            not command_id.isascii()
+            or not command_id.replace("-", "").replace("_", "").isalnum()
+            or len(command_id) > 128
+        ):
+            raise HTTPException(status_code=400, detail="invalid compaction command ID")
         return JSONResponse(
-            await broker_context_request("POST", "/compact"),
+            await broker_context_request("POST", "/compact", command_id),
             headers={"Cache-Control": "no-store"},
         )
 

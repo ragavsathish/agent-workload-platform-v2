@@ -77,6 +77,10 @@ class ContextUsage {
     required this.percent,
     required this.estimated,
     required this.canCompact,
+    this.compactionCommandId,
+    this.compactionStatus = 'idle',
+    this.compactionBaselineLeafId,
+    this.compactionBaselineEntryCount,
   });
 
   final int? tokens;
@@ -84,6 +88,10 @@ class ContextUsage {
   final double? percent;
   final bool estimated;
   final bool canCompact;
+  final String? compactionCommandId;
+  final String compactionStatus;
+  final String? compactionBaselineLeafId;
+  final int? compactionBaselineEntryCount;
 
   factory ContextUsage.fromJson(JsonMap json) => ContextUsage(
     tokens: (json['tokens'] as num?)?.toInt(),
@@ -91,6 +99,11 @@ class ContextUsage {
     percent: (json['percent'] as num?)?.toDouble(),
     estimated: json['estimated'] == true,
     canCompact: json['canCompact'] == true,
+    compactionCommandId: json['compactionCommandId'] as String?,
+    compactionStatus: json['compactionStatus'] as String? ?? 'idle',
+    compactionBaselineLeafId: json['compactionBaselineLeafId'] as String?,
+    compactionBaselineEntryCount:
+        (json['compactionBaselineEntryCount'] as num?)?.toInt(),
   );
 }
 

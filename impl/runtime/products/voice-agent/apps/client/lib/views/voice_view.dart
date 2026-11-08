@@ -194,6 +194,12 @@ class _VoiceViewState extends State<VoiceView> {
       final value = await widget.api.compact();
       if (mounted) setState(() => _context = value);
     } on Object {
+      try {
+        final value = await widget.api.context();
+        if (mounted) setState(() => _context = value);
+      } on Object {
+        // Preserve the last owner-scoped receipt when context refresh is unavailable.
+      }
       if (mounted) setState(() => _error = 'Could not compact context.');
     } finally {
       if (mounted) setState(() => _compactBusy = false);
@@ -332,7 +338,13 @@ class _VoiceViewState extends State<VoiceView> {
                   muted: _isMuted,
                   contextUsage: _context,
                   compactBusy: _compactBusy,
-                  onCompact: _context?.canCompact == true ? _compact : null,
+                  onCompact:
+                      (_context?.canCompact == true ||
+                          (_context?.compactionCommandId != null &&
+                              {'queued', 'pending', 'uncertain'}
+                                  .contains(_context?.compactionStatus)))
+                      ? _compact
+                      : null,
                   onStart: _phase == VoicePhase.starting ? null : _start,
                   onMute: _toggleMute,
                   onStop: _stop,
@@ -774,7 +786,15 @@ class _ConversationDock extends StatelessWidget {
           OutlinedButton(
             key: const Key('compact-button'),
             onPressed: compactBusy ? null : onCompact,
-            child: Text(compactBusy ? 'Compacting…' : 'Compact'),
+            child: Text(
+              compactBusy
+                  ? 'Compacting…'
+                  : contextUsage?.compactionCommandId != null &&
+                        {'queued', 'pending', 'uncertain'}
+                            .contains(contextUsage?.compactionStatus)
+                  ? 'Reconcile'
+                  : 'Compact',
+            ),
           ),
         ],
       ),

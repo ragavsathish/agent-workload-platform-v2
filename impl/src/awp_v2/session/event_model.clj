@@ -36,11 +36,20 @@
                    :reads #{:session/state} :produces #{:session/fact}
                    :grain/allium [{:spec "specs/session-orchestration.allium" :kind :rule
                                    :name "RequestTurnStop"}]}
-    :session/compact {:description "Queue or settle context maintenance."
+    :session/compact-start {:description "Record compaction intent before the Pi effect."
                       :schema [:map [:owner :string] [:data :map]]
                       :reads #{:session/state} :produces #{:session/fact}
                       :grain/allium [{:spec "specs/session-orchestration.allium" :kind :rule
-                                      :name "CompactSelectedContext"}]}
+                                      :name "BeginContextCompaction"}
+                                     {:spec "specs/session-orchestration.allium" :kind :rule
+                                      :name "QueueContextCompaction"}
+                                     {:spec "specs/session-orchestration.allium" :kind :rule
+                                      :name "StartQueuedContextCompaction"}]}
+    :session/compact-complete {:description "Record a Pi compaction proven by its branch entry."
+                      :schema [:map [:owner :string] [:data :map]]
+                      :reads #{:session/state} :produces #{:session/fact}
+                      :grain/allium [{:spec "specs/session-orchestration.allium" :kind :rule
+                                      :name "SettleContextCompaction"}]}
     :session/attach {:description "Route future turns to an owned task."
                      :schema [:map [:owner :string] [:data :map]]
                      :reads #{:session/state} :produces #{:session/fact}

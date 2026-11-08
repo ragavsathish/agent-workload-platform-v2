@@ -58,10 +58,38 @@ entity ContextView {
     can_compact: Boolean
 }
 
+entity ContextCompactionCommand {
+    command_id: String
+    owner: String
+    conversation_id: String
+    baseline_leaf_id: String
+    baseline_entry_count: Integer
+    entry_id: String?
+    status: pending | settled
+    transitions status {
+        pending -> settled
+        terminal: settled
+    }
+}
+
+entity QueuedContextCompaction {
+    command_id: String
+    owner: String
+    conversation_id: String
+    baseline_leaf_id: String?
+    baseline_entry_count: Integer?
+    queue_state: queued | promoted
+    transitions queue_state {
+        queued -> promoted
+        terminal: promoted
+    }
+}
 rule StartFreshConversation {
     when: StartFresh(caller, command_id, new_id)
     requires: not exists SelectionCommand{command_id: command_id}
     requires: not Busy{owner: caller}
+    requires: not exists ContextCompactionCommand{owner: caller, status: pending}
+    requires: not exists QueuedContextCompaction{owner: caller, queue_state: queued}
     requires: not exists OrchestratorConversation{conversation_id: new_id}
     ensures: OrchestratorConversation.created(
         conversation_id: new_id,
@@ -83,6 +111,8 @@ rule ResumeConversation {
     requires: exists conversation
     requires: conversation.owner = caller
     requires: not Busy{owner: caller}
+    requires: not exists ContextCompactionCommand{owner: caller, status: pending}
+    requires: not exists QueuedContextCompaction{owner: caller, queue_state: queued}
     requires: not exists SelectionCommand{command_id: command_id}
     ensures: ActiveSelectionChanged(owner: caller, conversation_id: target_id)
     ensures: TaskAttachmentReleased(owner: caller)
@@ -133,6 +163,8 @@ rule AcceptOrchestratorTurn {
     requires: exists active
     requires: exists selected
     requires: not Busy{owner: caller}
+    requires: not exists ContextCompactionCommand{owner: caller, status: pending}
+    requires: not exists QueuedContextCompaction{owner: caller, queue_state: queued}
     requires: not exists Turn{turn_id: turn_id}
     requires: prompt != ""
     requires: not exists TaskAttachment{owner: caller, active: true}
@@ -167,6 +199,8 @@ rule RouteAttachedTaskTurn {
     requires: exists attachment
     requires: exists active
     requires: not Busy{owner: caller}
+    requires: not exists ContextCompactionCommand{owner: caller, status: pending}
+    requires: not exists QueuedContextCompaction{owner: caller, queue_state: queued}
     requires: not exists Turn{turn_id: turn_id}
     requires: prompt != ""
     ensures: Turn.created(
@@ -221,6 +255,8 @@ rule AttachOwnedTask {
     requires: OwnedTask(owner: caller, task_id: task_id)
     requires: TaskEligible(owner: caller, task_id: task_id)
     requires: not exists TaskRoutingCommand{command_id: command_id}
+    requires: not exists ContextCompactionCommand{owner: caller, status: pending}
+    requires: not exists QueuedContextCompaction{owner: caller, queue_state: queued}
     ensures: TaskAttachmentChanged(owner: caller, task_id: task_id, command_id: command_id, active: true)
     ensures: TaskRoutingCommand.created(command_id: command_id, owner: caller, operation: attach, task_id: task_id)
 }
@@ -228,6 +264,8 @@ rule AttachOwnedTask {
 rule DetachTask {
     when: DetachTaskSession(caller, command_id)
     requires: not exists TaskRoutingCommand{command_id: command_id}
+    requires: not exists ContextCompactionCommand{owner: caller, status: pending}
+    requires: not exists QueuedContextCompaction{owner: caller, queue_state: queued}
     ensures: TaskAttachmentReleased(owner: caller, command_id: command_id)
     ensures: TaskRoutingCommand.created(command_id: command_id, owner: caller, operation: detach, task_id: null)
 }
@@ -251,14 +289,79 @@ rule RefuseConflictingTaskRoutingCommand {
     ensures: TaskRoutingCommandConflict(command_id: command_id)
 }
 
-rule CompactSelectedContext {
-    when: CompactContext(caller)
+rule BeginContextCompaction {
+    when: CompactContext(caller, command_id, baseline_leaf_id, baseline_entry_count)
     let active = ActiveSelection{owner: caller}
     let context = ContextView{owner: caller}
     requires: exists active
     requires: exists context
     requires: context.can_compact = true
-    ensures: ContextCompactionRequested(owner: caller, conversation_id: active.conversation_id)
+    requires: not Busy{owner: caller}
+    requires: not exists ContextCompactionCommand{owner: caller, status: pending}
+    requires: not exists QueuedContextCompaction{owner: caller, queue_state: queued}
+    requires: not exists QueuedContextCompaction{command_id: command_id}
+    requires: not exists ContextCompactionCommand{command_id: command_id}
+    ensures: ContextCompactionCommand.created(
+        command_id: command_id,
+        owner: caller,
+        conversation_id: active.conversation_id,
+        baseline_leaf_id: baseline_leaf_id,
+        baseline_entry_count: baseline_entry_count,
+        status: pending)
+}
+
+rule QueueContextCompaction {
+    when: CompactContext(caller, command_id, baseline_leaf_id, baseline_entry_count)
+    let active = ActiveSelection{owner: caller}
+    let context = ContextView{owner: caller}
+    requires: exists active
+    requires: exists context
+    requires: context.can_compact = true
+    requires: Busy{owner: caller}
+    requires: not exists ContextCompactionCommand{owner: caller, status: pending}
+    requires: not exists QueuedContextCompaction{owner: caller, queue_state: queued}
+    requires: not exists QueuedContextCompaction{command_id: command_id}
+    requires: not exists ContextCompactionCommand{command_id: command_id}
+    ensures: QueuedContextCompaction.created(
+        command_id: command_id,
+        owner: caller,
+        conversation_id: active.conversation_id,
+        baseline_leaf_id: null,
+        baseline_entry_count: null,
+        queue_state: queued)
+}
+
+rule StartQueuedContextCompaction {
+    when: PromoteQueuedCompaction(caller, command_id, baseline_leaf_id, baseline_entry_count)
+    let queued = QueuedContextCompaction{command_id: command_id}
+    requires: exists queued
+    requires: queued.owner = caller
+    requires: queued.queue_state = queued
+    requires: not Busy{owner: caller}
+    requires: queued.baseline_leaf_id = null or queued.baseline_leaf_id = baseline_leaf_id
+    requires: queued.baseline_entry_count = null or queued.baseline_entry_count = baseline_entry_count
+    requires: not exists ContextCompactionCommand{command_id: command_id}
+    ensures: queued.queue_state = promoted
+    ensures: ContextCompactionCommand.created(
+        command_id: command_id,
+        owner: caller,
+        conversation_id: queued.conversation_id,
+        baseline_leaf_id: baseline_leaf_id,
+        baseline_entry_count: baseline_entry_count,
+        status: pending)
+}
+
+rule SettleContextCompaction {
+    when: CompleteContextCompaction(caller, command_id, entry_id, parent_id, entry_count)
+    let compaction = ContextCompactionCommand{command_id: command_id}
+    requires: exists compaction
+    requires: compaction.owner = caller
+    requires: compaction.status = pending
+    requires: parent_id = compaction.baseline_leaf_id
+    requires: entry_count > compaction.baseline_entry_count
+    ensures: compaction.entry_id = entry_id
+    ensures: compaction.status = settled
+    ensures: ContextUsageRefreshed(owner: caller)
 }
 
 rule RecordFirstContextUsage {
@@ -342,6 +445,11 @@ invariant OneActiveSelectionPerOwner {
             a.owner = b.owner implies a = b
 }
 
+invariant CompletedCompactionHasPiEntry {
+    for compaction in ContextCompactionCommands:
+        compaction.status = settled implies compaction.entry_id != null
+}
+
 surface OwnerConversation {
     facing selection: ActiveSelection
 
@@ -359,7 +467,6 @@ surface OwnerConversation {
         DetachTaskSession(caller, command_id)
         RetryTaskRouting(caller, command_id, operation, task_id)
         ReadTaskRouting(caller)
-        CompactContext(caller)
         ListConversations(caller)
         ReadActiveTranscript(caller)
         ReadContextUsage(caller)
@@ -394,4 +501,21 @@ surface TurnObservationFeed {
 
     @guarantee SafeFactsOnly
         -- Private reasoning and tool payloads are never supplied as public facts.
+}
+
+
+surface ContextCompactionControl {
+    facing compaction: ContextCompactionCommand
+
+    exposes:
+        compaction.command_id
+        compaction.status
+
+    provides:
+        CompactContext(caller, command_id, baseline_leaf_id, baseline_entry_count)
+        CompleteContextCompaction(caller, command_id, entry_id, parent_id, entry_count)
+        PromoteQueuedCompaction(caller, command_id, baseline_leaf_id, baseline_entry_count)
+
+    @guarantee CompactionIdentityPreserved
+        -- Retries and completion refer to the original owner compaction command.
 }

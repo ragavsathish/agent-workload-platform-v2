@@ -162,6 +162,112 @@
     (is (= (:id (session/selection s owner))
            (:conversation-id (session/context s owner)))))))
 
+(deftest session-compaction-001-rejection-does-not-create-pending-operation
+  (with-session (fn [s _ _]
+    (fresh s 1)
+    (is (= :conflict
+           (:error (session/compact! s owner "not-eligible"
+                                    {:baseline-leaf-id "leaf-0"
+                                     :baseline-entry-count 3}))))
+    (is (nil? (:compactionCommandId (session/context s owner)))))))
+
+(deftest session-compaction-002-pending-command-is-owner-lock-and-idempotent
+  (with-session (fn [s _ _]
+    (fresh s 1)
+    (turn s "usage" "enough context" :voice)
+    (session/observe! s owner "usage" {:kind :context-usage :tokens 8000
+                                        :contextWindow 16000 :estimated false
+                                        :canCompact true})
+    (finish s "usage" "eligible")
+    (let [first (session/compact! s owner "compact-a"
+                                  {:baseline-leaf-id "leaf-a"
+                                   :baseline-entry-count 8})
+          retry (session/compact! s owner "compact-a"
+                                  {:baseline-leaf-id "leaf-a"
+                                   :baseline-entry-count 8})]
+      (is (= :pending (:status first)))
+      (is (= (dissoc first :effect-claim?)
+             (assoc (dissoc retry :effect-claim?) :reused? false)))
+      (is (false? (:effect-claim? retry)))
+      (is (= "compact-a" (:compactionCommandId (session/context s owner))))
+      (is (= :busy (:error (turn s "after" "must wait" :typed))))
+      (is (= :busy (:error (fresh s 2))))
+      (is (= :busy
+             (:error (session/compact! s owner "compact-b"
+                                      {:baseline-leaf-id "leaf-b"
+                                       :baseline-entry-count 8}))))
+      (is (= :not-found (:error (session/context s other))))))))
+
+(deftest session-compaction-003-exact-pi-cursor-settles-on-replay-and-restart
+  (let [dir (room) opts {:storage-dir dir :turn-driver (fn [_] nil)}
+        s (session/open-system opts)]
+    (try
+      (fresh s 1)
+      (turn s "usage" "enough context" :voice)
+      (session/observe! s owner "usage" {:kind :context-usage :tokens 8000
+                                          :contextWindow 16000 :estimated false
+                                          :canCompact true})
+      (finish s "usage" "eligible")
+      (session/compact! s owner "compact-a"
+                        {:baseline-leaf-id "leaf-a" :baseline-entry-count 8})
+      (is (= :conflict
+             (:error (session/compact-complete! s owner "compact-a"
+                                                {:entry-id "compaction-a"
+                                                 :parent-id "wrong-leaf"
+                                                 :entry-count 9}))))
+      (is (= "pending" (:compactionStatus (session/context s owner))))
+      (is (= "leaf-a" (:compactionBaselineLeafId (session/context s owner))))
+      (is (= 8 (:compactionBaselineEntryCount (session/context s owner))))
+      (is (= {:status :completed :command-id "compact-a"}
+             (session/compact-complete! s owner "compact-a"
+                                        {:entry-id "compaction-a"
+                                         :parent-id "leaf-a"
+                                         :entry-count 9 :tokens 1200
+                                         :contextWindow 16000})))
+      (is (= "completed" (:compactionStatus (session/context s owner))))
+      (session/close-system! s)
+      (let [reopened (session/open-system opts)]
+        (try
+          (is (= "completed" (:compactionStatus (session/context reopened owner))))
+          (is (= {:status :completed :command-id "compact-a" :reused? true}
+                 (session/compact! reopened owner "compact-a"
+                                   {:baseline-leaf-id "leaf-a"
+                                    :baseline-entry-count 8})))
+          (is (= :conflict
+                 (:error (session/compact-complete! reopened owner "compact-a"
+                                                    {:entry-id "another-entry"
+                                                     :parent-id "leaf-a"
+                                                     :entry-count 9}))))
+          (turn reopened "usage-b" "more context" :typed)
+          (session/observe! reopened owner "usage-b"
+                            {:kind :context-usage :tokens 9000
+                             :contextWindow 16000 :estimated false
+                             :canCompact true})
+          (finish reopened "usage-b" "eligible again")
+          (is (= :pending
+                 (:status (session/compact! reopened owner "compact-b"
+                                            {:baseline-leaf-id "leaf-b"
+                                             :baseline-entry-count 10}))))
+          (is (= "compact-b" (:compactionCommandId (session/context reopened owner))))
+          (is (= "pending" (:compactionStatus (session/context reopened owner))))
+          (finally (session/close-system! reopened))))
+      (finally (when-not @(:closed? s) (session/close-system! s))))))
+
+(deftest session-compaction-004-owner-session-mutations-stay-locked
+  (with-session (fn [s _ _]
+    (fresh s 1)
+    (turn s "usage" "enough context" :voice)
+    (session/observe! s owner "usage" {:kind :context-usage :tokens 8000
+                                        :contextWindow 16000 :estimated false
+                                        :canCompact true})
+    (finish s "usage" "eligible")
+    (session/compact! s owner "compact-lock"
+                      {:baseline-leaf-id "leaf-a" :baseline-entry-count 8})
+    (is (= :busy (:error (session/resume! s owner "resume-lock"
+                                          (:id (session/selection s owner))))))
+    (is (= :busy (:error (session/attach! s owner "task-1" "attach-lock"))))
+    (is (= :busy (:error (session/detach! s owner "detach-lock")))))))
+
 (deftest owner-client-006-session-012-task-routing-boundary
   (with-session (fn [s calls _]
     (let [id (:id (fresh s 1))]

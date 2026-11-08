@@ -26,6 +26,8 @@ async def main() -> None:
             return httpx.Response(201, json={"id": "selected"})
         if request.url.path == "/v1/context":
             return httpx.Response(200, json={"tokens": 19, "canCompact": False})
+        if request.url.path == "/v1/context/compact":
+            return httpx.Response(200, json={"compactionStatus": "queued"})
         if request.url.path == "/v1/tasks/attach":
             return httpx.Response(200, json={"taskId": "4b860912-01a3-455b-9fa4-7a71c93500ee"})
         if request.url.path == "/v1/tasks/routing":
@@ -69,6 +71,16 @@ async def main() -> None:
         assert context.json()["tokens"] == 19
         assert forwarded[-1].headers["x-awp-owner"] == "owner@example.test"
 
+        compacted = await client.post("/v1/pi/context/compact", headers={
+            "authorization": f"Bearer {broker.BROKER_TOKEN}",
+            "x-awp-command-id": "stable-compaction-command",
+        })
+        assert compacted.status_code == 200
+        assert compacted.json()["compactionStatus"] == "queued"
+        assert forwarded[-1].url.path == "/v1/context/compact"
+        assert forwarded[-1].headers["x-awp-command-id"] == "stable-compaction-command"
+        assert forwarded[-1].headers["x-awp-owner"] == "owner@example.test"
+
         task_id = "4b860912-01a3-455b-9fa4-7a71c93500ee"
         attached = await client.post("/v1/pi/tasks/attach", headers={
             "authorization": f"Bearer {broker.BROKER_TOKEN}",
@@ -99,7 +111,7 @@ async def main() -> None:
 
         denied = await client.post("/v1/pi/chat/completions", json={})
         assert denied.status_code == 401
-        assert len(forwarded) == 6
+        assert len(forwarded) == 7
 
     await broker.app.state.http.aclose()
 

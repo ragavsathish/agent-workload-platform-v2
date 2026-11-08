@@ -150,6 +150,47 @@
                     {:kind "context-usage" :tokens 8000 :contextWindow 16000
                      :estimated false :canCompact true}})
       (is (= 50.0 (get-in (post server "context" {}) [:body :percent])))
-      (is (= "queued" (get-in (post server "compact" {:command-id "compact"}) [:body :status])))
+      (is (= "queued" (get-in (post server "compact-start" {:command-id "compact"}) [:body :status])))
       (settle server "turn" "done")
       (is (= id (get-in (post server "context" {}) [:body :conversation-id])))))))
+
+(deftest live-010-compaction-is-queued-during-an-active-turn
+  (with-service (fn [server _ _]
+    (fresh server "compaction")
+    (submit server "turn" "context" "voice")
+    (post server "observe" {:turn-id "turn" :observation
+                  {:kind "context-usage" :tokens 8000 :contextWindow 16000
+                   :estimated false :canCompact true}})
+    (let [queued (post server "compact-start" {:command-id "compact-a"})]
+      (is (= "queued" (get-in queued [:body :status])))
+      (settle server "turn" "settled")
+      (is (= "queued" (get-in (post server "context" {}) [:body :compactionStatus])))
+      (is (= "compact-a" (get-in (post server "context" {}) [:body :compactionCommandId])))))))
+
+(deftest live-011-compaction-settles-only-from-the-recorded-pi-cursor
+  (with-service (fn [server _ _]
+    (fresh server "compaction")
+    (submit server "turn" "context" "voice")
+    (post server "observe" {:turn-id "turn" :observation
+                  {:kind "context-usage" :tokens 8000 :contextWindow 16000
+                   :estimated false :canCompact true}})
+    (settle server "turn" "settled")
+    (let [started (post server "compact-start"
+                        {:command-id "compact-a" :baseline-leaf-id "leaf-a"
+                         :baseline-entry-count 8})]
+      (is (= "pending" (get-in started [:body :status])))
+      (is (= "compact-a" (get-in (post server "context" {})
+                                 [:body :compactionCommandId])))
+      (let [blocked (post server "submit"
+                          {:turn-id "other-turn" :origin "typed"
+                           :messages [{:role "user" :content "locked"}]})]
+        (is (= 409 (:status blocked)))
+        (is (= "busy" (get-in blocked [:body :error]))))
+      (is (= "completed"
+             (get-in (post server "compact-complete"
+                           {:command-id "compact-a" :entry-id "compaction-a"
+                            :parent-id "leaf-a" :entry-count 9
+                            :tokens 1200 :contextWindow 16000})
+                     [:body :status])))
+      (is (= "completed" (get-in (post server "context" {})
+                                 [:body :compactionStatus])))))))

@@ -568,12 +568,17 @@ async def pi_resume_session(
     )
 
 
-async def _pi_context_request(client: httpx.AsyncClient, method: str, path: str) -> Response:
+async def _pi_context_request(
+    client: httpx.AsyncClient, method: str, path: str, command_id: str | None = None
+) -> Response:
+    headers = _pi_headers()
+    if command_id is not None:
+        headers["x-awp-command-id"] = command_id
     try:
         response = await client.request(
             method,
             f"{_pi_service_url()}{path}",
-            headers=_pi_headers(),
+            headers=headers,
             timeout=float(os.getenv("PI_VOICE_TIMEOUT_SECONDS", "120")) + 5,
         )
     except httpx.HTTPError as exc:
@@ -599,7 +604,12 @@ async def pi_context(request: Request, _: None = Depends(authenticate)) -> Respo
 async def compact_pi_context(request: Request, _: None = Depends(authenticate)) -> Response:
     """Compact the persistent voice session after any active turn completes."""
 
-    return await _pi_context_request(request.app.state.http, "POST", "/v1/context/compact")
+    return await _pi_context_request(
+        request.app.state.http,
+        "POST",
+        "/v1/context/compact",
+        request.headers.get("x-awp-command-id"),
+    )
 
 
 @app.post("/v1/pi/turn/abort", response_model=None)

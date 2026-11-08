@@ -70,6 +70,10 @@ export type PublicContextUsage = {
   percent: number | null;
   estimated: boolean;
   canCompact: boolean;
+  compactionCommandId: string | null;
+  compactionStatus: "idle" | "queued" | "pending" | "completed" | "uncertain";
+  compactionBaselineLeafId?: string | null;
+  compactionBaselineEntryCount?: number | null;
 };
 
 type VoiceSessionState =
@@ -523,6 +527,8 @@ export class VoiceAgent {
         this.compacting,
         branch.at(-1)?.type,
       ),
+      compactionCommandId: null,
+      compactionStatus: "idle",
     };
   }
 
@@ -530,30 +536,131 @@ export class VoiceAgent {
     return await this.grain.call("context") as unknown as PublicContextUsage;
   }
 
-  async compact(): Promise<PublicContextUsage> {
-    return this.operations.run("maintenance", async () => {
-      const recorded = await this.contextSnapshot();
-      if (!recorded.canCompact) throw new Error("selected conversation cannot be compacted");
-      if (this.sessionState.kind === "closed") throw new Error("Pi voice agent is closed");
-      if (this.sessionState.kind === "unbound") {
-        await this.newSession(this.sessionState.systemPrompt);
-      }
-      const session = this.activeSession();
-      if (!session) throw new Error("Pi voice session is unavailable");
-      this.compacting = true;
-      try {
-        const result = await session.compact();
-        this.estimatedContextTokens = result.estimatedTokensAfter;
-        this.persistedContextTokens = result.estimatedTokensAfter ?? null;
-        this.persistedContextWindow = session.model?.contextWindow ?? null;
-        await this.grain.call("compact", { "command-id": randomUUID(),
-          tokens: this.persistedContextTokens,
-          contextWindow: this.persistedContextWindow });
-        return await this.contextSnapshot();
-      } finally {
-        this.compacting = false;
-      }
-    });
+  compact(commandId: string): Promise<PublicContextUsage> {
+    if (this.activeTurnId) {
+      return (async () => {
+        const queued = await this.grain.call("compact-start", {
+          "command-id": commandId,
+        });
+        if (queued.status !== "queued") {
+          throw new Error("Grain did not queue context compaction");
+        }
+        // Grain owns the durable queue. runTurn resumes it after the active turn settles.
+        return this.contextSnapshot();
+      })();
+    }
+    return this.operations.run("maintenance", () => this.compactOnce(commandId));
+  }
+
+  private compactOnce(commandId: string): Promise<PublicContextUsage> {
+    const agent = this;
+    return Effect.runPromise(
+      Effect.gen(function* () {
+        if (!/^[A-Za-z0-9_-]{1,128}$/u.test(commandId)) {
+          return yield* Effect.fail(new Error("invalid compaction command identity"));
+        }
+        if (agent.sessionState.kind === "closed") {
+          return yield* Effect.fail(new Error("Pi voice agent is closed"));
+        }
+        if (agent.sessionState.kind === "unbound") {
+          const systemPrompt = agent.sessionState.systemPrompt;
+          yield* Effect.tryPromise(() => agent.newSession(systemPrompt));
+        }
+
+        const session = agent.activeSession();
+        if (!session) return yield* Effect.fail(new Error("Pi voice session is unavailable"));
+        const manager = session.sessionManager;
+        const recorded = yield* Effect.tryPromise(() => agent.contextSnapshot());
+        const pendingId = recorded.compactionCommandId;
+        const hasPending = ["queued", "pending", "uncertain"].includes(recorded.compactionStatus);
+        if (hasPending && pendingId !== commandId) {
+          return yield* Effect.fail(new Error("another context compaction is pending"));
+        }
+        if (pendingId === commandId && recorded.compactionStatus === "completed") {
+          return yield* Effect.tryPromise(() => agent.contextSnapshot());
+        }
+        if (!hasPending && !recorded.canCompact) {
+          return yield* Effect.fail(new Error("selected conversation cannot be compacted"));
+        }
+
+        const isPendingRetry = pendingId === commandId && recorded.compactionStatus === "pending";
+        const baselineLeafId = isPendingRetry
+          ? recorded.compactionBaselineLeafId
+          : manager.getLeafId();
+        const baselineEntryCount = isPendingRetry
+          ? recorded.compactionBaselineEntryCount
+          : manager.getEntryCount();
+        if (!baselineLeafId || typeof baselineEntryCount !== "number"
+            || !Number.isInteger(baselineEntryCount) || baselineEntryCount <= 0) {
+          return yield* Effect.fail(new Error("Pi session has no compaction cursor"));
+        }
+        const started = yield* Effect.tryPromise(() => agent.grain.call("compact-start", {
+          "command-id": commandId,
+          "baseline-leaf-id": baselineLeafId,
+          "baseline-entry-count": baselineEntryCount,
+        }));
+        if (started.status === "queued") {
+          return yield* Effect.tryPromise(() => agent.contextSnapshot());
+        }
+        if (started.status === "completed") {
+          return yield* Effect.tryPromise(() => agent.contextSnapshot());
+        }
+        if (started.status !== "pending") {
+          return yield* Effect.fail(new Error("Grain did not accept context compaction"));
+        }
+
+        const proveApplied = () => {
+          const branch = manager.getBranch();
+          const tail = branch.at(-1);
+          return tail?.type === "compaction"
+            && tail.parentId === baselineLeafId
+            && manager.getEntryCount() > baselineEntryCount
+            ? tail
+            : undefined;
+        };
+        const settle = (entry: NonNullable<ReturnType<typeof proveApplied>>) =>
+          agent.grain.call("compact-complete", {
+            "command-id": commandId,
+            "entry-id": entry.id,
+            "parent-id": entry.parentId,
+            "entry-count": manager.getEntryCount(),
+            tokens: agent.persistedContextTokens,
+            contextWindow: session.model?.contextWindow ?? null,
+          });
+
+        const observed = proveApplied();
+        if (observed) {
+          yield* Effect.tryPromise(() => settle(observed));
+          return yield* Effect.tryPromise(() => agent.contextSnapshot());
+        }
+        if (started["effect-claim?"] !== true) {
+          return yield* Effect.fail(new Error(
+            "context compaction is pending but the Pi branch does not prove its outcome"));
+        }
+        if (manager.getLeafId() !== baselineLeafId
+            || manager.getEntryCount() !== baselineEntryCount) {
+          return yield* Effect.fail(new Error(
+            "Pi session changed after Grain recorded the compaction cursor"));
+        }
+
+        agent.compacting = true;
+        try {
+          const result = yield* Effect.tryPromise(() => session.compact());
+          agent.estimatedContextTokens = result.estimatedTokensAfter;
+          agent.persistedContextTokens = result.estimatedTokensAfter ?? null;
+          agent.persistedContextWindow = session.model?.contextWindow ?? null;
+          const entry = proveApplied();
+          if (!entry) {
+            return yield* Effect.fail(new Error(
+              "Pi compaction returned without the expected branch entry"));
+          }
+          yield* Effect.tryPromise(() => settle(entry));
+          return yield* Effect.tryPromise(() => agent.contextSnapshot());
+        } finally {
+          agent.compacting = false;
+        }
+      }),
+    );
   }
 
   private executeTurn(rawMessages: unknown, onDelta?: (delta: string) => void): Promise<string> {
@@ -658,6 +765,21 @@ export class VoiceAgent {
     } finally {
       this.activeTurnId = undefined;
       this.stopRequestedTurnId = undefined;
+      void this.resumeQueuedCompactionAfterTurn();
+    }
+  }
+
+  private async resumeQueuedCompactionAfterTurn(): Promise<void> {
+    try {
+      const context = await this.contextSnapshot();
+      const commandId = context.compactionStatus === "queued"
+        ? context.compactionCommandId
+        : null;
+      if (commandId) {
+        void this.operations.run("maintenance", () => this.compactOnce(commandId)).catch(() => undefined);
+      }
+    } catch {
+      // The durable queued command remains visible; a client retry can resume it.
     }
   }
 

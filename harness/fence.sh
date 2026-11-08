@@ -45,6 +45,12 @@ git -C "$TARGET" gc -q --prune=now --aggressive
 [[ -f "$TARGET/raw/v1/stack-alert-monitor.py" ]] || {
   echo "FENCE FAILED: pinned incident evidence missing" >&2; exit 1;
 }
+[[ -f "$TARGET/docs/plan/12-task-result-delivery/spec.feature" ]] || {
+  echo "FENCE FAILED: slice 12 contract missing" >&2; exit 1;
+}
+[[ -f "$TARGET/raw/v1/task-artifacts.py" ]] || {
+  echo "FENCE FAILED: pinned task artifact evidence missing" >&2; exit 1;
+}
 [[ "$(git -C "$TARGET" rev-list --all --count)" == 1 ]] || {
   echo "FENCE FAILED: prior history remains" >&2; exit 1
 }

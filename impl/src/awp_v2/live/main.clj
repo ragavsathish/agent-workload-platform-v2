@@ -13,6 +13,7 @@
             [awp-v2.tasking.api :as tasking]
             [awp-v2.tasking.commands :as task-commands]
             [awp-v2.tasking.lifecycle :as lifecycle]
+            [clojure.data.json :as json]
             [clojure.string :as str]))
 
 (defn- required [name]
@@ -25,7 +26,8 @@
   (let [workspaces (->> (str/split (or (System/getenv "AWP_ELIGIBLE_WORKSPACES") "") #",")
                         (map str/trim) (remove str/blank?) set)
         task-system (tasking/open-system {:storage-dir (required "AWP_TASKING_STORAGE_DIR")
-                                          :eligible-workspaces workspaces})
+                                          :eligible-workspaces workspaces
+                                          :workspace-roots (json/read-str (or (System/getenv "AWP_WORKSPACE_MAP_JSON") "{}"))})
         incident-source (when-let [rules-file (System/getenv "AWP_INCIDENT_RULES_FILE")]
                           (incident-adapter/adapter
                             {:alerts-url (or (System/getenv "AWP_INCIDENT_ALERTS_URL")

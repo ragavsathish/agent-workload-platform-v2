@@ -15,15 +15,35 @@ from deployment import GrainTaskClient
 def task_public(task: dict) -> dict:
     task_id = str(task.get("task-id", task.get("task_id", "")))
     progress = task.get("progress") or []
+    status = str(task.get("status", "pending"))
+    raw_result = task.get("result")
+    execution = None
+    if status == "completed" and raw_result is not None:
+        if isinstance(raw_result, dict):
+            response = raw_result.get("response") if isinstance(raw_result.get("response"), dict) else {}
+            text = response.get("text") if isinstance(response.get("text"), str) else raw_result.get("text", "Task completed.")
+            spoken = response.get("spoken") if isinstance(response.get("spoken"), str) else text
+            presentation = response.get("presentation") if response.get("presentation") in {"text", "markdown", "diagram"} else "text"
+            artifacts = raw_result.get("artifacts") if isinstance(raw_result.get("artifacts"), dict) else {}
+        else:
+            text, spoken, presentation, artifacts = str(raw_result), str(raw_result), "text", {}
+        expected = "workspace" if task.get("workspace") == "scratch" else "patch"
+        declared = [expected] if expected in artifacts else []
+        execution = {"response": {"text": str(text)[:12000], "spoken": str(spoken)[:2000],
+                                  "presentation": presentation},
+                     "artifacts": declared,
+                     "downloads": {expected: f"/v1/tasks/{task_id}/artifacts/{expected}"} if declared else {}}
     return {"id": task_id, "task_id": task_id,
             "instruction": task.get("instruction", ""),
             "workspace": task.get("workspace", ""),
-            "status": task.get("status", "pending"),
+            "status": status,
             "recovery_required": task.get("recovery-required?", False),
             "progress": [{"id": item.get("cursor", 0),
                           "spoken": item.get("summary", "Progress updated.")}
                          for item in progress],
-            "result": task.get("result")}
+            "result": {"state": status,
+                       "result": execution,
+                       "failure": str(task.get("failure"))[:2000] if task.get("failure") else None}}
 
 
 class GatewayHandler(BaseHTTPRequestHandler):
@@ -46,6 +66,16 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "audio/mp4")
         self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_artifact(self, body: bytes, filename: str, content_type: str) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Cache-Control", "private, no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -230,6 +260,30 @@ class GatewayHandler(BaseHTTPRequestHandler):
             if len(parts) == 3 and self.command == "GET":
                 task = client.call("read", {"task-id": task_id})
                 self._send(404 if "error" in task else 200, task_public(task) if "error" not in task else {"detail": "not found"})
+                return
+            if len(parts) == 5 and parts[3] == "artifacts" and self.command == "GET":
+                name = parts[4]
+                if name not in {"patch", "workspace"}:
+                    self._send(404, {"detail": "task artifact is unavailable"})
+                    return
+                request = urllib.request.Request(
+                    f"{client.base_url}/internal/task/artifact",
+                    data=json.dumps({"task-id": task_id, "name": name}).encode(),
+                    method="POST",
+                    headers={"Authorization": f"Bearer {client.token}",
+                             "X-AWP-Owner": identity, "Content-Type": "application/json"})
+                try:
+                    with urllib.request.urlopen(request, timeout=20) as response:
+                        data = response.read(16_777_217)
+                        if len(data) > 16_777_216 or len(data) != int(response.headers.get("Content-Length", "-1")):
+                            raise ValueError("invalid artifact size")
+                        self._send_artifact(data, "workspace.zip" if name == "workspace" else "changes.patch",
+                                            "application/zip" if name == "workspace" else "text/x-diff")
+                except urllib.error.HTTPError as error:
+                    error.close()
+                    self._send(404, {"detail": "task artifact is unavailable"})
+                except (ValueError, OSError):
+                    self._send(502, {"detail": "task artifact is unavailable"})
                 return
             if len(parts) == 4 and parts[3] == "progress" and self.command == "GET":
                 after = int(query.get("after", [0])[0])

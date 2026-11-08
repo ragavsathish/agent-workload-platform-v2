@@ -34,6 +34,15 @@
   (.sendResponseHeaders exchange 200 (alength body))
   (with-open [out (.getResponseBody exchange)] (.write out body)))
 
+(defn- send-task-artifact! [^HttpExchange exchange {:keys [^bytes bytes filename content-type]}]
+  (let [headers (.getResponseHeaders exchange)]
+    (.set headers "Content-Type" content-type)
+    (.set headers "Content-Disposition" (str "attachment; filename=\"" filename "\""))
+    (.set headers "Cache-Control" "private, no-store")
+    (.set headers "X-Content-Type-Options" "nosniff")
+    (.sendResponseHeaders exchange 200 (alength bytes))
+    (with-open [out (.getResponseBody exchange)] (.write out bytes))))
+
 (defn- parse-body [^HttpExchange exchange]
   (let [length (some-> (.getRequestHeaders exchange) (.getFirst "Content-Length"))]
     (when (and length (> (Long/parseLong length) max-body-bytes))
@@ -106,6 +115,8 @@
       "dispatch" (tasking/dispatch! task-system task-id (:workspace data))
       "progress" (tasking/report-progress! task-system task-id (:summary data))
       "complete" (tasking/complete! task-system task-id (:result data))
+      "capture-complete" (tasking/capture-complete! task-system task-id (:response data))
+      "artifact" (tasking/artifact task-system owner task-id (:name data))
       "fail" (tasking/fail! task-system task-id (:failure data))
       "interrupt" (tasking/interrupt! task-system task-id)
       {:error "not-found"})))
@@ -143,16 +154,18 @@
                     owner (.getFirst (.getRequestHeaders exchange) "X-AWP-Owner")]
                 (cond
                   (not= auth (str "Bearer " token)) (send! exchange 401 {:error "unauthorized"})
-                  (not (contains? #{"list" "dispatch" "progress" "complete" "fail" "interrupt"
-                                   "submit" "read" "owned-list" "abort" "retry" "owned-progress"} op))
+                  (not (contains? #{"list" "dispatch" "progress" "complete" "capture-complete" "fail" "interrupt"
+                                   "submit" "read" "owned-list" "abort" "retry" "owned-progress" "artifact"} op))
                   (send! exchange 404 {:error "not-found"})
                   :else (let [result (task-operation task-system owner op (parse-body exchange))]
-                          (send! exchange (cond
-                                            (= ::anom/not-found (::anom/category result)) 404
-                                            (= ::anom/forbidden (::anom/category result)) 403
-                                            (= ::anom/incorrect (::anom/category result)) 400
-                                            (or (:error result) (::anom/category result)) 409
-                                            :else 200) result))))
+                          (if (and (= op "artifact") (bytes? (:bytes result)))
+                            (send-task-artifact! exchange result)
+                            (send! exchange (cond
+                                              (= ::anom/not-found (::anom/category result)) 404
+                                              (= ::anom/forbidden (::anom/category result)) 403
+                                              (= ::anom/incorrect (::anom/category result)) 400
+                                              (or (:error result) (::anom/category result)) 409
+                                              :else 200) result)))))
               (catch Throwable _
                 (send! exchange 400 {:error "invalid request"})))))))
     (when knowledge-system

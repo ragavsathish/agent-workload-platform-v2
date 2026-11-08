@@ -30,7 +30,7 @@ const run = Effect.gen(function* () {
     }),
     catch: (error) => new Error(String(error)),
   });
-  yield* post("complete", { taskId, result: result.slice(0, 20_000) });
+  yield* post("capture-complete", { taskId, response: { text: result.slice(0, 12_000) } });
 });
 
 try {

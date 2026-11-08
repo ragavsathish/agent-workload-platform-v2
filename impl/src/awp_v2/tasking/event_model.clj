@@ -23,11 +23,14 @@
     :tasking/complete-task {:description "Complete controlled work." :schema [:map [:task-id :uuid] [:result :any]]
                             :reads #{:tasking/requests :tasking/lifecycle}
                             :produces #{:tasking/task-transitioned}
-                            :grain/allium [{:spec "specs/task-lifecycle.allium" :kind :rule :name "CompleteTask"}]}
+                            :grain/allium [{:spec "specs/task-lifecycle.allium" :kind :rule :name "CompleteTask"}
+                                           {:spec "specs/task-result-delivery.allium" :kind :rule :name "CaptureRepositoryPatch"}
+                                           {:spec "specs/task-result-delivery.allium" :kind :rule :name "CaptureScratchWorkspace"}]}
     :tasking/fail-task {:description "Fail controlled work." :schema [:map [:task-id :uuid] [:failure :string]]
                         :reads #{:tasking/requests :tasking/lifecycle}
                         :produces #{:tasking/task-transitioned}
-                        :grain/allium [{:spec "specs/task-lifecycle.allium" :kind :rule :name "FailTask"}]}
+                        :grain/allium [{:spec "specs/task-lifecycle.allium" :kind :rule :name "FailTask"}
+                                       {:spec "specs/task-result-delivery.allium" :kind :rule :name "FailCapture"}]}
     :tasking/interrupt-task {:description "Park interrupted work." :schema [:map [:task-id :uuid]]
                              :reads #{:tasking/requests :tasking/lifecycle}
                              :produces #{:tasking/task-transitioned}

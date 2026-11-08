@@ -44,6 +44,7 @@ python3 -m py_compile "$ROOT/impl/deployment/deployment.py" \
   "$ROOT/impl/deployment/qualify_public.py" \
   "$ROOT/impl/deployment/confirm_public_report.py"
 python3 -m unittest discover -s "$ROOT/impl/deployment" -p test_deployment.py -v
+python3 -m unittest discover -s "$ROOT/impl/deployment" -p test_artifact_delivery.py -v
 python3 -m unittest discover -s "$ROOT/impl/knowledge-migration" -p test_snapshot.py -v
 if command -v docker >/dev/null 2>&1; then
   AWP_PUBLIC_EDGE_ENV="$ROOT/impl/deployment/edge.env.example" \

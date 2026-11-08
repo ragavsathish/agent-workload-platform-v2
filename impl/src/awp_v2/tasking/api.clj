@@ -8,6 +8,7 @@
             [ai.obney.grain.query-processor.interface :as qp]
             [ai.obney.grain.read-model-processor-v2.interface :as rmp]
             [awp-v2.tasking.commands]
+            [awp-v2.tasking.artifacts :as artifacts]
             [awp-v2.tasking.event-model]
             [awp-v2.tasking.lifecycle :as lifecycle]
             [awp-v2.tasking.queries]
@@ -29,6 +30,7 @@
                                 :database-file (str (io/file dir "events.sqlite"))}})
         cache (kv/start (lmdb/->KV-Store-LMDB {:storage-dir (.getPath dir) :db-name "tasking"}))]
     {:event-store store :cache cache :cache-dir dir :owned-dir? owned?
+     :artifact-dir (io/file dir "artifacts")
      :closed? (atom false)
      :tenant-id (or tenant-id
                     (java.util.UUID/nameUUIDFromBytes
@@ -87,6 +89,36 @@
 
 (defn complete! [system task-id result]
   (lifecycle/issue! system :tasking/complete-task {:task-id task-id :result result}))
+
+(declare fail!)
+(defn capture-complete! [system task-id {:keys [text spoken presentation resourceUri]}]
+  (let [task (lifecycle/task-state system task-id)]
+    (if (not= :running (:status task))
+      {::anom/category ::anom/conflict ::anom/message "task is not running"}
+      (try
+        (let [captured (artifacts/capture! system task-id (:workspace task))
+              answer (subs (or text "Task completed.") 0 (min 12000 (count (or text "Task completed."))))
+              response {:text answer
+                        :spoken (subs (or spoken answer) 0 (min 2000 (count (or spoken answer))))
+                        :presentation (or presentation "text")
+                        :resourceUri resourceUri}]
+          (complete! system task-id {:response response :artifacts captured}))
+        (catch Exception _
+          (fail! system task-id "Task artifact capture failed."))))))
+
+(defn artifact [system actor-id task-id kind]
+  (let [task (task system actor-id task-id)
+        expected (if (= "scratch" (:workspace task)) "workspace" "patch")
+        descriptor (get-in task [:result :artifacts kind])]
+    (if (or (::anom/category task)
+            (not= :completed (:status task))
+            (not= expected kind)
+            (nil? descriptor))
+      {::anom/category ::anom/not-found ::anom/message "task artifact is unavailable"}
+      (try
+        (artifacts/read! system task-id kind descriptor)
+        (catch Exception _
+          {::anom/category ::anom/not-found ::anom/message "task artifact is unavailable"})))))
 
 (defn fail! [system task-id failure]
   (lifecycle/issue! system :tasking/fail-task {:task-id task-id :failure failure}))

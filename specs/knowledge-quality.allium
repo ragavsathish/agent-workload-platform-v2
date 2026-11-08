@@ -1,0 +1,104 @@
+-- allium: 3
+-- Cites docs/plan/17-knowledge-quality/spec.feature,
+-- docs/wiki/knowledge-quality.md, and raw/v1/journal-reviewed-manifest.schema.json.
+
+entity ReviewCase {
+    case_id: String
+    owner: String
+    source_id: String
+    branch: journal | assertion | concept | relation
+    family_id: String
+    partition: development | challenge | locked_holdout | production_shadow
+    annotation_state: pending | reviewed | adjudicated | excluded
+    privacy_state: pending | passed | failed
+    expected_digest: String
+}
+
+entity QualityRun {
+    run_id: String
+    policy_id: String
+    baseline_id: String
+    candidate_id: String
+    corpus_id: String
+    partition: development | challenge | locked_holdout | production_shadow
+    state: prepared | running | passed | failed | open
+    rollback_id: String
+}
+
+entity HoldoutUse {
+    corpus_id: String
+    candidate_id: String
+    run_id: String
+}
+
+rule ApproveReviewCase {
+    when: IndependentCaseApproved(case_id, owner, source_id, branch, family_id, partition, expected_digest)
+    let item = ReviewCase{case_id: case_id}
+    requires: exists item
+    requires: item.owner = owner
+    requires: item.source_id = source_id
+    requires: item.branch = branch
+    requires: item.family_id = family_id
+    requires: item.partition = partition
+    requires: item.privacy_state = passed
+    requires: expected_digest != ""
+    ensures: item.annotation_state = reviewed
+    ensures: item.expected_digest = expected_digest
+}
+
+rule StartQualityRun {
+    when: FrozenQualityRunRequested(run_id, policy_id, baseline_id, candidate_id, corpus_id, partition, rollback_id)
+    requires: policy_id != ""
+    requires: baseline_id != ""
+    requires: candidate_id != ""
+    requires: corpus_id != ""
+    requires: rollback_id != ""
+    requires: not exists QualityRun{run_id: run_id}
+    ensures: QualityRun.created(run_id: run_id, policy_id: policy_id, baseline_id: baseline_id, candidate_id: candidate_id, corpus_id: corpus_id, partition: partition, state: prepared, rollback_id: rollback_id)
+}
+
+rule ConsumeLockedHoldout {
+    when: LockedHoldoutOpened(run_id, corpus_id, candidate_id)
+    let run = QualityRun{run_id: run_id}
+    requires: exists run
+    requires: run.partition = locked_holdout
+    requires: run.corpus_id = corpus_id
+    requires: run.candidate_id = candidate_id
+    requires: run.state = prepared
+    requires: not exists HoldoutUse{corpus_id: corpus_id}
+    ensures: HoldoutUse.created(corpus_id: corpus_id, candidate_id: candidate_id, run_id: run_id)
+    ensures: run.state = running
+}
+
+rule RecordQualityVerdict {
+    when: QualityMetricsAssessed(run_id, outcome)
+    let run = QualityRun{run_id: run_id}
+    requires: exists run
+    requires: run.state = running or run.state = prepared
+    requires: outcome = passed or outcome = failed or outcome = open
+    ensures: run.state = outcome
+}
+
+invariant HoldoutIsSingleUse {
+    for use in HoldoutUses:
+        count HoldoutUse{corpus_id: use.corpus_id} = 1
+}
+
+invariant EveryRunHasRollback {
+    for run in QualityRuns:
+        run.rollback_id != ""
+}
+
+surface OwnerKnowledgeQuality {
+    facing run: QualityRun
+    exposes:
+        run.run_id
+        run.state
+        run.policy_id
+        run.rollback_id
+    provides:
+        IndependentCaseApproved(case_id, owner, source_id, branch, family_id, partition, expected_digest)
+        FrozenQualityRunRequested(run_id, policy_id, baseline_id, candidate_id, corpus_id, partition, rollback_id)
+        LockedHoldoutOpened(run_id, corpus_id, candidate_id)
+        QualityMetricsAssessed(run_id, outcome)
+}

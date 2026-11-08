@@ -77,3 +77,5 @@ e57c51cf3f136c240c58d641990849fadd16ff6ad59d0d9f1f4e44cce1251bb2  raw/v1/task-im
 9e9a36d0e3f3dc3a0d196385ae8b55fb7a5d9349394478ae499d8f177ec5753c  raw/v1/task-execution-images.py
 1028e03d996894aa35bdb26d8a37bda21044bb0fe4ab6d0eb1652a616ed683fd  raw/v1/song-owner-server.ts
 69d6ff3567f3d82659f482535c665e220b57fe851cf253fd84cba7303e5b2ff8  raw/v1/song-pi-response.py
+9132f85b2a43aca1f5dc3a765482e7037f86a8defa2201736981fc6a492a0d7b  raw/v1/journal-reviewed-manifest.schema.json
+2afca19213fdf934fdb30853c006b2926d005ad64b0555ff4bf75feae0a02f35  raw/v1/journal-reviewed-eval-lib.mjs

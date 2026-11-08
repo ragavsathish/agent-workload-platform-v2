@@ -145,3 +145,23 @@ The existing [PR workflow](song-pr-workflow.md), [song service](song-service.py)
 | [Root README](pr-soundtrack-root-readme.md) | `README.md` | `043bfd8d73fdb0ee0022a12e84db7a547ce72187376b55e4652d01a77eb3d68a` |
 | Committed R&B audio example | `products/voice-agent/docs/assets/let-me-hear-the-work.m4a` | `2ac4c90e8f8672b91d12e86d4442dcc6ebb211c3f7076ab4870f5d39cca4af96` |
 | Committed soul audio example | `products/voice-agent/docs/assets/let-me-hear-the-work-soul-take.m4a` | `c30028aa97cd67e7000c054bc71b8afd5a1360b08194d9ad4855c787cd33db94` |
+
+## Slice 17 model quality evidence
+
+The following safe contracts are byte copies from the pinned v1 commit. The
+checked-in classifier gold fixture is intentionally not copied: its 40 cases
+and 200 transcript variants have no review, semantic-family, or split fields.
+Its source digest is `42a94ec9a53c0e27f0499f0b3d55376e068e613b3113019a360578fff0823dbc`.
+This fixture is regression material, not an independently reviewed owner corpus.
+
+| Snapshot | Original path | SHA-256 |
+| --- | --- | --- |
+| [Private review schema](journal-reviewed-manifest.schema.json) | `products/voice-agent/apps/pi-agent/digital-twin/eval/journal-reviewed-manifest.schema.json` | `9132f85b2a43aca1f5dc3a765482e7037f86a8defa2201736981fc6a492a0d7b` |
+| [Review scoring contract](journal-reviewed-eval-lib.mjs) | `products/voice-agent/apps/pi-agent/digital-twin/eval/journal-reviewed-eval-lib.mjs` | `2afca19213fdf934fdb30853c006b2926d005ad64b0555ff4bf75feae0a02f35` |
+
+The v1 ignored private-manifest directory was inspected only for structural
+metadata on 2026-11-08. It held an 80-case classifier draft with all labels
+pending and privacy review pending, and a 40-case journal draft with all
+annotations pending, all assigned to development, and privacy review pending.
+Neither is a reviewed qualification corpus. No private case or private-file
+digest was copied into this repository.

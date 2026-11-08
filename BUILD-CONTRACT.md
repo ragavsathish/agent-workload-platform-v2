@@ -42,6 +42,12 @@ are used.
   re-read and eligibility is revalidated before a pending fact is committed
   and Pi is called. If eligibility is stale, the queue settles as rejected,
   releases its owner lock, and never invokes Pi.
+- The Flutter client resumes an active compaction identity from owner context
+  after reload and forwards it unchanged to the Pi compact route. Pi remains
+  the branch authority; the pinned runtime must expose stable branch entry IDs,
+  parent links, and compaction entry types so Grain settlement can be
+  reconciled. The detailed wire and proof contract is in
+  [`Slice 32`](docs/plan/32-compaction-protocol-reconstruction/plan.md).
 
 ## Evidence boundaries
 

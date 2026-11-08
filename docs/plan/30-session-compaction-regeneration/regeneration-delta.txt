@@ -14,14 +14,47 @@ This independent build was derived from the Slice 29 plan, scenarios, decisions,
 ## Remaining limits and assumptions
 
 1. **Fenced-room scope versus current v2.** The clean-room fence intentionally removed `impl/` and its dependency setup, so this independent reconstruction could not compile Grain handlers or inspect the executable AWP bootstrap. The current v2 source does contain Grain SQLite event-store/LMDB startup, schema and event-model registration, command/query/read-model loading, event-model validation, and owner projection recovery in `impl/src/awp_v2/session/api.clj`. The public session API routes mutations and reads through Grain command/query processors. Existing acceptance tests prove close/reopen recovery; Slice 31 adds an explicit scenario covering owner projection rebuild and ephemeral recovery. The clean-room reconstruction therefore does not itself establish bootstrap completeness, but the bootstrap is not absent from the current v2 repository.
-2. **Trusted admission and shared mutation lock.** The command handler accepts selected/eligibility/busy flags from its caller because the slice defines those conditions but not the session read-model API or how turn, selection, attach, and detach handlers share the lock. Those values must come from trusted owner-scoped projections; client input must not control them. The Effect workflow alone cannot prove the full session mutation serialization invariant.
-3. **Pi branch proof.** v1 confirms the `getBranch()` and `compact()` calls and uses the tail `type`; D113 states that Pi branch entries expose IDs and parent IDs. The raw source does not include the dependency type declaration or establish atomic snapshot semantics. The adapter assumes `id`, `parentId`, and `type === "compaction"`, and that a proven result is exactly one entry after the persisted baseline count with its parent equal to that baseline leaf. This is conservative, explicit, and tested against the port shape, not against installed Pi.
-4. **HTTP/client integration.** Current pinned client methods use `/api/pi-context` and `/api/pi-context/compact` without an idempotency key. The Slice 29 docs require request identity retention and restoration after reload but omit field location, response schema, error semantics, key generation/reset rules, and Flutter persistence behavior. No client edits were made because those choices would invent the public protocol.
+2. **Trusted admission and shared mutation lock in the fenced
+   reconstruction.** Its reconstructed command handler accepts selected,
+   eligibility, and busy facts as inputs because the permitted docs did not
+   specify the session read-model API or common mutation boundary. Current v2
+   reads `:session/state` through `rmp/project` in
+   [`read_models.clj`](../../../impl/src/awp_v2/session/read_models.clj),
+   obtains the owner projection, checks the trusted `actor-id` against the
+   command owner, and derives selection, eligibility, busy state, and
+   attachment from that projection in
+   [`commands.clj`](../../../impl/src/awp_v2/session/commands.clj). Appended
+   facts carry an owner tag and compare-and-swap against the projected event
+   revision. Session acceptance coverage checks mutation exclusion while
+   compaction is pending and cross-owner isolation. Slice 32 maps this current
+   implementation evidence; reconstructing those seams from durable inputs
+   remains an open documentation gap.
+3. **Pi branch proof in the fenced reconstruction.** The permitted v1 source
+   confirms branch inspection and the compaction call, but did not include
+   current v2's Pi package declaration. Therefore the clean-room agent could
+   not verify the types against the installed package or prove snapshot
+   semantics. Current v2 pins Pi 1.2.0; its declarations and live protocol test
+   verify the `id`, `parentId`, `type === "compaction"`, baseline leaf, and
+   entry-count checks. These observations do not establish an atomic snapshot.
+   See [Slice 32](../32-compaction-protocol-reconstruction/plan.md).
+4. **HTTP/client integration in the fenced reconstruction.** The permitted
+   pinned v1 client evidence does not establish the current v2 idempotency
+   protocol, so the independent reconstruction could not derive its exact
+   fields and recovery behavior. Current v2 implements and tests the public
+   `GET /api/pi-context` and `POST /api/pi-context/compact` routes, forwards
+   `x-awp-command-id`, and restores queued/pending/uncertain IDs from Grain
+   context after page reload. The current contract and test mapping are in
+   [Slice 32](../32-compaction-protocol-reconstruction/plan.md).
 5. **Uncertain resolution.** The contract says uncertain work stays held and cannot be reapplied but does not say whether later observation may settle it or how an operator safely releases it. The reconstruction treats uncertainty as terminal and lock-holding.
 
 ## Remaining reconstruction limits
 
-The clean-room reconstruction still cannot recover the trusted owner key contract or shared owner lock integration from permitted sources; Pi branch-entry types and snapshot consistency evidence; HTTP/client idempotency wire and reload persistence; or a safe operator resolution path for indefinitely uncertain effects. The current v2 implementation may satisfy some of these, but they require separate evidence audits and are not established by this clean-room run.
+The clean-room reconstruction still cannot recover the trusted owner key
+contract or shared owner lock integration from permitted sources, nor establish
+an atomic Pi snapshot or a safe operator resolution path for indefinitely
+uncertain effects. Current v2's Pi type, client wire, and reload identity
+behavior are documented and test-mapped in Slice 32; their absence from the
+fenced reconstruction is not evidence that they are absent from v2.
 
 ## Checks
 
@@ -57,3 +90,21 @@ the executable close/reopen acceptance evidence for projection reconstruction,
 owner isolation, and recovery of an unfinished turn and ephemeral task route.
 This proves the repository's system API path, not a separately deployed
 multi-process restart or external storage failover.
+
+## Slice 32 disposition
+
+Current v2 pins `@earendil-works/pi-coding-agent` 1.2.0 and uses its session
+branch/entry declarations in the compaction proof. The runtime protocol test
+reopens the persisted Pi session after Grain settlement loss, checks the
+compaction entry's `type` and `parentId`, and proves reconciliation does not
+invoke Pi a second time. The Flutter client retries with the same command ID
+and recovers it after reload from owner context. The precise contract and test
+mapping are recorded in Slice 32. These current-v2 facts were not derivable
+from the clean-room input set, which intentionally removed the runtime code,
+dependency declarations, and Flutter client.
+
+Current v2 also reads compaction admission state from the owner projection and
+serializes event append through the owner tag and compare-and-swap predicate;
+the fenced reconstruction's caller-supplied admission values are not a
+description of the implementation. This evidence is mapped in Slice 32, but
+the durable rules still need to be detailed enough for an independent rebuild.

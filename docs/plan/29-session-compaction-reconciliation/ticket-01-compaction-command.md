@@ -1,8 +1,8 @@
 # Make context compaction a reconciled command
 
 Cites the [slice plan](plan.md), [scenarios](spec.feature), root
-[build contract](../../BUILD-CONTRACT.md), pinned [AWP v1 source inventory](../../raw/v1/manifest.md),
-and pinned [ORC examples](../../raw/orc/manifest.md).
+[build contract](../../../BUILD-CONTRACT.md), pinned [AWP v1 source inventory](../../../raw/v1/manifest.md),
+and pinned [ORC examples](../../../raw/orc/manifest.md).
 
 Carry a stable command identity from the client to owner event store. Persist a pending
 command and Pi branch cursor before the effect, serialize owner session

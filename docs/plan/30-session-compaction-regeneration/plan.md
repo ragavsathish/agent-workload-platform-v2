@@ -26,7 +26,7 @@ docs. Pinned source snapshots provide historical or substrate evidence only.
 - Slice 29 plan, scenario, wiki, and formal session contract agree on the
   queue/promote and stale-context rejection flow.
 - Slice 29 plan and ticket cite durable `raw/` evidence and the persistent
-  root-level [build contract](../../BUILD-CONTRACT.md), never deleted `impl/`
+  root-level [build contract](../../../BUILD-CONTRACT.md), never deleted `impl/`
   files.
 - The build contract preserves the selected architecture and records only the
   runtime ownership, bootstrap, projection, and lock requirements needed for

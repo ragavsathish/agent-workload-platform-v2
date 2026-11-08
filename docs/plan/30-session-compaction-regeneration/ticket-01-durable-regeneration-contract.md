@@ -1,9 +1,9 @@
 # Close the session compaction regeneration gaps
 
 Use the [Slice 30 plan](plan.md), [acceptance scenarios](spec.feature), the
-[root build contract](../../BUILD-CONTRACT.md),
-[pinned AWP v1 evidence](../../raw/v1/manifest.md), and
-[pinned ORC evidence](../../raw/orc/manifest.md).
+[root build contract](../../../BUILD-CONTRACT.md),
+[pinned AWP v1 evidence](../../../raw/v1/manifest.md), and
+[pinned ORC evidence](../../../raw/orc/manifest.md).
 
 Update Slice 29's durable acceptance wording to queue an active-turn request
 under its original command identity, promote it after turn settlement, and

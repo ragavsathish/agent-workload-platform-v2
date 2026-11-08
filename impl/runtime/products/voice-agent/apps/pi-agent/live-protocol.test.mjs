@@ -43,7 +43,7 @@ async function waitForGrain(port, process) {
   throw new Error("Grain bridge did not start");
 }
 
-test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @routing-005 @routing-006 Pi route and Grain process journey", async (t) => {
+test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @routing-005 @routing-006 @session-compaction-protocol-005 Pi route and Grain process journey", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "awp-v2-live-protocol-"));
   const socketDir = await mkdtemp("/tmp/awp-live-sock-");
   t.after(() => rm(socketDir, { recursive: true, force: true }));
@@ -267,10 +267,8 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
   const compactManager = compactableSession.sessionManager;
   const compactionBaselineLeafId = compactManager.getLeafId();
   let controlledCompactions = 0;
-  let controlledCompactionBaseline;
   compactableSession.compact = async () => {
     controlledCompactions += 1;
-    controlledCompactionBaseline = compactManager.getLeafId();
     compactManager.appendCompaction("controlled summary", null, 50_000);
     return { estimatedTokensAfter: 1_000 };
   };
@@ -329,6 +327,8 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
   await grainClient.call("settle", {
     "turn-id": "protocol-queue-eligibility", status: "completed", answer: "eligible again",
   });
+  const branchCompactionsBeforeQueue = compactManager.getBranch()
+    .filter((entry) => entry.type === "compaction").length;
   const queuedTurnPromise = call("POST", "/v1/turn", { messages: [
     { role: "system", content: "Answer briefly." }, { role: "user", content: "slow" },
   ] }, { "x-awp-turn-id": "protocol-queued-turn", "x-awp-origin": "typed" });
@@ -350,13 +350,13 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
     queuedCompletion = (await call("GET", "/v1/context")).body;
   }
-  assert.equal(queuedCompletion.compactionStatus, "completed");
-  assert.equal(queuedCompletion.compactionCommandId, "protocol-compact-queued");
-  assert.equal(controlledCompactions, 2);
-  assert.notEqual(controlledCompactionBaseline, compactionBaselineLeafId);
+  assert.equal(queuedCompletion.compactionStatus, "rejected", JSON.stringify(queuedCompletion));
+  assert.equal(queuedCompletion.compactionCommandId, null);
+  assert.equal(queuedCompletion.canCompact, false);
+  assert.equal(controlledCompactions, 1);
   const queuedBranch = compactManager.getBranch();
-  assert.equal(queuedBranch.at(-1).type, "compaction");
-  assert.equal(queuedBranch.at(-1).parentId, controlledCompactionBaseline);
+  assert.equal(queuedBranch.filter((entry) => entry.type === "compaction").length,
+    branchCompactionsBeforeQueue);
 
   const transcript = await call("GET", "/v1/transcript");
   assert.deepEqual(transcript.body.entries.map((entry) => entry.text),

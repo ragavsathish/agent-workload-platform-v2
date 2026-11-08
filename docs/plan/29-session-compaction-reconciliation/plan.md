@@ -2,8 +2,8 @@
 
 Cites the [session orchestration rules](../../wiki/session-orchestration.md),
 the [session CQRS slice](../03-session-orchestration/plan.md), the durable
-[build contract](../../BUILD-CONTRACT.md), the pinned [AWP source inventory](../../raw/v1/manifest.md),
-and pinned [ORC evidence](../../raw/orc/manifest.md).
+[build contract](../../../BUILD-CONTRACT.md), the pinned [AWP source inventory](../../../raw/v1/manifest.md),
+and pinned [ORC evidence](../../../raw/orc/manifest.md).
 
 ## Goal
 
@@ -49,6 +49,9 @@ external provider call that did not append a Pi compaction entry.
   a successful command clears that key for the next deliberate compaction.
   After page reload, the owner-scoped context query exposes the pending command
   identity/status so the client can resume it rather than inventing a new one.
+- The implemented owner protocol and Pi branch proof are pinned in the
+  [Slice 32 contract](../32-compaction-protocol-reconstruction/plan.md), with
+  Flutter retry/reload and Pi restart evidence mapped to their tests.
 
 ## Documents
 

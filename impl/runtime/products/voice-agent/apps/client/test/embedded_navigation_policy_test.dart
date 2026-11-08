@@ -1,10 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:voice_agent_client/platform/embedded_navigation_policy.dart';
+import 'package:voice_agent_client/platform/native_permission_policy.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 void main() {
   final trustedOrigin = Uri.parse('https://voice.example.test/');
 
-  test('allows paths and query parameters on the trusted origin', () {
+  test('@owner-client-010 allows private paths and query parameters on the trusted origin', () {
     expect(
       isAllowedVoiceWorkspaceNavigation(
         Uri.parse('https://voice.example.test/?view=transcript'),
@@ -49,5 +51,24 @@ void main() {
       ),
       isFalse,
     );
+  });
+
+  test('@owner-client-010 requests permission only for microphone media', () {
+    expect(
+      isMicrophoneOnlyRequest(const [WebViewPermissionResourceType.microphone]),
+      isTrue,
+    );
+    expect(
+      isMicrophoneOnlyRequest(const [WebViewPermissionResourceType.camera]),
+      isFalse,
+    );
+    expect(
+      isMicrophoneOnlyRequest(const [
+        WebViewPermissionResourceType.microphone,
+        WebViewPermissionResourceType.camera,
+      ]),
+      isFalse,
+    );
+    expect(isMicrophoneOnlyRequest(const []), isFalse);
   });
 }

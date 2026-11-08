@@ -4,3 +4,4 @@ build/
 .packages
 .flutter-plugins
 .flutter-plugins-dependencies
+web/voice-runtime/

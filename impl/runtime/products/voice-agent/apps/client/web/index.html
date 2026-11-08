@@ -41,6 +41,12 @@
     For more details:
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
-  <script src="flutter_bootstrap.js" async></script>
+  <script type="module">
+    import './voice-runtime/voice_bridge.js';
+    const bootstrap = document.createElement('script');
+    bootstrap.src = 'flutter_bootstrap.js';
+    bootstrap.async = true;
+    document.body.append(bootstrap);
+  </script>
 </body>
 </html>

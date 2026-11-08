@@ -90,7 +90,7 @@ void main() {
   });
 
   testWidgets(
-    'successful chat is not reported as failed when autoplay is blocked',
+    '@owner-client-003 successful typed chat is not reported as failed when autoplay is blocked',
     (tester) async {
       final api = _FakeVoiceApi();
 
@@ -120,46 +120,49 @@ void main() {
     },
   );
 
-  testWidgets('desktop keeps tasks separate from the conversation', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1180, 820);
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final api = _FakeVoiceApi()..taskValues.add(_pendingTask);
+  testWidgets(
+    '@owner-client-001 @owner-client-006 desktop owner workspace keeps tasks separate without direct routing controls',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1180, 820);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _FakeVoiceApi()..taskValues.add(_pendingTask);
 
-    await tester.pumpWidget(MaterialApp(home: TranscriptView(api: api)));
-    await tester.pump();
+      await tester.pumpWidget(MaterialApp(home: TranscriptView(api: api)));
+      await tester.pump();
 
-    expect(find.byKey(const Key('conversation-section')), findsOneWidget);
-    expect(find.byKey(const Key('task-pending-1')), findsNothing);
+      expect(find.byKey(const Key('conversation-section')), findsOneWidget);
+      expect(find.byKey(const Key('task-pending-1')), findsNothing);
 
-    await tester.tap(find.byKey(const Key('tasks-section')));
-    await tester.pump();
+      await tester.tap(find.byKey(const Key('tasks-section')));
+      await tester.pump();
 
-    expect(find.byKey(const Key('task-board')), findsOneWidget);
-    expect(find.byKey(const Key('task-pending-1')), findsOneWidget);
-    expect(find.text('Kind of Blue'), findsWidgets);
-    expect(find.text('Miles Davis'), findsOneWidget);
-    expect(find.byKey(const Key('task-spotify-pending-1')), findsOneWidget);
-    expect(find.text('Listen to agent'), findsOneWidget);
-    final spotifyWraps = find.ancestor(
-      of: find.byKey(const Key('task-spotify-pending-1')),
-      matching: find.byType(Wrap),
-    );
-    final narrationWraps = find.ancestor(
-      of: find.byKey(const Key('task-narration-pending-1')),
-      matching: find.byType(Wrap),
-    );
-    expect(
-      spotifyWraps.evaluate().toSet().intersection(
-        narrationWraps.evaluate().toSet(),
-      ),
-      isNotEmpty,
-    );
-    expect(find.text('Queued · now'), findsOneWidget);
-  });
+      expect(find.byKey(const Key('task-board')), findsOneWidget);
+      expect(find.byKey(const Key('task-pending-1')), findsOneWidget);
+      expect(find.byKey(const Key('task-attach-1')), findsNothing);
+      expect(find.byKey(const Key('task-detach-1')), findsNothing);
+      expect(find.text('Kind of Blue'), findsWidgets);
+      expect(find.text('Miles Davis'), findsOneWidget);
+      expect(find.byKey(const Key('task-spotify-pending-1')), findsOneWidget);
+      expect(find.text('Listen to agent'), findsOneWidget);
+      final spotifyWraps = find.ancestor(
+        of: find.byKey(const Key('task-spotify-pending-1')),
+        matching: find.byType(Wrap),
+      );
+      final narrationWraps = find.ancestor(
+        of: find.byKey(const Key('task-narration-pending-1')),
+        matching: find.byType(Wrap),
+      );
+      expect(
+        spotifyWraps.evaluate().toSet().intersection(
+          narrationWraps.evaluate().toSet(),
+        ),
+        isNotEmpty,
+      );
+      expect(find.text('Queued · now'), findsOneWidget);
+    },
+  );
 
   testWidgets('mobile switches to tasks without changing the voice surface', (
     tester,
@@ -570,29 +573,30 @@ void main() {
     expect(find.text('Download status'), findsNothing);
   });
 
-  testWidgets('creates a durable task through the existing task API', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1180, 820);
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final api = _FakeVoiceApi();
+  testWidgets(
+    '@owner-client-005 creates a durable task through the existing task API',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1180, 820);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _FakeVoiceApi();
 
-    await tester.pumpWidget(MaterialApp(home: TranscriptView(api: api)));
-    await tester.pump();
-    await tester.tap(find.byKey(const Key('new-task')));
-    await tester.pump();
-    await tester.enterText(
-      find.byKey(const Key('new-task-instruction')),
-      'Audit the release',
-    );
-    await tester.tap(find.byKey(const Key('submit-new-task')));
-    await tester.pump();
+      await tester.pumpWidget(MaterialApp(home: TranscriptView(api: api)));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('new-task')));
+      await tester.pump();
+      await tester.enterText(
+        find.byKey(const Key('new-task-instruction')),
+        'Audit the release',
+      );
+      await tester.tap(find.byKey(const Key('submit-new-task')));
+      await tester.pump();
 
-    expect(api.createdTasks, ['Audit the release']);
-    expect(find.byKey(const Key('task-board')), findsOneWidget);
-  });
+      expect(api.createdTasks, ['Audit the release']);
+      expect(find.byKey(const Key('task-board')), findsOneWidget);
+    },
+  );
 }
 
 class _FakeVoiceApi extends VoiceApi {
@@ -606,10 +610,8 @@ class _FakeVoiceApi extends VoiceApi {
   bool narrationFails = false;
 
   @override
-  Uri taskArtifactUrl(String taskId, String name) => Uri.https(
-    'voice-fixture.ts.net',
-    '/api/tasks/$taskId/artifacts/$name',
-  );
+  Uri taskArtifactUrl(String taskId, String name) =>
+      Uri.https('voice-fixture.ts.net', '/api/tasks/$taskId/artifacts/$name');
 
   @override
   Future<TranscriptSnapshot> transcript() async =>

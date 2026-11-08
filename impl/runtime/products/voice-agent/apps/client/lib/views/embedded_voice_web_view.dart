@@ -8,6 +8,7 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
 import '../platform/embedded_navigation_policy.dart';
+import '../platform/native_permission_policy.dart';
 
 class EmbeddedVoiceWebView extends StatefulWidget {
   const EmbeddedVoiceWebView({super.key});
@@ -102,12 +103,7 @@ class _EmbeddedVoiceWebViewState extends State<EmbeddedVoiceWebView> {
   Future<void> _handlePagePermissionRequest(
     WebViewPermissionRequest request,
   ) async {
-    final microphoneOnly =
-        request.types.isNotEmpty &&
-        request.types.every(
-          (type) => type == WebViewPermissionResourceType.microphone,
-        );
-    if (!microphoneOnly) {
+    if (!isMicrophoneOnlyRequest(request.types)) {
       await request.deny();
       return;
     }

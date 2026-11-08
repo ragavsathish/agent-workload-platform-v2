@@ -92,7 +92,7 @@
       (is (= #{"workspace"} (set (keys (:artifacts result)))))
       (is (not (re-find #"s3://|source-uri|rawEvents" (pr-str result))))))))
 
-(deftest artifact-006-owner-boundary
+(deftest owner-client-007-artifact-006-owner-boundary
   (fixture "scratch" (fn [_ dir sys id _]
     (spit (io/file dir "note.txt") "work")
     (capture! sys id "Done")
@@ -106,7 +106,7 @@
     (is (= ::anom/not-found (::anom/category (artifact sys owner (UUID/randomUUID) "workspace"))))
     (is (= ::anom/not-found (::anom/category (artifact sys owner id "execution")))))))
 
-(deftest artifact-008-loss-is-separate
+(deftest owner-client-007-artifact-008-loss-is-separate
   (fixture "scratch" (fn [root dir sys id _]
     (spit (io/file dir "note.txt") "work")
     (capture! sys id "Done")

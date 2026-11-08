@@ -10,11 +10,13 @@ allium check specs
 "$ROOT/impl/test.sh"
 (cd "$ROOT/impl" && clojure -M:verify)
 CLIENT="$ROOT/impl/runtime/products/voice-agent/apps/client"
+pnpm --dir "$ROOT/impl/runtime" install --frozen-lockfile --ignore-scripts
+pnpm --dir "$ROOT/impl/runtime" --filter @agent-workload-platform/voice-agent-client run build:bridge
+pnpm --dir "$ROOT/impl/runtime" --filter @agent-workload-platform/voice-agent-client run test:bridge-security
 (cd "$CLIENT" && ./tool/flutterw pub get --enforce-lockfile)
 (cd "$CLIENT" && ./tool/flutterw analyze)
 (cd "$CLIENT" && ./tool/flutterw test)
 (cd "$CLIENT" && ./tool/flutterw build web --wasm --release)
-pnpm --dir "$ROOT/impl/runtime" install --frozen-lockfile --ignore-scripts
 pnpm --dir "$ROOT/impl/runtime" run build
 node --test "$ROOT/impl/runtime/platform/agent-execution/pi-durable-task/song-lyric-owner.test.mjs"
 pnpm --dir "$ROOT/impl/runtime/products/voice-agent/apps/pi-agent" exec node --test live-protocol.test.mjs knowledge-worker.test.mjs knowledge-quality.test.mjs knowledge-quality-v2.test.mjs song-worker.test.mjs

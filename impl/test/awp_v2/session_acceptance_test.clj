@@ -137,7 +137,7 @@
         (is (every? #(and (string? (:id %)) (integer? (:timestamp %)))
                     (:entries view))))))))
 
-(deftest session-010-stop-retains-selection
+(deftest owner-client-004-session-010-stop-retains-selection
   (with-session (fn [s _ _]
     (let [id (:id (fresh s 1))]
       (turn s "t1" "stop" :voice)
@@ -148,7 +148,7 @@
       (finish s "t2" "okay")
       (is (some #{"later"} (texts (session/transcript s owner))))))))
 
-(deftest session-011-context-maintenance-serialized
+(deftest owner-client-008-session-011-context-maintenance-serialized
   (with-session (fn [s _ _]
     (fresh s 1)
     (turn s "t1" "wait" :voice)
@@ -162,7 +162,7 @@
     (is (= (:id (session/selection s owner))
            (:conversation-id (session/context s owner)))))))
 
-(deftest session-012-task-routing-boundary
+(deftest owner-client-006-session-012-task-routing-boundary
   (with-session (fn [s calls _]
     (let [id (:id (fresh s 1))]
       (session/attach! s owner "task-1")
@@ -179,7 +179,7 @@
     (is (nil? (:task-id (session/routing s owner))))
     (is (= :not-found (:error (session/attach! s other "task-1")))))))
 
-(deftest session-013-explicit-detach-restores-routing
+(deftest owner-client-006-session-013-explicit-detach-restores-routing
   (with-session (fn [s calls _]
     (let [id (:id (fresh s 1))]
       (session/attach! s owner "task-1")

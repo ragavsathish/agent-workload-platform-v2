@@ -1,0 +1,103 @@
+-- allium: 3
+-- Cites docs/plan/13-task-worker-delivery/spec.feature and docs/wiki/task-execution-delivery.md.
+
+entity DeliveryTask {
+    task_id: String
+    owner: String
+    workspace_kind: repository | scratch
+    status: pending | running | completed | failed
+    recovery_required: Boolean
+    source_identity: String?
+    workspace_identity: String?
+    answer: String?
+}
+
+entity DeliveredProduct {
+    task_id: String
+    kind: patch | workspace
+    digest: String
+    byte_length: Integer
+}
+
+rule RecordAdmittedTask {
+    when: TaskAccepted(task_id, owner, workspace_kind, source_identity)
+    requires: not exists DeliveryTask{task_id: task_id}
+    ensures: DeliveryTask.created(task_id: task_id, owner: owner, workspace_kind: workspace_kind, status: pending, recovery_required: false, source_identity: source_identity, workspace_identity: null, answer: null)
+}
+
+rule PrepareSelectedWorkspace {
+    when: WorkspacePrepared(task_id, workspace_identity)
+    let task = DeliveryTask{task_id: task_id}
+    requires: exists task
+    requires: task.status = pending
+    requires: task.recovery_required = false
+    ensures: task.workspace_identity = workspace_identity
+}
+
+rule StartSelectedTask {
+    when: TaskDispatched(task_id, workspace_identity)
+    let task = DeliveryTask{task_id: task_id}
+    requires: exists task
+    requires: task.status = pending
+    requires: task.recovery_required = false
+    requires: task.workspace_identity = workspace_identity
+    ensures: task.status = running
+}
+
+rule CompleteWithProduct {
+    when: WorkProductCaptured(task_id, workspace_identity, kind, digest, byte_length, answer)
+    let task = DeliveryTask{task_id: task_id}
+    requires: exists task
+    requires: task.status = running
+    requires: task.workspace_identity = workspace_identity
+    requires: task.workspace_kind = repository implies kind = patch
+    requires: task.workspace_kind = scratch implies kind = workspace
+    requires: byte_length >= 0
+    ensures: DeliveredProduct.created(task_id: task_id, kind: kind, digest: digest, byte_length: byte_length)
+    ensures: task.status = completed
+    ensures: task.answer = answer
+}
+
+rule FailAttempt {
+    when: TaskPreparationOrExecutionFailed(task_id)
+    let task = DeliveryTask{task_id: task_id}
+    requires: exists task
+    requires: task.status = pending or task.status = running
+    ensures: task.status = failed
+}
+
+rule InterruptLostAttempt {
+    when: WorkerLost(task_id)
+    let task = DeliveryTask{task_id: task_id}
+    requires: exists task
+    requires: task.status = running
+    ensures: task.status = pending
+    ensures: task.recovery_required = true
+}
+
+rule RetryInterruptedAttempt {
+    when: OwnerRetriedTask(task_id, owner)
+    let task = DeliveryTask{task_id: task_id}
+    requires: exists task
+    requires: task.owner = owner
+    requires: task.status = pending
+    requires: task.recovery_required = true
+    ensures: task.recovery_required = false
+}
+
+surface OwnerDelivery {
+    facing task: DeliveryTask
+    exposes:
+        task.task_id
+        task.status
+        task.answer
+        task.source_identity
+    provides:
+        TaskAccepted(task_id, owner, workspace_kind, source_identity)
+        WorkspacePrepared(task_id, workspace_identity)
+        TaskDispatched(task_id, workspace_identity)
+        WorkProductCaptured(task_id, workspace_identity, kind, digest, byte_length, answer)
+        TaskPreparationOrExecutionFailed(task_id)
+        WorkerLost(task_id)
+        OwnerRetriedTask(task_id, owner)
+}

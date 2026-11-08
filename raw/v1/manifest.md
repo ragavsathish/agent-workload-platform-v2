@@ -114,3 +114,12 @@ All snapshots below are byte copies from the pinned v1 commit named above. The a
 | [Artifact store tests](task-artifacts-test.py) | `products/voice-agent/packages/tasking/tests/infrastructure/test_artifacts.py` | `5e6959b03d3b947bc4b1ebf372027d92881501780049f2bca654dbf9178bc0f6` |
 | [Task service tests](task-service-test.py) | `products/voice-agent/packages/tasking/tests/application/test_service.py` | `01bca528522ff69c74e4cac75efda114c51ad6c18433dbe7d3de33e144a66ad2` |
 | [Owner route tests](task-gateway-test.py) | `products/voice-agent/apps/gateway/tests/test_gateway.py` | `1500d8e584945c82f4af27f05c6c62ae9c8094f5b8ba86da48ade6105d6ac24b` |
+
+## Slice 13 task execution evidence
+
+The following two files are byte copies from the same pinned v1 commit named above. They describe the conditional repository execution image handoff; an actual image build and registry are environment-dependent effects.
+
+| Snapshot | Original path | SHA-256 |
+| --- | --- | --- |
+| [Task image ensure](task-image-ensure.py) | `products/voice-agent/packages/tasking/src/voice_agent/tasking/infrastructure/ensure_execution_image.py` | `e57c51cf3f136c240c58d641990849fadd16ff6ad59d0d9f1f4e44cce1251bb2` |
+| [Task execution images](task-execution-images.py) | `products/voice-agent/packages/tasking/src/voice_agent/tasking/domain/execution_images.py` | `9e9a36d0e3f3dc3a0d196385ae8b55fb7a5d9349394478ae499d8f177ec5753c` |

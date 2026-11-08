@@ -73,3 +73,5 @@ c475eba44d3e11b7a73dec7d3cc63429aaadb0b3b1f7af2b1b4be3e98d50edf1  raw/v1/task-wo
 5e6959b03d3b947bc4b1ebf372027d92881501780049f2bca654dbf9178bc0f6  raw/v1/task-artifacts-test.py
 01bca528522ff69c74e4cac75efda114c51ad6c18433dbe7d3de33e144a66ad2  raw/v1/task-service-test.py
 1500d8e584945c82f4af27f05c6c62ae9c8094f5b8ba86da48ade6105d6ac24b  raw/v1/task-gateway-test.py
+e57c51cf3f136c240c58d641990849fadd16ff6ad59d0d9f1f4e44cce1251bb2  raw/v1/task-image-ensure.py
+9e9a36d0e3f3dc3a0d196385ae8b55fb7a5d9349394478ae499d8f177ec5753c  raw/v1/task-execution-images.py

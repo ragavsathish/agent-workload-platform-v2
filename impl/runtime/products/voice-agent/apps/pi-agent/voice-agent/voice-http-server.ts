@@ -5,6 +5,7 @@ import {
   type ServerResponse,
 } from "node:http";
 
+import { SessionConflictError } from "./grain-client.js";
 import type { PublicContextUsage } from "./voice-agent.js";
 import type { PublicTranscriptSnapshot } from "./public-transcript.js";
 import type { PublicSessionSummary } from "./voice-sessions.js";
@@ -117,6 +118,21 @@ function sendJson(
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
+}
+
+function turnFailure(error: unknown, fallback: string): {
+  status: number;
+  detail: string;
+  code?: string;
+} {
+  if (error instanceof SessionConflictError) {
+    return {
+      status: 409,
+      detail: "Session command conflicts with current state.",
+      code: "session-conflict",
+    };
+  }
+  return { status: 502, detail: fallback };
 }
 
 export function createVoiceHttpServer(options: {
@@ -241,8 +257,16 @@ export function createVoiceHttpServer(options: {
       const turnId = request.headers["x-awp-turn-id"] as string | undefined;
       const origin = request.headers["x-awp-origin"] === "typed" ? "typed" : "voice";
       if (!route.stream) {
-        const text = await telemetry.observe("pi.turn", () => agent.turn(messages, turnId, origin));
-        return sendJson(response, 200, { text });
+        try {
+          const text = await telemetry.observe("pi.turn", () => agent.turn(messages, turnId, origin));
+          return sendJson(response, 200, { text });
+        } catch (error) {
+          const failure = turnFailure(error, "Pi voice turn failed");
+          return sendJson(response, failure.status, {
+            detail: failure.detail,
+            ...(failure.code ? { code: failure.code } : {}),
+          });
+        }
       }
 
       response.writeHead(200, {
@@ -265,14 +289,19 @@ export function createVoiceHttpServer(options: {
         );
         send({ type: "done" });
       } catch (error) {
-        send({ type: "error", detail: errorMessage(error, "Pi voice turn failed") });
+        const failure = turnFailure(error, "Pi voice turn failed");
+        send({ type: "error", status: failure.status,
+          ...(failure.code ? { code: failure.code } : {}), detail: failure.detail });
       } finally {
         response.off("close", abortOnDisconnect);
         response.end();
       }
     } catch (error) {
-      const detail = errorMessage(error, "Pi voice turn failed");
-      if (!response.headersSent) sendJson(response, 502, { detail });
+      const failure = turnFailure(error, "Pi voice turn failed");
+      if (!response.headersSent) sendJson(response, failure.status, {
+        detail: failure.detail,
+        ...(failure.code ? { code: failure.code } : {}),
+      });
       else response.end();
     }
   });

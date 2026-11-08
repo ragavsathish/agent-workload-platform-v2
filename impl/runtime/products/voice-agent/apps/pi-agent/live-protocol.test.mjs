@@ -9,7 +9,7 @@ import test from "node:test";
 
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { VoiceAgent } from "./dist/voice-agent/voice-agent.js";
-import { GrainSessionClient } from "./dist/voice-agent/grain-client.js";
+import { GrainSessionClient, SessionCommandError } from "./dist/voice-agent/grain-client.js";
 import { PublicTranscript } from "./dist/voice-agent/public-transcript.js";
 import {
   closeVoiceHttpServer, createVoiceHttpServer, listenVoiceHttpServer,
@@ -123,9 +123,18 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
   await new Promise((resolveListen) => taskSocket.listen(join(socketDir, `${taskId}.sock`), resolveListen));
   t.after(() => taskSocket.close());
   let otherTaskSocketConnections = 0;
+  let routeTransitionGate;
+  let routeTransitionEntered;
   const otherTaskSocket = createSocketServer((socket) => {
     otherTaskSocketConnections += 1;
-    socket.write(`${JSON.stringify({ type: "remote_attached", taskId: otherTaskId })}\n`);
+    const announceAttachment = async () => {
+      if (routeTransitionGate) {
+        routeTransitionEntered?.();
+        await routeTransitionGate;
+      }
+      socket.write(`${JSON.stringify({ type: "remote_attached", taskId: otherTaskId })}\n`);
+    };
+    void announceAttachment();
     let buffer = "";
     socket.on("data", (chunk) => {
       buffer += chunk.toString("utf8");
@@ -211,9 +220,29 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
   await grainClient.call("settle", { "turn-id": uncertainId, status: "uncertain" });
   const uncertainRetry = await call("POST", "/v1/turn", { messages: uncertainMessages },
     { "x-awp-turn-id": uncertainId, "x-awp-origin": "typed" });
-  assert.equal(uncertainRetry.status, 502);
-  assert.match(uncertainRetry.body.detail, /uncertain/u);
+  assert.equal(uncertainRetry.status, 409);
+  assert.equal(uncertainRetry.body.code, "session-conflict");
+  assert.equal(uncertainRetry.body.detail, "Session command conflicts with current state.");
   assert.equal(modelCalls, 1);
+  for (const status of ["accepted", "failed", "interrupted"]) {
+    const turnId = `protocol-reused-${status}`;
+    const messages = [
+      { role: "system", content: "Answer briefly." },
+      { role: "user", content: `reused ${status}` },
+    ];
+    await grainClient.call("submit", { "turn-id": turnId, origin: "typed", messages });
+    if (status !== "accepted") {
+      await grainClient.call("settle", { "turn-id": turnId, status });
+    }
+    const reused = await call("POST", "/v1/turn", { messages },
+      { "x-awp-turn-id": turnId, "x-awp-origin": "typed" });
+    assert.equal(reused.status, 409, `${status} receipt must remain a conflict`);
+    assert.equal(reused.body.code, "session-conflict");
+    assert.equal(modelCalls, 1);
+    if (status === "accepted") {
+      await grainClient.call("settle", { "turn-id": turnId, status: "interrupted" });
+    }
+  }
   const invalid = await call("POST", "/v1/turn", { messages: [
     { role: "system", content: "Answer briefly." },
     { role: "invalid", content: "never dispatch" },
@@ -243,6 +272,43 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
   assert.match(voiceStream, /Pi heard spoken/u);
   assert.match(voiceStream, /"type":"done"/u);
   assert.equal(modelCalls, 2);
+  const executeTurn = agent.executeTurn.bind(agent);
+  agent.executeTurn = async () => { throw new Error("controlled provider failure"); };
+  const modelCallsBeforeProviderFailure = modelCalls;
+  const providerFailure = await call("POST", "/v1/turn", { messages: [
+    { role: "system", content: "Answer briefly." },
+    { role: "user", content: "provider failure" },
+  ] }, { "x-awp-turn-id": "protocol-provider-failure", "x-awp-origin": "typed" });
+  agent.executeTurn = executeTurn;
+  assert.equal(providerFailure.status, 502);
+  assert.equal(providerFailure.body.detail, "Pi voice turn failed");
+  assert.equal(modelCalls, modelCallsBeforeProviderFailure);
+  assert.equal((await grainClient.call("turn", {
+    "turn-id": "protocol-provider-failure",
+  })).status, "uncertain");
+  const grainCall = grainClient.call.bind(grainClient);
+  let rejectedCompletedSettlement = false;
+  grainClient.call = async (operation, data = {}) => {
+    if (!rejectedCompletedSettlement && operation === "settle"
+      && data["turn-id"] === "protocol-post-dispatch-grain-failure"
+      && data.status === "completed") {
+      rejectedCompletedSettlement = true;
+      throw new SessionCommandError(409, "busy");
+    }
+    return grainCall(operation, data);
+  };
+  const modelCallsBeforeGrainFailure = modelCalls;
+  const postDispatchGrainFailure = await call("POST", "/v1/turn", { messages: [
+    { role: "system", content: "Answer briefly." },
+    { role: "user", content: "post-dispatch grain failure" },
+  ] }, { "x-awp-turn-id": "protocol-post-dispatch-grain-failure", "x-awp-origin": "typed" });
+  grainClient.call = grainCall;
+  assert.equal(postDispatchGrainFailure.status, 502);
+  assert.equal(postDispatchGrainFailure.body.detail, "Pi voice turn failed");
+  assert.equal(modelCalls, modelCallsBeforeGrainFailure + 1);
+  assert.equal((await grainCall("turn", {
+    "turn-id": "protocol-post-dispatch-grain-failure",
+  })).status, "uncertain");
   // Seed the authoritative Grain eligibility projection from a controlled completed turn.
   const eligibilityMessages = [
     { role: "system", content: "Answer briefly." },
@@ -408,7 +474,22 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
   const blockedTurn = await call("POST", "/v1/turn", { messages: [
     { role: "system", content: "Answer briefly." }, { role: "user", content: "blocked" },
   ] }, { "x-awp-turn-id": "protocol-held-turn", "x-awp-origin": "typed" });
-  assert.notEqual(blockedTurn.status, 200);
+  assert.equal(blockedTurn.status, 409);
+  assert.equal(blockedTurn.body.code, "session-conflict");
+  assert.equal(blockedTurn.body.detail, "Session command conflicts with current state.");
+  assert.equal(modelCalls, modelCallsBeforeBlockedTurn);
+  const streamedBlockedTurn = await fetch(`${base}/v1/turn/stream`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${serviceToken}`, "x-awp-owner": owner,
+      "x-awp-turn-id": "protocol-held-stream", "x-awp-origin": "voice",
+      "content-type": "application/json" },
+    body: JSON.stringify({ messages: [
+      { role: "system", content: "Answer briefly." }, { role: "user", content: "blocked stream" },
+    ] }),
+  });
+  const blockedStreamBody = await streamedBlockedTurn.text();
+  assert.equal(streamedBlockedTurn.status, 200);
+  assert.match(blockedStreamBody, /"type":"error","status":409,"code":"session-conflict"/u);
   assert.equal(modelCalls, modelCallsBeforeBlockedTurn);
   const noProofRetry = await call("POST", "/v1/context/compact", {}, {
     "x-awp-command-id": noProofId,
@@ -432,7 +513,9 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
 
   const transcript = await call("GET", "/v1/transcript");
   assert.deepEqual(transcript.body.entries.map((entry) => entry.text),
-    ["typed", "Pi heard typed", "uncertain", "spoken", "Pi heard spoken",
+    ["typed", "Pi heard typed", "uncertain", "reused accepted", "reused failed",
+      "reused interrupted", "spoken", "Pi heard spoken", "provider failure",
+      "post-dispatch grain failure", "Pi heard post-dispatch grain failure",
       "compactable", "eligible", "compactable", "eligible again", "slow", "Pi heard slow",
       "eligible after stale request", "Pi heard eligible after stale request",
       "eligible for uncertain retry", "eligible"]);
@@ -458,6 +541,33 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
   assert.equal(failedAttach.status, 409);
   assert.equal((await call("GET", "/v1/tasks/routing")).body.taskId, taskId);
   assert.equal(taskSocketConnections, 2);
+  let releaseOtherTaskAttach;
+  let markOtherTaskAttachStarted;
+  const otherTaskAttachStarted = new Promise((resolve) => {
+    markOtherTaskAttachStarted = resolve;
+  });
+  const otherTaskAttachGate = new Promise((resolve) => {
+    releaseOtherTaskAttach = resolve;
+  });
+  routeTransitionGate = otherTaskAttachGate;
+  routeTransitionEntered = markOtherTaskAttachStarted;
+  const transitioningRoute = call("POST", "/v1/tasks/attach", { taskId: otherTaskId },
+    { "x-awp-command-id": "protocol-transition-attach" });
+  await otherTaskAttachStarted;
+  const modelCallsBeforeRoutingConflict = modelCalls;
+  const routingConflict = await call("POST", "/v1/turn", { messages: [
+    { role: "system", content: "Answer briefly." }, { role: "user", content: "route changing" },
+  ] }, { "x-awp-turn-id": "protocol-routing-conflict", "x-awp-origin": "typed" });
+  assert.equal(routingConflict.status, 409);
+  assert.equal(routingConflict.body.code, "session-conflict");
+  assert.equal(modelCalls, modelCallsBeforeRoutingConflict);
+  releaseOtherTaskAttach();
+  assert.equal((await transitioningRoute).status, 200);
+  routeTransitionGate = undefined;
+  routeTransitionEntered = undefined;
+  const restoredRoute = await call("POST", "/v1/tasks/attach", { taskId },
+    { "x-awp-command-id": "protocol-transition-restore" });
+  assert.equal(restoredRoute.status, 200);
   const modelCallsBeforeAttachedTurn = modelCalls;
   const attached = await call("POST", "/v1/turn", { messages: [
     { role: "system", content: "Answer briefly." }, { role: "user", content: "task prompt" },
@@ -475,7 +585,9 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
   assert.equal(agent.remoteTask.attachedTaskId, undefined);
   const history = await call("GET", `/v1/sessions/${selected.id}`);
   assert.deepEqual(history.body.entries.map((entry) => entry.text),
-    ["typed", "Pi heard typed", "uncertain", "spoken", "Pi heard spoken",
+    ["typed", "Pi heard typed", "uncertain", "reused accepted", "reused failed",
+      "reused interrupted", "spoken", "Pi heard spoken", "provider failure",
+      "post-dispatch grain failure", "Pi heard post-dispatch grain failure",
       "compactable", "eligible", "compactable", "eligible again", "slow", "Pi heard slow",
       "eligible after stale request", "Pi heard eligible after stale request",
       "eligible for uncertain retry", "eligible"]);
@@ -532,7 +644,8 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
   const heldTurn = await call("POST", "/v1/turn", { messages: [
     { role: "system", content: "Answer briefly." }, { role: "user", content: "held until route repair" },
   ] }, { "x-awp-turn-id": "protocol-held-routing", "x-awp-origin": "typed" });
-  assert.equal(heldTurn.status, 502);
+  assert.equal(heldTurn.status, 409);
+  assert.equal(heldTurn.body.code, "session-conflict");
   assert.equal(modelCalls, modelCallsBeforeInterrupted + 1);
   assert.deepEqual(taskPrompts, ["task prompt"]);
   const reconciled = await call("POST", "/v1/tasks/detach", {},

@@ -39,10 +39,16 @@ import { createVoiceGondolinSession } from "./voice-gondolin.js";
 import type { ServiceSettings } from "./voice-config.js";
 import { type PublicSessionSummary } from "./voice-sessions.js";
 import { RemoteTaskSession } from "./remote-task-session.js";
-import { GrainSessionClient } from "./grain-client.js";
+import {
+  GrainSessionClient, SessionCommandError, SessionConflictError, type GrainReply,
+} from "./grain-client.js";
 import { Effect } from "effect";
 
 type GondolinTools = Awaited<ReturnType<GondolinSession["codingTools"]>>;
+
+function isSessionNotFound(error: unknown): boolean {
+  return error instanceof SessionCommandError && error.code === "not-found";
+}
 type VoiceAgentSettings = Pick<
   ServiceSettings,
   | "agentDir"
@@ -181,7 +187,7 @@ export class VoiceAgent {
       const selected = await grain.call("selection");
       selectedId = String(selected.id);
     } catch (error) {
-      if (!(error instanceof Error) || error.message !== "not-found") throw error;
+      if (!isSessionNotFound(error)) throw error;
       const fresh = await grain.call("fresh", { "command-id": randomUUID() });
       selectedId = String(fresh.id);
     }
@@ -427,7 +433,7 @@ export class VoiceAgent {
     try {
       return await this.grain.call("history", { "conversation-id": sessionId }) as unknown as PublicTranscriptSnapshot;
     } catch (error) {
-      if (error instanceof Error && error.message === "not-found") return undefined;
+      if (isSessionNotFound(error)) return undefined;
       throw error;
     }
   }
@@ -471,7 +477,7 @@ export class VoiceAgent {
     try {
       recorded = await this.grain.call("history", { "conversation-id": sessionId });
     } catch (error) {
-      if (error instanceof Error && error.message === "not-found") return undefined;
+      if (isSessionNotFound(error)) return undefined;
       throw error;
     }
     const path = SessionManager.findById(this.settings.cwd, sessionId, this.settings.sessionDir);
@@ -747,25 +753,33 @@ export class VoiceAgent {
 
   private async runTurn(rawMessages: unknown, turnId: string,
     origin: "voice" | "typed", onDelta?: (delta: string) => void): Promise<string> {
-    if (this.routingBusy) throw new Error("task routing is changing; inspect routing and retry");
+    if (this.routingBusy) throw new SessionConflictError();
     const parsed = parseVoiceTurn(rawMessages);
-    const decision = await this.grain.call("submit", {
-      "turn-id": turnId, origin, messages: rawMessages,
-    });
+    let decision: GrainReply;
+    try {
+      decision = await this.grain.call("submit", {
+        "turn-id": turnId, origin, messages: rawMessages,
+      });
+    } catch (error) {
+      if (error instanceof SessionCommandError && error.statusCode === 409) {
+        throw new SessionConflictError();
+      }
+      throw error;
+    }
     if (decision.reused === true || decision["reused?"] === true) {
       if (decision.status === "completed") {
         const prior = await this.grain.call("turn", { "turn-id": turnId });
         return String(prior.answer ?? "");
       }
-      throw new Error(`turn ${String(decision.status)}; inspect before retry`);
+      throw new SessionConflictError();
     }
     if (decision["conversation-id"] !== this.currentManager().getSessionId()) {
       await this.grain.call("settle", { "turn-id": turnId, status: "uncertain" });
-      throw new Error("selected conversation context is not bound");
+      throw new SessionConflictError();
     }
     if ((decision["task-id"] ?? null) !== (this.remoteTask.attachedTaskId ?? null)) {
       await this.grain.call("settle", { "turn-id": turnId, status: "uncertain" });
-      throw new Error("task routing is not bound");
+      throw new SessionConflictError();
     }
     this.activeTurnId = turnId;
     this.stopRequestedTurnId = undefined;
@@ -825,7 +839,7 @@ export class VoiceAgent {
       try {
         await this.grain.call("stop", { "turn-id": this.activeTurnId });
       } catch (error) {
-        if (!(error instanceof Error) || error.message !== "not-found") throw error;
+        if (!isSessionNotFound(error)) throw error;
       }
     }
     if (this.remoteTask.attachedTaskId) await this.remoteTask.abort();

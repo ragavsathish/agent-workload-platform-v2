@@ -2,6 +2,20 @@ import { Effect } from "effect";
 
 export type GrainReply = Record<string, unknown>;
 
+export class SessionCommandError extends Error {
+  constructor(readonly statusCode: number, readonly code: string) {
+    super("session command failed");
+    this.name = "SessionCommandError";
+  }
+}
+
+export class SessionConflictError extends Error {
+  constructor() {
+    super("session command conflicts with current state");
+    this.name = "SessionConflictError";
+  }
+}
+
 export class GrainSessionClient {
   constructor(
     private readonly baseUrl: string,
@@ -33,14 +47,17 @@ export class GrainSessionClient {
         }));
       const result = yield* Effect.tryPromise(() => response.json() as Promise<GrainReply>);
       if (!response.ok || result.error) {
-        return yield* Effect.fail(new Error(
-          typeof result.error === "string" ? result.error : "Grain session request failed"));
+        const code = typeof result.error === "string" ? result.error : "request-failed";
+        return yield* Effect.fail(new SessionCommandError(response.status, code));
       }
       return result;
     });
   }
 
   call(operation: string, data: GrainReply = {}): Promise<GrainReply> {
-    return Effect.runPromise(this.callEffect(operation, data));
+    return Effect.runPromise(Effect.either(this.callEffect(operation, data))).then((result) => {
+      if (result._tag === "Left") throw result.left;
+      return result.right;
+    });
   }
 }

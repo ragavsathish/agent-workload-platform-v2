@@ -17,3 +17,9 @@ The owner can attach a currently eligible durable task through the conversation'
 ## Observable completion
 
 A successful owner turn has an accepted routing identity, safe streamed or final observations, and a settled result. A failure after acceptance remains inspectable with its uncertainty and never silently resubmits the effect. Owner reads after a restart recover the selected identity and saved public history; a lost live task connection is reported as detached. See the [slice 03 decisions](../plan/03-session-orchestration/decisions.md) and [source service tests](../../raw/v1/voice-service.test.mjs).
+
+An owner-session command refused before Pi dispatch because the session is held,
+another turn is active, or routing is changing returns HTTP 409 with a bounded
+conflict detail. A streamed refusal is reported in its error event with status
+409. Pi and provider failures after command acceptance remain HTTP 502 and can
+leave an inspectable uncertain outcome; refusal never invokes the model.

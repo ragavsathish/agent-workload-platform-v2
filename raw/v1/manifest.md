@@ -90,3 +90,15 @@ All snapshots below are byte copies from the same pinned v1 commit named above.
 | [Personal song: song-pr-workflow.md](song-pr-workflow.md) | `docs/wow/pull-request-soundtrack-workflow.md` | `704aa42d7a6c6a3a902f98f2c0baf3395c70fe87730dc895e84d56c7a5b1942f` |
 | [Personal song: song-prompt.md](song-prompt.md) | `products/voice-agent/apps/pi-agent/voice-agent/prompts/music/APPEND_SYSTEM.md` | `02d973ccf9f20c62e190af35dd5422e4cb1b3e66ff1722bd5d65c87aef302953` |
 | [Personal song: song-gateway.py](song-gateway.py) | `products/voice-agent/apps/gateway/src/voice_gateway/main.py` | `e1938eb224cd9d37a69f107ea82d950f6accfd6e3249a7d860f711e8f510eb93` |
+
+## Slice 11 evidence
+
+All snapshots below are byte copies from the same pinned v1 commit named above.
+
+| Snapshot | Original path | SHA-256 |
+| --- | --- | --- |
+| [Incident monitor](stack-alert-monitor.py) | `products/voice-agent/tools/ops/stack_alert_monitor.py` | `90fc289408f6b5f2c0d212e56b44553a3437d404a5ae86eae0d186b2e204ef25` |
+| [Incident monitor tests](stack-alert-monitor-test.py) | `products/voice-agent/tests/tools/test_stack_alert_monitor.py` | `030cd018315509e8de55b2175d555c62150e09d5152eaa9f7f34d2d80836fab1` |
+| [Managed alert rules](stack-alerts.json) | `products/voice-agent/deploy/observability/stack-alerts.json` | `7b3da8c847184b80ddafe9f5a7b8322a188c137552b0d89e14e8bf171524a287` |
+| [Monitor service](stack-alert-monitor-service.plist) | `products/voice-agent/deploy/launchd/com.sathish.pipecat-stack-alert-monitor.plist` | `2ae55f0ba2b4360440522ee0b118ed9c6cc6ed0b127deb9a0b3ca29f1ca93420` |
+| [C4 incident contract](c4-operational-incidents.feature) | `docs/spec/contexts/c4-operational-incidents/spec.feature` | `72257eac54cf7ba55d56f6b678e2d43e250a035d2ee6612c199fdcafa687eaa8` |

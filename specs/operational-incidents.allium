@@ -1,0 +1,138 @@
+-- allium: 3
+-- Cites docs/plan/11-operational-incidents/spec.feature and docs/wiki/operational-incidents.md.
+
+entity ManagedRule {
+    rule_id: String
+    enabled: Boolean
+}
+
+entity IncidentEpoch {
+    epoch_id: String
+    owner: String
+    rule_id: String
+    fingerprint: String
+    first_seen: Integer
+    last_seen: Integer
+    active: Boolean
+    request_id: String
+    instruction_digest: String
+    submission_status: String
+}
+
+entity AlertObservation {
+    observation_id: String
+    owner: String
+    succeeded: Boolean
+}
+
+entity AlertSourceHealth {
+    owner: String
+    consecutive_failures: Integer
+    freshness: String
+}
+
+entity InvestigationView {
+    epoch_id: String
+    owner: String
+    task_id: String?
+    task_status: String
+    finding_status: String
+}
+
+rule OpenManagedIncident {
+    when: EligibleAlertObserved(epoch_id, owner, rule_id, fingerprint, first_seen, request_id, instruction_digest)
+    let rule = ManagedRule{rule_id: rule_id}
+    requires: exists rule
+    requires: rule.enabled = true
+    requires: not exists IncidentEpoch{epoch_id: epoch_id}
+    ensures: IncidentEpoch.created(epoch_id: epoch_id, owner: owner, rule_id: rule_id, fingerprint: fingerprint, first_seen: first_seen, last_seen: first_seen, active: true, request_id: request_id, instruction_digest: instruction_digest, submission_status: "pending")
+}
+
+rule RetainRepeatedIncident {
+    when: RepeatAlertObserved(epoch_id, owner, observed_at)
+    let incident = IncidentEpoch{epoch_id: epoch_id}
+    requires: exists incident
+    requires: incident.owner = owner
+    requires: incident.active = true
+    ensures: incident.last_seen = observed_at
+}
+
+rule ResolveAbsentIncident {
+    when: AlertAbsentFromSuccessfulObservation(epoch_id, owner, observation_id)
+    let incident = IncidentEpoch{epoch_id: epoch_id}
+    let observation = AlertObservation{observation_id: observation_id}
+    requires: exists incident
+    requires: exists observation
+    requires: incident.owner = owner
+    requires: observation.owner = owner
+    requires: observation.succeeded = true
+    requires: incident.active = true
+    ensures: incident.active = false
+}
+
+rule RecordAlertSourceFailure {
+    when: AlertListUnavailable(owner)
+    let health = AlertSourceHealth{owner: owner}
+    requires: exists health
+    ensures: health.consecutive_failures = health.consecutive_failures + 1
+    ensures: health.freshness = "stale"
+}
+
+rule RecordAlertSourceRecovery {
+    when: AlertListAvailable(owner)
+    let health = AlertSourceHealth{owner: owner}
+    requires: exists health
+    ensures: health.consecutive_failures = 0
+    ensures: health.freshness = "current"
+}
+
+rule ConfirmInvestigationTask {
+    when: TaskAdmissionConfirmed(epoch_id, owner, task_id)
+    let incident = IncidentEpoch{epoch_id: epoch_id}
+    requires: exists incident
+    requires: incident.owner = owner
+    requires: incident.submission_status = "pending"
+    requires: not exists InvestigationView{epoch_id: epoch_id}
+    ensures: incident.submission_status = "accepted"
+    ensures: InvestigationView.created(epoch_id: epoch_id, owner: owner, task_id: task_id, task_status: "pending", finding_status: "unjudged")
+}
+
+rule RecordInvestigationOutcome {
+    when: TaskOutcomeObserved(epoch_id, owner, task_status, finding_status)
+    let investigation = InvestigationView{epoch_id: epoch_id}
+    requires: exists investigation
+    requires: investigation.owner = owner
+    requires: investigation.task_id != null
+    ensures: investigation.task_status = task_status
+    ensures: investigation.finding_status = finding_status
+}
+
+rule ReadOwnedIncident {
+    when: IncidentRequested(epoch_id, owner)
+    let incident = IncidentEpoch{epoch_id: epoch_id}
+    requires: exists incident
+    requires: incident.owner = owner
+    ensures: IncidentPresented(epoch_id: epoch_id, owner: owner)
+}
+
+invariant StableRequestPerEpoch {
+    for a in IncidentEpochs:
+        for b in IncidentEpochs:
+            a.epoch_id = b.epoch_id implies a.request_id = b.request_id and a.instruction_digest = b.instruction_digest
+}
+
+surface IncidentCommand {
+    facing incident: IncidentEpoch
+    exposes:
+        incident.epoch_id
+        incident.request_id
+    provides:
+        EligibleAlertObserved(epoch_id, owner, rule_id, fingerprint, first_seen, request_id, instruction_digest)
+        RepeatAlertObserved(epoch_id, owner, observed_at)
+        AlertAbsentFromSuccessfulObservation(epoch_id, owner, observation_id)
+        TaskAdmissionConfirmed(epoch_id, owner, task_id)
+        TaskOutcomeObserved(epoch_id, owner, task_status, finding_status)
+        AlertListUnavailable(owner)
+        AlertListAvailable(owner)
+        IncidentRequested(epoch_id, owner)
+}

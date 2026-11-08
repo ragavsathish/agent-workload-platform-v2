@@ -24,7 +24,8 @@ reasoning, tools, credentials, and another owner's history are never exposed.
 
 The same workspace behavior is available in a browser and in a native shell.
 The shell stays on its configured private workspace. Microphone permission is
-requested only when the owner starts a spoken conversation; camera access is
-not needed. A response may contain a bounded interactive presentation, shown
-without granting it access to the workspace, owner credentials, or task
-controls.
+requested only in response to the trusted workspace requesting microphone
+media when the owner starts spoken interaction. Opening, reloading, or retrying
+the workspace does not request microphone access. Camera access is not needed.
+A response may contain a bounded interactive presentation, shown without
+granting it access to the workspace, owner credentials, or task controls.

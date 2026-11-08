@@ -19,6 +19,17 @@ class EmbeddedVoiceWebView extends StatefulWidget {
 
 class _EmbeddedVoiceWebViewState extends State<EmbeddedVoiceWebView> {
   static final Uri _workspaceUri = Uri.parse(defaultVoiceWorkspaceUrl);
+  late final NativeMicrophonePermissionBoundary _permissionBoundary =
+      NativeMicrophonePermissionBoundary(
+        requestMicrophone: () async {
+          final status = await Permission.microphone.request();
+          if (status.isGranted) return NativeMicrophoneAccessResult.granted;
+          if (status.isPermanentlyDenied) {
+            return NativeMicrophoneAccessResult.permanentlyDenied;
+          }
+          return NativeMicrophoneAccessResult.denied;
+        },
+      );
 
   late final WebViewController _controller;
   var _loading = true;
@@ -103,13 +114,10 @@ class _EmbeddedVoiceWebViewState extends State<EmbeddedVoiceWebView> {
   Future<void> _handlePagePermissionRequest(
     WebViewPermissionRequest request,
   ) async {
-    if (!isMicrophoneOnlyRequest(request.types)) {
-      await request.deny();
-      return;
-    }
-
-    final status = await Permission.microphone.request();
-    if (status.isGranted) {
+    final permissionResult = await _permissionBoundary.handlePageRequest(
+      request.types,
+    );
+    if (permissionResult == NativeMicrophoneAccessResult.granted) {
       await request.grant();
       return;
     }
@@ -118,7 +126,8 @@ class _EmbeddedVoiceWebViewState extends State<EmbeddedVoiceWebView> {
     if (mounted) {
       setState(() {
         _loading = false;
-        _error = status.isPermanentlyDenied
+        _error =
+            permissionResult == NativeMicrophoneAccessResult.permanentlyDenied
             ? 'Microphone access is disabled in system settings.'
             : 'Microphone access is required for voice conversations.';
       });
@@ -130,19 +139,9 @@ class _EmbeddedVoiceWebViewState extends State<EmbeddedVoiceWebView> {
       _loading = true;
       _error = null;
     });
-    final status = await Permission.microphone.request();
-    if (status.isGranted) {
-      await _controller.loadRequest(_workspaceUri);
-      return;
-    }
-    if (mounted) {
-      setState(() {
-        _loading = false;
-        _error = status.isPermanentlyDenied
-            ? 'Microphone access is disabled in system settings.'
-            : 'Microphone access is required for voice conversations.';
-      });
-    }
+    await _permissionBoundary.retryWorkspaceLoad(
+      () => _controller.loadRequest(_workspaceUri),
+    );
   }
 
   @override

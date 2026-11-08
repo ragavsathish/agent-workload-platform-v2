@@ -583,7 +583,8 @@ export class VoiceAgent {
           return yield* Effect.fail(new Error("selected conversation cannot be compacted"));
         }
 
-        const isPendingRetry = pendingId === commandId && recorded.compactionStatus === "pending";
+        const isPendingRetry = pendingId === commandId
+          && ["pending", "uncertain"].includes(recorded.compactionStatus);
         const baselineLeafId = isPendingRetry
           ? recorded.compactionBaselineLeafId
           : manager.getLeafId();
@@ -605,7 +606,7 @@ export class VoiceAgent {
         if (started.status === "completed") {
           return yield* Effect.tryPromise(() => agent.contextSnapshot());
         }
-        if (started.status !== "pending") {
+        if (started.status !== "pending" && started.status !== "uncertain") {
           return yield* Effect.fail(new Error("Grain did not accept context compaction"));
         }
 
@@ -627,6 +628,8 @@ export class VoiceAgent {
             tokens: agent.persistedContextTokens,
             contextWindow: session.model?.contextWindow ?? null,
           });
+        const markUncertain = (reason: "pi-outcome-unproven" | "pi-effect-failed") =>
+          agent.grain.call("compact-uncertain", { "command-id": commandId, reason });
 
         const observed = proveApplied();
         if (observed) {
@@ -634,27 +637,51 @@ export class VoiceAgent {
           return yield* Effect.tryPromise(() => agent.contextSnapshot());
         }
         if (started["effect-claim?"] !== true) {
+          yield* Effect.tryPromise(() => markUncertain("pi-outcome-unproven"));
           return yield* Effect.fail(new Error(
             "context compaction is pending but the Pi branch does not prove its outcome"));
         }
         if (manager.getLeafId() !== baselineLeafId
             || manager.getEntryCount() !== baselineEntryCount) {
+          yield* Effect.tryPromise(() => markUncertain("pi-outcome-unproven"));
           return yield* Effect.fail(new Error(
             "Pi session changed after Grain recorded the compaction cursor"));
         }
 
         agent.compacting = true;
         try {
-          const result = yield* Effect.tryPromise(() => session.compact());
+          const compactResult = yield* Effect.either(
+            Effect.tryPromise(() => session.compact()),
+          );
+          if (compactResult._tag === "Left") {
+            const error = compactResult.left;
+            const entry = proveApplied();
+            if (entry) {
+              const settlement = yield* Effect.either(Effect.tryPromise(() => settle(entry)));
+              if (settlement._tag === "Right") {
+                return yield* Effect.tryPromise(() => agent.contextSnapshot());
+              }
+              yield* Effect.tryPromise(() => markUncertain("pi-outcome-unproven"));
+              return yield* Effect.fail(error);
+            }
+            yield* Effect.tryPromise(() => markUncertain("pi-effect-failed"));
+            return yield* Effect.fail(error);
+          }
+          const result = compactResult.right;
           agent.estimatedContextTokens = result.estimatedTokensAfter;
           agent.persistedContextTokens = result.estimatedTokensAfter ?? null;
           agent.persistedContextWindow = session.model?.contextWindow ?? null;
           const entry = proveApplied();
           if (!entry) {
+            yield* Effect.tryPromise(() => markUncertain("pi-outcome-unproven"));
             return yield* Effect.fail(new Error(
               "Pi compaction returned without the expected branch entry"));
           }
-          yield* Effect.tryPromise(() => settle(entry));
+          const settlement = yield* Effect.either(Effect.tryPromise(() => settle(entry)));
+          if (settlement._tag === "Left") {
+            yield* Effect.tryPromise(() => markUncertain("pi-outcome-unproven"));
+            return yield* Effect.fail(settlement.left);
+          }
           return yield* Effect.tryPromise(() => agent.contextSnapshot());
         } finally {
           agent.compacting = false;

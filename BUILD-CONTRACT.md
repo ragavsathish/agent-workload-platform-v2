@@ -30,8 +30,11 @@ are used.
   stream before exposing reads or admitting mutations.
 - Commands that mutate an owner's session share one owner-scoped serialization
   boundary across turns, selection, task attach/detach, and compaction. Durable
-  pending or uncertain external work retains that boundary until it is safely
-  settled or explicitly resolved by a defined owner operation.
+  pending or uncertain external work retains that boundary until safely
+  settled. For Pi compaction, only the recorded branch proof settles an
+  uncertain command; when evidence is missing the owner lock remains held
+  indefinitely. Do not add a blind override without a real distributed fencing
+  guarantee.
 - Session projections are owner scoped. Context/compaction reads expose only
   the owner-visible status and identifiers defined by
   [`specs/session-orchestration.allium`](specs/session-orchestration.allium);
@@ -42,6 +45,10 @@ are used.
   re-read and eligibility is revalidated before a pending fact is committed
   and Pi is called. If eligibility is stale, the queue settles as rejected,
   releases its owner lock, and never invokes Pi.
+- Restart or an unproven Pi result records a bounded owner-visible uncertainty
+  reason while retaining the lock. The same identity may retry branch
+  reconciliation, but no second Pi compaction is claimed. The terminal hold
+  contract is in [Slice 33](docs/plan/33-compaction-uncertainty/plan.md).
 - The Flutter client resumes an active compaction identity from owner context
   after reload and forwards it unchanged to the Pi compact route. Pi remains
   the branch authority; the pinned runtime must expose stable branch entry IDs,

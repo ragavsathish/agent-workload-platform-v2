@@ -311,6 +311,77 @@
       (is (false? (:effect-claim? rejected)))
       (is (= "rejected" (:compactionStatus (session/context s owner))))))))
 
+;; @session-compaction-uncertain-001 @session-compaction-uncertain-002
+(deftest session-compaction-uncertain-001-restart-holds-lock-until-pi-proof
+  (let [dir (room)
+        opts {:storage-dir dir
+              :owned-task? (fn [actor task] (and (= actor owner) (= task "task-1")))}
+        s (session/open-system opts)]
+    (fresh s 1)
+    (turn s "uncertain-usage" "eligible" :typed)
+    (session/observe! s owner "uncertain-usage" {:kind :context-usage :tokens 8000
+                                                   :contextWindow 16000 :estimated false
+                                                   :canCompact true})
+    (finish s "uncertain-usage" "eligible")
+    (let [started (session/compact! s owner "uncertain-compact"
+                                    {:baseline-leaf-id "uncertain-leaf"
+                                     :baseline-entry-count 12})]
+      (is (= :pending (:status started)))
+      (is (true? (:effect-claim? started)))
+      (session/close-system! s)
+      (let [reopened (session/open-system opts)]
+        (try
+          (let [context (session/context reopened owner)]
+            (is (= "uncertain" (:compactionStatus context)))
+            (is (= "service-restarted" (:compactionReason context)))
+            (is (= "uncertain-leaf" (:compactionBaselineLeafId context)))
+            (is (= 12 (:compactionBaselineEntryCount context))))
+          (is (= :busy (:error (session/fresh! reopened owner "blocked-fresh"))))
+          (is (= :busy (:error (session/attach! reopened owner "task-1"))))
+          (is (= :not-found (:error (session/context reopened other))))
+          (let [retry (session/compact! reopened owner "uncertain-compact"
+                                        {:baseline-leaf-id "uncertain-leaf"
+                                         :baseline-entry-count 12})]
+            (is (= :uncertain (:status retry)))
+            (is (false? (:effect-claim? retry)))
+            (is (= :service-restarted (:reason retry))))
+          (is (= :completed
+                 (:status (session/compact-complete!
+                           reopened owner "uncertain-compact"
+                           {:entry-id "proven-compaction-entry"
+                            :parent-id "uncertain-leaf" :entry-count 13}))))
+          (is (= "completed" (:compactionStatus (session/context reopened owner))))
+          (finally (session/close-system! reopened)))))))
+
+;; @session-compaction-uncertain-003
+(deftest session-compaction-uncertain-003-unproven-command-stays-locked-and-idempotent
+  (with-session (fn [s _ _]
+    (fresh s 1)
+    (turn s "uncertain-no-proof" "eligible" :typed)
+    (session/observe! s owner "uncertain-no-proof" {:kind :context-usage :tokens 8000
+                                                      :contextWindow 16000 :estimated false
+                                                      :canCompact true})
+    (finish s "uncertain-no-proof" "eligible")
+    (let [started (session/compact! s owner "unproven-compact"
+                                    {:baseline-leaf-id "unproven-leaf"
+                                     :baseline-entry-count 20})]
+      (is (= :pending (:status started)))
+      (is (= :uncertain
+             (:status (session/compact-uncertain! s owner "unproven-compact"
+                                                   :pi-outcome-unproven))))
+      (is (= :uncertain
+             (:status (session/compact-uncertain! s owner "unproven-compact"
+                                                   :pi-effect-failed))))
+      (let [context (session/context s owner)]
+        (is (= "uncertain" (:compactionStatus context)))
+        (is (= "pi-outcome-unproven" (:compactionReason context))))
+      (is (= :busy (:error (session/fresh! s owner "blocked-fresh"))))
+      (let [retry (session/compact! s owner "unproven-compact"
+                                    {:baseline-leaf-id "unproven-leaf"
+                                     :baseline-entry-count 20})]
+        (is (= :uncertain (:status retry)))
+        (is (false? (:effect-claim? retry))))))))
+
 (deftest owner-client-006-session-012-task-routing-boundary
   (with-session (fn [s calls _]
     (let [id (:id (fresh s 1))]

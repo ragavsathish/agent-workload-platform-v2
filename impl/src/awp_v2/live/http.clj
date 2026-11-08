@@ -22,6 +22,7 @@
    "context" :context "routing" :routing "turn" :turn "submit" :submit
    "observe" :observe "settle" :settle "stop" :stop
    "compact-start" :compact-start "compact-complete" :compact-complete
+   "compact-uncertain" :compact-uncertain
    "attach" :attach "detach" :detach "routing-command" :routing-command
    "voice-ended" :voice-ended})
 
@@ -89,6 +90,8 @@
     :stop (session/stop! system owner (:turn-id data))
     :compact-start (session/compact! system owner (:command-id data) data)
     :compact-complete (session/compact-complete! system owner (:command-id data) data)
+    :compact-uncertain (session/compact-uncertain! system owner (:command-id data)
+                                                   (some-> (:reason data) keyword))
     :attach (session/attach! system owner (:task-id data) (:command-id data))
     :detach (session/detach! system owner (:command-id data))
     :voice-ended (session/voice-ended! system owner)))

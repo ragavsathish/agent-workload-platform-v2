@@ -62,6 +62,15 @@ owner-scoped context read exposes the pending command identity/status, allowing
 the owner client to resume it after a lost response or page reload. See
 [slice 29](../plan/29-session-compaction-reconciliation/plan.md).
 
+If restart or a failed Pi call leaves the compaction result unproven, the owner
+read reports an uncertain status and a bounded reason. The owner lock remains
+held: turns, selection, and task routing cannot move the Pi branch cursor. A
+retry checks the same persisted branch and may settle the original identity
+only when the compaction proof is present; it never starts a second Pi effect.
+When the branch cannot prove an outcome, the session remains held indefinitely.
+There is no manual unlock because v2 has no fencing token proving every prior
+Pi writer has stopped. See [slice 33](../plan/33-compaction-uncertainty/plan.md).
+
 The source serializes turns and maintenance. It refuses conversation switching
 while either is pending. A turn timeout requests interruption and reports an
 error. A streamed turn can be interrupted when the connection closes. The

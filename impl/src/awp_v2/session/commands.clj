@@ -122,6 +122,17 @@
                          :baseline-entry-count (:baseline-entry-count prior-compaction)
                          :reused? true :effect-claim? false}}
                 (refuse :conflict))
+              (= :uncertain (:status prior-compaction))
+              (if (and (= (:baseline-leaf-id data) (:baseline-leaf-id prior-compaction))
+                       (= (:baseline-entry-count data)
+                          (:baseline-entry-count prior-compaction)))
+                {:value {:status :uncertain :command-id (:command-id data)
+                         :conversation-id (:conversation-id prior-compaction)
+                         :baseline-leaf-id (:baseline-leaf-id prior-compaction)
+                         :baseline-entry-count (:baseline-entry-count prior-compaction)
+                         :reason (:uncertainty-reason prior-compaction)
+                         :reused? true :effect-claim? false}}
+                (refuse :conflict))
               (= :queued (:status prior-compaction))
               (cond
                 (not= (:command-id data) (:pending-compaction state)) (refuse :conflict)
@@ -180,6 +191,7 @@
             (if (= (:entry-id data) (:entry-id prior-compaction))
               {:value {:status :completed :command-id (:command-id data)}}
               (refuse :conflict))
+            (not (#{:pending :uncertain} (:status prior-compaction))) (refuse :conflict)
             (not= (:command-id data) (:pending-compaction state)) (refuse :conflict)
             (not= (:parent-id data) (:baseline-leaf-id prior-compaction)) (refuse :conflict)
             (<= (:entry-count data) (:baseline-entry-count prior-compaction)) (refuse :conflict)
@@ -188,6 +200,27 @@
             (let [fact (assoc data :conversation-id (:conversation-id prior-compaction))]
               {:facts [[:context-compaction-completed fact]]
                :value {:status :completed :command-id (:command-id data)}}))
+
+          (= op :compact-uncertain)
+          (cond
+            (nil? prior-compaction) (refuse :not-found)
+            (= :completed (:status prior-compaction))
+            {:value {:status :completed :command-id (:command-id data) :reused? true}}
+            (not (#{:pending :uncertain} (:status prior-compaction))) (refuse :conflict)
+            (not= (:command-id data) (:pending-compaction state)) (refuse :conflict)
+            (not (#{:service-restarted :pi-outcome-unproven :pi-effect-failed}
+                  (:reason data))) (refuse :incorrect)
+            (= :uncertain (:status prior-compaction))
+            {:value {:status :uncertain :command-id (:command-id data)
+                     :reason (:uncertainty-reason prior-compaction)
+                     :effect-claim? false :reused? true}}
+            :else
+            {:facts [[:context-compaction-uncertain
+                      {:command-id (:command-id data)
+                       :conversation-id (:conversation-id prior-compaction)
+                       :reason (:reason data) :at (:at data)}]]
+             :value {:status :uncertain :command-id (:command-id data)
+                     :reason (:reason data) :effect-claim? false}})
 
           (= op :attach)
           (cond
@@ -266,6 +299,11 @@
   {:grain.event-model/reads #{:session/state}
    :grain.event-model/produces #{:session/fact}}
   [context] (decision :compact-complete context))
+
+(defcommand :session compact-uncertain
+  {:grain.event-model/reads #{:session/state}
+   :grain.event-model/produces #{:session/fact}}
+  [context] (decision :compact-uncertain context))
 (defcommand :session attach
   {:grain.event-model/reads #{:session/state}
    :grain.event-model/produces #{:session/fact}}

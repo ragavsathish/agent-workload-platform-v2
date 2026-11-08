@@ -1706,6 +1706,15 @@ class _Composer extends StatelessWidget {
                   ),
                 ],
               ),
+              if (compactionHoldMessage(usage) case final message?)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    message,
+                    key: const Key('compaction-uncertainty'),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [

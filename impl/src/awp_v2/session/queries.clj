@@ -65,9 +65,11 @@
                               :conversation-id id
                               :compactionCommandId (when (or pending? (= :completed (:status compaction))) command-id)
                               :compactionStatus (name (or (:status compaction) :idle))
-                              :compactionBaselineLeafId (when (= :pending (:status compaction))
+                              :compactionReason (when (= :uncertain (:status compaction))
+                                                  (some-> (:uncertainty-reason compaction) name))
+                              :compactionBaselineLeafId (when (#{:pending :uncertain} (:status compaction))
                                                           (:baseline-leaf-id compaction))
-                              :compactionBaselineEntryCount (when (= :pending (:status compaction))
+                              :compactionBaselineEntryCount (when (#{:pending :uncertain} (:status compaction))
                                                               (:baseline-entry-count compaction)))})
       (missing))))
 

@@ -64,7 +64,8 @@ void main() {
                 jsonEncode({
                   'canCompact': false,
                   'compactionCommandId': 'persisted-compaction-29',
-                  'compactionStatus': 'pending',
+                  'compactionStatus': 'uncertain',
+                  'compactionReason': 'service-restarted',
                 }),
                 200,
               );
@@ -79,6 +80,8 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 10));
       expect(find.text('Reconcile'), findsOneWidget);
+      expect(find.byKey(const Key('compaction-uncertainty')), findsOneWidget);
+      expect(find.textContaining('session is held while Pi history is checked'), findsOneWidget);
       await tester.tap(find.byKey(const Key('compact-session')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 10));

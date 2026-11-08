@@ -49,7 +49,14 @@
                       :schema [:map [:owner :string] [:data :map]]
                       :reads #{:session/state} :produces #{:session/fact}
                       :grain/allium [{:spec "specs/session-orchestration.allium" :kind :rule
-                                      :name "SettleContextCompaction"}]}
+                                      :name "SettleContextCompaction"}
+                                     {:spec "specs/session-orchestration.allium" :kind :rule
+                                      :name "SettleUncertainContextCompaction"}]}
+    :session/compact-uncertain {:description "Record an unproven Pi outcome while retaining the owner lock."
+                      :schema [:map [:owner :string] [:data :map]]
+                      :reads #{:session/state} :produces #{:session/fact}
+                      :grain/allium [{:spec "specs/session-orchestration.allium" :kind :rule
+                                      :name "MarkContextCompactionUncertain"}]}
     :session/attach {:description "Route future turns to an owned task."
                      :schema [:map [:owner :string] [:data :map]]
                      :reads #{:session/state} :produces #{:session/fact}

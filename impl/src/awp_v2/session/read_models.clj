@@ -175,6 +175,14 @@
           (update-in [:contexts id :revision] (fnil inc 0))
           (assoc-in [:contexts id :canCompact] false))
 
+      :context-compaction-uncertain
+      (-> owner-state
+          ;; Keep pending-compaction set: uncertainty is a held owner lock.
+          (assoc-in [:compactions (:command-id data) :status] :uncertain)
+          (assoc-in [:compactions (:command-id data) :uncertainty-reason] (:reason data))
+          (update-in [:contexts id :revision] (fnil inc 0))
+          (assoc-in [:contexts id :canCompact] false))
+
       :context-compaction-rejected
       (-> owner-state
           (assoc :pending-compaction nil)

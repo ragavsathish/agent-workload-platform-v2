@@ -72,6 +72,17 @@ entity ContextCompactionCommand {
     }
 }
 
+entity ContextCompactionUncertainty {
+    command_id: String
+    owner: String
+    reason: service_restarted | pi_outcome_unproven | pi_effect_failed
+    status: held | resolved
+    transitions status {
+        held -> resolved
+        terminal: resolved
+    }
+}
+
 entity QueuedContextCompaction {
     command_id: String
     owner: String
@@ -382,11 +393,45 @@ rule SettleContextCompaction {
     requires: exists compaction
     requires: compaction.owner = caller
     requires: compaction.status = pending
+    requires: not exists ContextCompactionUncertainty{command_id: command_id}
     requires: parent_id = compaction.baseline_leaf_id
     requires: entry_count > compaction.baseline_entry_count
     ensures: compaction.entry_id = entry_id
     ensures: compaction.status = settled
     ensures: ContextUsageRefreshed(owner: caller)
+}
+
+rule SettleUncertainContextCompaction {
+    when: CompleteContextCompaction(caller, command_id, entry_id, parent_id, entry_count)
+    let compaction = ContextCompactionCommand{command_id: command_id}
+    requires: exists compaction
+    requires: compaction.owner = caller
+    let uncertainty = ContextCompactionUncertainty{command_id: command_id}
+    requires: compaction.status = pending
+    requires: exists uncertainty
+    requires: uncertainty.owner = caller
+    requires: uncertainty.status = held
+    requires: parent_id = compaction.baseline_leaf_id
+    requires: entry_count > compaction.baseline_entry_count
+    ensures: compaction.entry_id = entry_id
+    ensures: compaction.status = settled
+    ensures: uncertainty.status = resolved
+    ensures: ContextUsageRefreshed(owner: caller)
+}
+
+rule MarkContextCompactionUncertain {
+    when: CompactionOutcomeUnproven(caller, command_id, reason)
+    let compaction = ContextCompactionCommand{command_id: command_id}
+    requires: exists compaction
+    requires: compaction.owner = caller
+    requires: compaction.status = pending
+    requires: reason in [service_restarted, pi_outcome_unproven, pi_effect_failed]
+    requires: not exists ContextCompactionUncertainty{command_id: command_id}
+    ensures: ContextCompactionUncertainty.created(
+        command_id: command_id,
+        owner: caller,
+        reason: reason,
+        status: held)
 }
 
 rule RecordFirstContextUsage {
@@ -424,6 +469,14 @@ rule ReadContextUsage {
     requires: exists context
     ensures: ContextUsageVisible(owner: caller, revision: context.revision,
                                  can_compact: context.can_compact)
+}
+
+rule ReadUncertainCompaction {
+    when: ReadContextUsage(caller)
+    let uncertainty = ContextCompactionUncertainty{owner: caller, status: held}
+    requires: exists uncertainty
+    ensures: ContextCompactionUncertainVisible(
+        owner: caller, command_id: uncertainty.command_id, reason: uncertainty.reason)
 }
 
 rule ShowOwnedHistory {
@@ -535,12 +588,23 @@ surface ContextCompactionControl {
     exposes:
         compaction.command_id
         compaction.status
+        uncertainty.command_id
+        uncertainty.reason
+
+    facing uncertainty: ContextCompactionUncertainty
 
     provides:
         CompactContext(caller, command_id, baseline_leaf_id, baseline_entry_count)
         CompleteContextCompaction(caller, command_id, entry_id, parent_id, entry_count)
+        CompactionOutcomeUnproven(caller, command_id, reason)
         PromoteQueuedCompaction(caller, command_id, baseline_leaf_id, baseline_entry_count)
 
     @guarantee CompactionIdentityPreserved
         -- Retries and completion refer to the original owner compaction command.
+
+    @guarantee UncertainCompactionNeverReapplied
+        -- Uncertain retries may inspect Pi but never claim another external effect.
+
+    @guarantee UncertainCompactionHoldsOwnerLock
+        -- Mutations remain blocked until Pi branch proof settles the original command.
 }

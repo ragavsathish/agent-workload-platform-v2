@@ -52,6 +52,9 @@ external provider call that did not append a Pi compaction entry.
 - The implemented owner protocol and Pi branch proof are pinned in the
   [Slice 32 contract](../32-compaction-protocol-reconstruction/plan.md), with
   Flutter retry/reload and Pi restart evidence mapped to their tests.
+- If a Pi result cannot be proven, the owner-visible `uncertain` status keeps
+  the session locked until the same Pi branch proof settles it; see the
+  [terminal hold contract](../33-compaction-uncertainty/plan.md).
 
 ## Documents
 

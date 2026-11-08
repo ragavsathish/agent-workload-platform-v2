@@ -81,6 +81,7 @@ class ContextUsage {
     this.compactionStatus = 'idle',
     this.compactionBaselineLeafId,
     this.compactionBaselineEntryCount,
+    this.compactionReason,
   });
 
   final int? tokens;
@@ -92,6 +93,7 @@ class ContextUsage {
   final String compactionStatus;
   final String? compactionBaselineLeafId;
   final int? compactionBaselineEntryCount;
+  final String? compactionReason;
 
   factory ContextUsage.fromJson(JsonMap json) => ContextUsage(
     tokens: (json['tokens'] as num?)?.toInt(),
@@ -104,7 +106,20 @@ class ContextUsage {
     compactionBaselineLeafId: json['compactionBaselineLeafId'] as String?,
     compactionBaselineEntryCount:
         (json['compactionBaselineEntryCount'] as num?)?.toInt(),
+    compactionReason: json['compactionReason'] as String?,
   );
+}
+
+String? compactionHoldMessage(ContextUsage? usage) {
+  if (usage?.compactionStatus != 'uncertain') return null;
+  return switch (usage?.compactionReason) {
+    'service-restarted' =>
+      'The service restarted during compaction. This session is held while Pi history is checked. Reconcile will not run compaction again.',
+    'pi-effect-failed' =>
+      'Pi compaction did not produce a verified result. This session is held while Pi history is checked. Reconcile will not run compaction again.',
+    _ =>
+      'The compaction result is unverified. This session is held while Pi history is checked. Reconcile will not run compaction again.',
+  };
 }
 
 class TranscriptEntry {

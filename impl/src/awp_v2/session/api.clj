@@ -45,6 +45,11 @@
               :when (= :accepted (:status turn))]
         (issue! system owner :settle {:turn-id turn-id :status :uncertain
                                       :at (str (OffsetDateTime/now))}))
+      (when-let [command-id (:pending-compaction state)]
+        (when (= :pending (get-in state [:compactions command-id :status]))
+          (issue! system owner :compact-uncertain
+                  {:command-id command-id :reason :service-restarted
+                   :at (str (OffsetDateTime/now))})))
       (when (:attachment state)
         (issue! system owner :detach {:at (str (OffsetDateTime/now))})))
     system))
@@ -222,6 +227,13 @@
             {:command-id command-id :entry-id entry-id :parent-id parent-id
              :entry-count entry-count :tokens tokens :contextWindow contextWindow
              :at (now)})
+    {:error :incorrect}))
+
+(defn compact-uncertain! [system actor command-id reason]
+  (if (and (valid-command-id? command-id)
+           (#{:service-restarted :pi-outcome-unproven :pi-effect-failed} reason))
+    (issue! system actor :compact-uncertain
+            {:command-id command-id :reason reason :at (now)})
     {:error :incorrect}))
 (defn attach! [system actor task-id & [command-id]]
   (if (or (nil? command-id) (valid-command-id? command-id))

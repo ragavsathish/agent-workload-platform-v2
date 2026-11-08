@@ -289,7 +289,8 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
   assert.equal(controlledCompactions, 1);
   const pendingReceipt = (await call("GET", "/v1/context")).body;
   assert.equal(pendingReceipt.compactionCommandId, compactionCommandId);
-  assert.equal(pendingReceipt.compactionStatus, "pending");
+  assert.equal(pendingReceipt.compactionStatus, "uncertain");
+  assert.equal(pendingReceipt.compactionReason, "pi-outcome-unproven");
   assert.equal(pendingReceipt.compactionBaselineLeafId, compactionBaselineLeafId);
   assert.equal(typeof pendingReceipt.compactionBaselineEntryCount, "number");
 
@@ -358,10 +359,83 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
   assert.equal(queuedBranch.filter((entry) => entry.type === "compaction").length,
     branchCompactionsBeforeQueue);
 
+  // A Pi call that fails before an entry is appended becomes owner-visible
+  // uncertainty. Retrying cannot claim a second Pi effect; later persisted
+  // branch evidence may settle the same command.
+  compactableSession.settingsManager.getCompactionKeepRecentTokens = () => 0;
+  const afterQueueTurn = await call("POST", "/v1/turn", { messages: [
+    { role: "system", content: "Answer briefly." },
+    { role: "user", content: "eligible after stale request" },
+  ] }, { "x-awp-turn-id": "protocol-post-rejection-turn", "x-awp-origin": "typed" });
+  assert.equal(afterQueueTurn.status, 200);
+  await grainClient.call("submit", {
+    "turn-id": "protocol-no-proof-eligibility", origin: "typed", messages: [
+      { role: "system", content: "Answer briefly." },
+      { role: "user", content: "eligible for uncertain retry" },
+    ],
+  });
+  await grainClient.call("observe", {
+    "turn-id": "protocol-no-proof-eligibility",
+    observation: {
+      kind: "context-usage", tokens: 50_000, contextWindow: 16_000,
+      estimated: false, canCompact: true,
+    },
+  });
+  await grainClient.call("settle", {
+    "turn-id": "protocol-no-proof-eligibility", status: "completed", answer: "eligible",
+  });
+  const noProofBaselineLeafId = compactManager.getLeafId();
+  const noProofBaselineCount = compactManager.getEntryCount();
+  const branchCompactionsBeforeNoProof = compactManager.getBranch()
+    .filter((entry) => entry.type === "compaction").length;
+  compactableSession.compact = async () => {
+    controlledCompactions += 1;
+    throw new Error("controlled Pi timeout before compaction append");
+  };
+  const noProofId = "protocol-compact-no-proof";
+  const noProof = await call("POST", "/v1/context/compact", {}, {
+    "x-awp-command-id": noProofId,
+  });
+  assert.equal(noProof.status, 409);
+  let uncertainReceipt = (await call("GET", "/v1/context")).body;
+  assert.equal(uncertainReceipt.compactionCommandId, noProofId);
+  assert.equal(uncertainReceipt.compactionStatus, "uncertain");
+  assert.equal(uncertainReceipt.compactionReason, "pi-effect-failed");
+  assert.equal(uncertainReceipt.compactionBaselineLeafId, noProofBaselineLeafId);
+  assert.equal(uncertainReceipt.compactionBaselineEntryCount, noProofBaselineCount);
+  assert.equal(controlledCompactions, 2);
+  const modelCallsBeforeBlockedTurn = modelCalls;
+  const blockedTurn = await call("POST", "/v1/turn", { messages: [
+    { role: "system", content: "Answer briefly." }, { role: "user", content: "blocked" },
+  ] }, { "x-awp-turn-id": "protocol-held-turn", "x-awp-origin": "typed" });
+  assert.notEqual(blockedTurn.status, 200);
+  assert.equal(modelCalls, modelCallsBeforeBlockedTurn);
+  const noProofRetry = await call("POST", "/v1/context/compact", {}, {
+    "x-awp-command-id": noProofId,
+  });
+  assert.equal(noProofRetry.status, 409);
+  uncertainReceipt = (await call("GET", "/v1/context")).body;
+  assert.equal(uncertainReceipt.compactionStatus, "uncertain");
+  assert.equal(controlledCompactions, 2);
+  assert.equal(compactManager.getBranch().filter((entry) => entry.type === "compaction").length,
+    branchCompactionsBeforeNoProof);
+
+  compactManager.appendCompaction("controlled persisted late result", null, 50_000);
+  const proofRetry = await call("POST", "/v1/context/compact", {}, {
+    "x-awp-command-id": noProofId,
+  });
+  assert.equal(proofRetry.status, 200);
+  assert.equal(proofRetry.body.compactionStatus, "completed");
+  assert.equal(controlledCompactions, 2);
+  const recoveredBranch = compactManager.getBranch();
+  assert.equal(recoveredBranch.at(-1).parentId, noProofBaselineLeafId);
+
   const transcript = await call("GET", "/v1/transcript");
   assert.deepEqual(transcript.body.entries.map((entry) => entry.text),
     ["typed", "Pi heard typed", "uncertain", "spoken", "Pi heard spoken",
-      "compactable", "eligible", "compactable", "eligible again", "slow", "Pi heard slow"]);
+      "compactable", "eligible", "compactable", "eligible again", "slow", "Pi heard slow",
+      "eligible after stale request", "Pi heard eligible after stale request",
+      "eligible for uncertain retry", "eligible"]);
   const catalog = await call("GET", "/v1/sessions");
   assert.equal(catalog.body.sessions[0].id, selected.id);
   const attachedRoute = await call("POST", "/v1/tasks/attach", { taskId },
@@ -384,13 +458,14 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
   assert.equal(failedAttach.status, 409);
   assert.equal((await call("GET", "/v1/tasks/routing")).body.taskId, taskId);
   assert.equal(taskSocketConnections, 2);
+  const modelCallsBeforeAttachedTurn = modelCalls;
   const attached = await call("POST", "/v1/turn", { messages: [
     { role: "system", content: "Answer briefly." }, { role: "user", content: "task prompt" },
   ] }, { "x-awp-turn-id": "protocol-task", "x-awp-origin": "voice" });
   assert.equal(attached.status, 200);
   assert.equal(attached.body.text, "Task heard prompt");
   assert.deepEqual(taskPrompts, ["task prompt"]);
-  assert.equal(modelCalls, 3);
+  assert.equal(modelCalls, modelCallsBeforeAttachedTurn);
   const attachedHistory = await call("GET", `/v1/sessions/${selected.id}`);
   assert.ok(!attachedHistory.body.entries.some((entry) => entry.text === "task prompt"));
   const fresh = await call("POST", "/v1/sessions/new", {},
@@ -401,12 +476,15 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
   const history = await call("GET", `/v1/sessions/${selected.id}`);
   assert.deepEqual(history.body.entries.map((entry) => entry.text),
     ["typed", "Pi heard typed", "uncertain", "spoken", "Pi heard spoken",
-      "compactable", "eligible", "compactable", "eligible again", "slow", "Pi heard slow"]);
+      "compactable", "eligible", "compactable", "eligible again", "slow", "Pi heard slow",
+      "eligible after stale request", "Pi heard eligible after stale request",
+      "eligible for uncertain retry", "eligible"]);
   const resume = await call("POST", `/v1/sessions/${selected.id}/resume`, {},
     { "x-awp-command-id": "protocol-resume" });
   assert.equal(resume.body.id, selected.id);
   assert.deepEqual((await call("GET", "/v1/transcript")).body.entries,
     history.body.entries);
+  const modelCallsBeforeInterrupted = modelCalls;
   const interrupted = new AbortController();
   const interruptedResponse = await fetch(`${base}/v1/turn/stream`, { method: "POST",
     signal: interrupted.signal,
@@ -420,11 +498,11 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
   for (let attempt = 0; attempt < 40; attempt++) {
     activeTurn = await grainClient.call("turn", { "turn-id": "protocol-interrupted" })
       .catch(() => undefined);
-    if (activeTurn?.status === "accepted" && modelCalls >= 4) break;
+    if (activeTurn?.status === "accepted" && modelCalls > modelCallsBeforeInterrupted) break;
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
   }
   assert.equal(activeTurn?.status, "accepted");
-  assert.equal(modelCalls, 4);
+  assert.equal(modelCalls, modelCallsBeforeInterrupted + 1);
   const stop = await call("POST", "/v1/turn/abort", {});
   assert.equal(stop.status, 200);
   await interruptedResponse.body.cancel();
@@ -455,7 +533,7 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
     { role: "system", content: "Answer briefly." }, { role: "user", content: "held until route repair" },
   ] }, { "x-awp-turn-id": "protocol-held-routing", "x-awp-origin": "typed" });
   assert.equal(heldTurn.status, 502);
-  assert.equal(modelCalls, 4);
+  assert.equal(modelCalls, modelCallsBeforeInterrupted + 1);
   assert.deepEqual(taskPrompts, ["task prompt"]);
   const reconciled = await call("POST", "/v1/tasks/detach", {},
     { "x-awp-command-id": "protocol-reconcile-detach" });

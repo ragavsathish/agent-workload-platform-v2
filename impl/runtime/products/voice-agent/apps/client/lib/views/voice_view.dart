@@ -754,48 +754,63 @@ class _ConversationDock extends StatelessWidget {
             ? null
             : Border(left: BorderSide(color: PiColors.of(context).border)),
       ),
-      child: Row(
+      child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (mobile) const ThemeToggleButton(),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              if (!mobile)
-                Text(
-                  'CONTEXT',
-                  style: TextStyle(
-                    color: PiColors.of(context).muted,
-                    fontSize: 10,
-                    letterSpacing: 1.4,
+              if (mobile) const ThemeToggleButton(),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (!mobile)
+                    Text(
+                      'CONTEXT',
+                      style: TextStyle(
+                        color: PiColors.of(context).muted,
+                        fontSize: 10,
+                        letterSpacing: 1.4,
+                      ),
+                    ),
+                  Text(
+                    contextText,
+                    key: const Key('context-size'),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
-                ),
-              Text(
-                contextText,
-                key: const Key('context-size'),
-                style: const TextStyle(fontWeight: FontWeight.w700),
+                  if (!mobile && contextUsage?.percent != null)
+                    Text(
+                      '${contextUsage!.percent!.round()}% used',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                ],
               ),
-              if (!mobile && contextUsage?.percent != null)
-                Text(
-                  '${contextUsage!.percent!.round()}% used',
-                  style: Theme.of(context).textTheme.bodySmall,
+              const SizedBox(width: 12),
+              OutlinedButton(
+                key: const Key('compact-button'),
+                onPressed: compactBusy ? null : onCompact,
+                child: Text(
+                  compactBusy
+                      ? 'Compacting…'
+                      : contextUsage?.compactionCommandId != null &&
+                            {'queued', 'pending', 'uncertain'}
+                                .contains(contextUsage?.compactionStatus)
+                      ? 'Reconcile'
+                      : 'Compact',
                 ),
+              ),
             ],
           ),
-          const SizedBox(width: 12),
-          OutlinedButton(
-            key: const Key('compact-button'),
-            onPressed: compactBusy ? null : onCompact,
-            child: Text(
-              compactBusy
-                  ? 'Compacting…'
-                  : contextUsage?.compactionCommandId != null &&
-                        {'queued', 'pending', 'uncertain'}
-                            .contains(contextUsage?.compactionStatus)
-                  ? 'Reconcile'
-                  : 'Compact',
+          if (compactionHoldMessage(contextUsage) case final message?)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                message,
+                key: const Key('compaction-uncertainty'),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
             ),
-          ),
         ],
       ),
     );

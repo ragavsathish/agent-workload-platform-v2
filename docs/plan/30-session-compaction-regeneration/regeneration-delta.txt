@@ -45,7 +45,7 @@ This independent build was derived from the Slice 29 plan, scenarios, decisions,
    `x-awp-command-id`, and restores queued/pending/uncertain IDs from Grain
    context after page reload. The current contract and test mapping are in
    [Slice 32](../32-compaction-protocol-reconstruction/plan.md).
-5. **Uncertain resolution.** The contract says uncertain work stays held and cannot be reapplied but does not say whether later observation may settle it or how an operator safely releases it. The reconstruction treats uncertainty as terminal and lock-holding.
+5. **Uncertain resolution.** Slice 33 now specifies and implements the current-v2 contract: restart or an unproven Pi call becomes owner-visible uncertainty; the lock remains held; a same-ID retry may settle only from the exact persisted Pi branch proof and never claims another Pi effect. With no distributed fencing token or proof that the old Pi writer has stopped, no owner/admin release is safe, so an unproven command remains held indefinitely. This closes the behavior-spec gap while preserving the runtime limitation that no safe override exists. See [Slice 33](../33-compaction-uncertainty/plan.md).
 
 ## Remaining reconstruction limits
 
@@ -53,8 +53,10 @@ The clean-room reconstruction still cannot recover the trusted owner key
 contract or shared owner lock integration from permitted sources, nor establish
 an atomic Pi snapshot or a safe operator resolution path for indefinitely
 uncertain effects. Current v2's Pi type, client wire, and reload identity
-behavior are documented and test-mapped in Slice 32; their absence from the
-fenced reconstruction is not evidence that they are absent from v2.
+behavior are documented and test-mapped in Slice 32; uncertainty visibility,
+proof-only settlement, and terminal hold are documented and test-mapped in
+Slice 33. Their absence from the fenced reconstruction is not evidence that
+they are absent from v2.
 
 ## Checks
 
@@ -108,3 +110,20 @@ serializes event append through the owner tag and compare-and-swap predicate;
 the fenced reconstruction's caller-supplied admission values are not a
 description of the implementation. This evidence is mapped in Slice 32, but
 the durable rules still need to be detailed enough for an independent rebuild.
+
+## Slice 33 disposition
+
+The current v2 Grain projection records a bounded uncertainty reason while
+retaining the owner mutation lock. Startup marks pending compaction uncertain
+before accepting commands. Same-ID retry reads the saved baseline for both
+pending and uncertain states; it can settle only when the Pi branch has the
+expected tail compaction entry parented to that baseline with a higher entry
+count. Otherwise retry does not claim or invoke another Pi compaction. The live
+protocol test covers a failed call with no proof, a no-effect retry, and a
+later persisted matching proof without a second `session.compact()` call.
+
+This is an indefinite terminal hold when no proof arrives, not a recovery
+mechanism that releases the lock. The inspected AWP process-local operation
+queue and Grain owner append CAS do not fence a Pi effect across concurrent
+processes. Until deployment supplies a verifiable writer fence/termination
+proof, owner/admin release remains intentionally unavailable.

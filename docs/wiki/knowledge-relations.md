@@ -1,6 +1,6 @@
 # Grounded relations in owner knowledge
 
-Cites the [taxonomy](knowledge-taxonomy.md), [quality rules](knowledge-quality.md), [owner review rules](personal-knowledge.md), [pinned relation capability](../../raw/orc/commands.clj), [pinned relation discovery](../../raw/orc/ontology-exploration.clj), and [v1 evidence vocabulary](../../raw/v1/knowledge-ontology.ttl).
+Cites the [taxonomy](knowledge-taxonomy.md), [quality rules](knowledge-quality.md), [owner review rules](personal-knowledge.md), [pinned relation capability](../../raw/orc/commands.clj), [pinned relation discovery](../../raw/orc/ontology-exploration.clj), [pinned relation observations](../../raw/relation-stage-observations.md), and [v1 evidence vocabulary](../../raw/v1/knowledge-ontology.ttl).
 
 ## A relation is a separate claim
 
@@ -13,6 +13,10 @@ Two accepted owner concepts do not imply an edge. A relation proposal names two 
 The bounded proposal attempt has a stable identity tied to owner, source digest, endpoint identities and revisions, model, prompt, and relation policy version. It returns zero or a small declared maximum of candidates. Each candidate has a stable identity, exact supporting excerpt, model trace, and source identity. A repeat of the same result has one effect; changed content under that identity conflicts. Timeout, malformed output, unsupported kind, and empty output have visible outcomes and no accepted edge.
 
 Proposals enter pending review. The owner may accept, reject, or correct a proposed relation. A correction records the original, the corrected kind or direction and exact evidence, and a replacement proposal linked to the original; it does not rewrite the model output. Acceptance is a separate action at the current revision. Rejection, correction, and revocation remain in ordered history. Revocation or endpoint revocation removes an edge from all current owner reads, including traversal and export. A derived graph may retain historical records, but current reads intersect it with authoritative review state. Rebuild and restart must produce the same current result and provenance.
+
+## Failed attempt and retry
+
+A failed proposal attempt is an outcome, not an empty answer from the source. Its history must distinguish a model or execution failure from a valid no-relation answer and from invalid candidate content. The owner can request a new bounded attempt against the same unchanged source and endpoints. The new attempt has a new identity; replaying one identity never re-invokes the model or changes its result. The previous outcome remains inspectable. A later successful attempt may create pending proposals, but cannot turn a previous failed attempt into a success or publish an edge by itself. The attempt history exposes a safe failure category and trace reference without disclosing source text or provider internals to another owner. These rules refine the [slice 19 proposal boundary](../plan/19-grounded-relations/plan.md) for [slice 20](../plan/20-relation-model-reliability/plan.md).
 
 ## Quality boundary
 

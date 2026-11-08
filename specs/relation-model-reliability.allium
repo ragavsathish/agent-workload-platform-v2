@@ -1,0 +1,66 @@
+-- allium: 3
+-- Cites docs/plan/20-relation-model-reliability/spec.feature,
+-- docs/wiki/knowledge-relations.md, and raw/orc/ontology-exploration.clj.
+
+entity BoundedRelationAttempt {
+    attempt_id: String
+    owner: String
+    source_id: String
+    source_digest: String
+    endpoint_pair: String
+    model_id: String
+    prompt_id: String
+    policy_id: String
+    status: String
+    failure_category: String
+    trace_id: String
+}
+
+entity PendingRelation {
+    relation_id: String
+    attempt_id: String
+    owner: String
+    source_id: String
+    left_id: String
+    right_id: String
+    kind: broader | related
+    evidence: String
+    status: String
+}
+
+rule RecordBoundedAttempt {
+    when: BoundedAttemptEnded(attempt_id, owner, source_id, source_digest, endpoint_pair, model_id, prompt_id, policy_id, status, failure_category, trace_id)
+    requires: not exists BoundedRelationAttempt{attempt_id: attempt_id}
+    requires: owner != ""
+    requires: source_digest != ""
+    requires: endpoint_pair != ""
+    requires: model_id != ""
+    requires: prompt_id != ""
+    requires: policy_id != ""
+    ensures: BoundedRelationAttempt.created(attempt_id: attempt_id, owner: owner, source_id: source_id, source_digest: source_digest, endpoint_pair: endpoint_pair, model_id: model_id, prompt_id: prompt_id, policy_id: policy_id, status: status, failure_category: failure_category, trace_id: trace_id)
+}
+
+rule StageGroundedRetryCandidate {
+    when: GroundedRelationCandidateStaged(relation_id, attempt_id, owner, source_id, left_id, right_id, kind, evidence)
+    let attempt = BoundedRelationAttempt{attempt_id: attempt_id}
+    requires: exists attempt
+    requires: attempt.owner = owner
+    requires: attempt.source_id = source_id
+    requires: attempt.status = completed
+    requires: left_id != right_id
+    requires: evidence != ""
+    requires: not exists PendingRelation{relation_id: relation_id}
+    ensures: PendingRelation.created(relation_id: relation_id, attempt_id: attempt_id, owner: owner, source_id: source_id, left_id: left_id, right_id: right_id, kind: kind, evidence: evidence, status: pending)
+}
+
+surface OwnerBoundedRelationAttempt {
+    facing attempt: BoundedRelationAttempt
+    exposes:
+        attempt.attempt_id
+        attempt.status
+        attempt.failure_category
+        attempt.trace_id
+    provides:
+        BoundedAttemptEnded(attempt_id, owner, source_id, source_digest, endpoint_pair, model_id, prompt_id, policy_id, status, failure_category, trace_id)
+        GroundedRelationCandidateStaged(relation_id, attempt_id, owner, source_id, left_id, right_id, kind, evidence)
+}

@@ -1,0 +1,47 @@
+-- allium: 3
+-- Sources: docs/plan/14-pr-soundtrack/spec.feature,
+-- docs/wiki/pr-soundtrack.md, raw/v1/song-pr-workflow.md.
+-- This describes an inspector's manual qualification record, not a deployed
+-- PR command handler or a release gate.
+
+entity SoundtrackObservation {
+    observation_id: String
+    reviewed_revision: String
+    manifest_digest: String
+    asset_digest: String
+    pull_request_ref: String
+    reviewer_link_checked: Boolean
+    status: String
+}
+
+rule RecordPublishedObservation {
+    when: PublicationInspected(observation_id, reviewed_revision, manifest_digest, asset_digest, pull_request_ref, reviewer_link_checked)
+    requires: not exists SoundtrackObservation{observation_id: observation_id}
+    requires: reviewed_revision != ""
+    requires: manifest_digest != ""
+    requires: asset_digest != ""
+    requires: pull_request_ref != ""
+    requires: reviewer_link_checked = true
+    ensures: SoundtrackObservation.created(observation_id: observation_id, reviewed_revision: reviewed_revision, manifest_digest: manifest_digest, asset_digest: asset_digest, pull_request_ref: pull_request_ref, reviewer_link_checked: reviewer_link_checked, status: "verified")
+}
+
+rule RecordHeldObservation {
+    when: PublicationHeld(observation_id, reviewed_revision, manifest_digest, asset_digest, pull_request_ref)
+    requires: not exists SoundtrackObservation{observation_id: observation_id}
+    ensures: SoundtrackObservation.created(observation_id: observation_id, reviewed_revision: reviewed_revision, manifest_digest: manifest_digest, asset_digest: asset_digest, pull_request_ref: pull_request_ref, reviewer_link_checked: false, status: "held")
+}
+
+surface ManualSoundtrackInspection {
+    facing observation: SoundtrackObservation
+    exposes:
+        observation.observation_id
+        observation.reviewed_revision
+        observation.manifest_digest
+        observation.asset_digest
+        observation.pull_request_ref
+        observation.reviewer_link_checked
+        observation.status
+    provides:
+        PublicationInspected(observation_id, reviewed_revision, manifest_digest, asset_digest, pull_request_ref, reviewer_link_checked)
+        PublicationHeld(observation_id, reviewed_revision, manifest_digest, asset_digest, pull_request_ref)
+}

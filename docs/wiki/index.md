@@ -21,6 +21,7 @@ Cites [the pinned v1 source inventory](../../raw/v1/manifest.md).
 - [Personal knowledge taxonomy](knowledge-taxonomy.md) defines category hierarchy, owner-reviewed relations, model proposals, and quality qualification for [slice 10](../plan/10-knowledge-taxonomy/plan.md).
 - [Operational incidents](operational-incidents.md) defines managed alert epochs, bounded investigations, and owner review for [slice 11](../plan/11-operational-incidents/plan.md).
 - [Task result delivery](task-result-delivery.md) defines bounded answer presentation and owner-scoped patch or scratch workspace retrieval for [slice 12](../plan/12-task-result-delivery/plan.md).
+- [Pull request soundtrack](pr-soundtrack.md) defines the manual reviewer publication and qualification boundary for [slice 14](../plan/14-pr-soundtrack/plan.md).
 
 The wiki records source-backed current behavior separately from agreed behavior
 and explicit v2 decisions. It does not describe the implementation.

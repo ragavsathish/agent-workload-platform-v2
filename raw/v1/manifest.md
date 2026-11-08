@@ -123,3 +123,13 @@ The following two files are byte copies from the same pinned v1 commit named abo
 | --- | --- | --- |
 | [Task image ensure](task-image-ensure.py) | `products/voice-agent/packages/tasking/src/voice_agent/tasking/infrastructure/ensure_execution_image.py` | `e57c51cf3f136c240c58d641990849fadd16ff6ad59d0d9f1f4e44cce1251bb2` |
 | [Task execution images](task-execution-images.py) | `products/voice-agent/packages/tasking/src/voice_agent/tasking/domain/execution_images.py` | `9e9a36d0e3f3dc3a0d196385ae8b55fb7a5d9349394478ae499d8f177ec5753c` |
+
+## Slice 14 PR soundtrack evidence
+
+The existing [PR workflow](song-pr-workflow.md), [song service](song-service.py), [song owner routes](song-gateway.py), [product README](voice-product-readme.md), [process model](process-model.md), and [decision wall](expanded-storming.md) are byte copies from the pinned v1 commit. The root README below adds evidence of repository-relative audio links. The pinned v1 tree also contains two example compact audio assets; their digests are recorded without copying the large media into this evidence directory. These examples prove repository publication, not a particular PR body or reviewer access.
+
+| Snapshot or example | Original path | SHA-256 |
+| --- | --- | --- |
+| [Root README](pr-soundtrack-root-readme.md) | `README.md` | `043bfd8d73fdb0ee0022a12e84db7a547ce72187376b55e4652d01a77eb3d68a` |
+| Committed R&B audio example | `products/voice-agent/docs/assets/let-me-hear-the-work.m4a` | `2ac4c90e8f8672b91d12e86d4442dcc6ebb211c3f7076ab4870f5d39cca4af96` |
+| Committed soul audio example | `products/voice-agent/docs/assets/let-me-hear-the-work-soul-take.m4a` | `c30028aa97cd67e7000c054bc71b8afd5a1360b08194d9ad4855c787cd33db94` |

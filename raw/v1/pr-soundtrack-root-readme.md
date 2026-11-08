@@ -1,0 +1,110 @@
+# Agent Workload Platform
+
+A private runtime for conversational agents that can safely use tools and hand
+off long-running work.
+
+The first product is [Voice Agent](products/voice-agent/README.md): a
+tailnet-only browser assistant for Apple Silicon. It supports live voice and
+typed conversations, renders Mermaid, Excalidraw, and Marp MCP Apps, and can
+delegate durable coding tasks without giving the browser or voice container
+direct access to host credentials or files.
+
+![Voice Agent mobile web interface](products/voice-agent/docs/assets/voice-agent-mobile.png)
+
+## Product tour
+
+[![Watch the narrated Voice Agent product tour](products/voice-agent/docs/assets/voice-agent-demo.png)](products/voice-agent/docs/assets/voice-agent-demo.mp4)
+
+[Read the timed video transcript](products/voice-agent/docs/assets/voice-agent-demo.srt).
+
+The tour starts with the reason for this project: developers should be able to
+listen to, see, and explore agent work instead of reading long conversations.
+It follows a synthetic voice session into durable work, shows how to switch
+sessions, and moves through Mermaid, Marp, and editable Excalidraw views. The
+Playwright Trace Viewer and Grafana make behavior and telemetry inspectable.
+The final Journal Review scene shows how chosen, source-backed knowledge could
+eventually shape a digital professional twin, without treating extraction as
+automatic memory.
+
+Each app gets a full-resolution frame instead of remaining
+clipped inside its task card. Click the image to play the video. Deterministic
+local fixtures keep the run independent of Tailscale, while the containerized
+renderer adds Kokoro TTS, captions, and payload-free OpenTelemetry.
+
+The companion song, **Let Me Hear the Work**, uses the same lyrics in two arrangements:
+[contemporary R&B](products/voice-agent/docs/assets/let-me-hear-the-work.m4a) and
+[late-1950s soul](products/voice-agent/docs/assets/let-me-hear-the-work-soul-take.m4a).
+
+The same response surface renders structured MCP App output:
+
+**Excalidraw**
+
+![Editable Voice Agent architecture in the Excalidraw MCP App](products/voice-agent/docs/assets/excalidraw-mcp-app.png)
+
+**Marp**
+
+![Voice Agent presentation in the Marp MCP App](products/voice-agent/docs/assets/marp-mcp-app.png)
+
+## How it works
+
+There are two paths through the product:
+
+1. **Interactive turns** — the browser sends audio through Tailscale to a
+   Pipecat edge. Speech inference runs on the Mac, Pi handles the conversation,
+   and file or shell tools run inside a persistent Gondolin micro-VM.
+2. **Delegated tasks** — an authenticated gateway records work in a durable
+   queue. A worker runs each task in a fresh Pi session backed by an isolated
+   Gondolin workspace, then stores the result and patch.
+
+MCP and permission-scoped Wassette components add optional browser, memory,
+GitHub, and other integrations. OpenTelemetry reports payload-free metrics and
+traces; it does not export audio, prompts, transcripts, or file contents.
+
+The deployment is currently a private, single-user Apple Silicon system. It is
+an engineering environment, not a multi-tenant hosted service.
+
+## Repository
+
+- `products/voice-agent/` — the complete user-facing product: browser client,
+  voice edge, inference broker, agent gateway, task worker, deployment, and
+  tests.
+- `platform/agent-execution/` — reusable Pi sessions and Gondolin-isolated tool
+  execution.
+- `platform/observability/` — shared payload-free telemetry.
+- `vendor/` — pinned upstream source kept as Git submodules.
+- `runtimes/` — transitional deployments that do not yet have a stable product
+  or platform boundary.
+
+Product-specific code stays with its product. A capability moves into
+`platform/` only when its contract is stable and genuinely reusable.
+
+## Run Voice Agent
+
+Read the [host requirements](products/voice-agent/HOST_REQUIREMENTS.md) first.
+
+```bash
+make setup
+# Configure products/voice-agent/deploy/.env from its .env.example.
+make pull-model
+make host-preflight
+make start
+make login
+```
+
+Use `make status` to inspect the deployment, `make verify` to check its security
+and capability boundaries, and `make check` for the full development suite.
+Use `make native-status`, `make native-start`, `make native-stop`, or `make native-restart`
+to operate all eight macOS services. `make down` stops those services and Compose.
+The repository Makefile is the main orchestrator and delegates product work to
+`products/voice-agent`. Additional product targets are available as
+`make voice-TARGET`; for example, `make voice-pull-model`.
+
+## Documentation
+
+- [Documentation guide: domain, architecture, method, and verified slices](docs/index.md)
+- [Voice Agent operations and development](products/voice-agent/README.md)
+- [Architecture views](products/voice-agent/docs/architecture/README.md)
+- [Product vocabulary](products/voice-agent/GLOSSARY.md)
+- [Repository organization](docs/monorepo-organization.md)
+- [Pull request soundtrack workflow](docs/wow/pull-request-soundtrack-workflow.md)
+- [Imported source provenance](PROVENANCE.md)

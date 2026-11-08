@@ -96,4 +96,13 @@ for id in $(rg -o '@release-[0-9]+' docs/plan/15-local-release-readiness/spec.fe
   fi
 done
 
+for id in $(rg -o '@durable-song-[0-9]+' docs/plan/16-durable-song-owner/spec.feature | tr -d '@'); do
+  if ! rg -q "$id" impl/test/awp_v2/song_acceptance_test.clj \
+      impl/runtime/platform/agent-execution/pi-durable-task/song-lyric-owner.test.mjs \
+      impl/qualification/qualify_durable_song.py; then
+    echo "Acceptance scenario $id has no named check" >&2
+    exit 1
+  fi
+done
+
 echo "documentation gate OK"

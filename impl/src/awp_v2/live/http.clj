@@ -262,10 +262,6 @@
                                  "render" (song/render! song-system owner id)
                                  "cancel" (song/cancel! song-system owner id)
                                  "audio" (song/audio song-system owner id)
-                                 "lyrics-result" (song/lyrics-result! song-system owner id
-                                                                     (:lyrics-task-id data) (:manifest data))
-                                 "render-result" (song/render-result! song-system owner id
-                                                                       (:render-task-id data) (:artifact-id data))
                                  {:error :not-found})]
                     (if (bytes? result)
                       (send-audio! exchange result)

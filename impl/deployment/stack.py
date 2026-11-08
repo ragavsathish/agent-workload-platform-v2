@@ -51,7 +51,17 @@ def native_specs(env: dict[str, str]) -> tuple[ServiceSpec, ...]:
             "AWP_GRAIN_SESSION_TOKEN", "AWP_OWNER_IDENTITY",
             "AWP_ELIGIBLE_WORKSPACES", "AWP_WORKSPACE_MAP_JSON",
             "INFERENCE_BROKER_TOKEN", "GONDOLIN_BROWSER_ASSETS")
-    return (
+    song_owner: tuple[ServiceSpec, ...] = ()
+    if env.get("AWP_PI_DURABLE_OWNER_URL"):
+        require(env, "AWP_PI_DURABLE_OWNER_TOKEN_FILE", "AWP_SONG_LYRIC_OWNER_DB",
+                "AWP_PI_DURABLE_OWNER_PORT")
+        owner_url = env["AWP_PI_DURABLE_OWNER_URL"].rstrip("/")
+        if owner_url != f"http://127.0.0.1:{env['AWP_PI_DURABLE_OWNER_PORT']}":
+            raise ValueError("song lyric owner URL must match its loopback port")
+        song_owner = (ServiceSpec("song-lyric-owner",
+                                  ("node", str(TASK / "dist/song-lyric-owner-server.js")),
+                                  RUNTIME, f"{owner_url}/health"),)
+    return song_owner + (
         ServiceSpec("grain", ("clojure", "-J--add-opens=java.base/java.nio=ALL-UNNAMED",
                               "-J--add-exports=java.base/sun.nio.ch=ALL-UNNAMED",
                               "-M", "-m", "awp-v2.live.main"), IMPL,
@@ -141,6 +151,8 @@ def main() -> None:
                        values.get("INFERENCE_BROKER_TOKEN", "")),
             "gateway": (f"http://127.0.0.1:{values.get('AGENT_GATEWAY_PORT', '9444')}/health", ""),
         }
+        if values.get("AWP_PI_DURABLE_OWNER_URL"):
+            checks["song-lyric-owner"] = (values["AWP_PI_DURABLE_OWNER_URL"].rstrip("/") + "/health", "")
         result = {}
         for name, (url, token) in checks.items():
             request = urllib.request.Request(url, data=b"{}" if name == "grain" else None,

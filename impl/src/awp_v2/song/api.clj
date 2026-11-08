@@ -69,9 +69,11 @@
   (get-in (models/owner-state sys owner) [:songs id]))
 (defn- view [row]
   (when row
-    (cond-> (select-keys row [:status :manifest :manifest-digest :lyrics-task-id :render-task-id :failure])
+    (cond-> (select-keys row [:status :manifest :manifest-digest :lyrics-task-id :lyric-result-digest
+                              :lyric-attempt :render-task-id :failure])
       true (assoc :id (:generation-id row)
-                  :approval (get-in row [:decision :choice]))
+                  :approval (get-in row [:decision :choice])
+                  :decision-id (get-in row [:decision :decision-id]))
       (= :complete (:status row)) (assoc :audio-path (str "/v1/music/generations/" (:generation-id row) "/audio")
                                            :artifact-id (:artifact-id row)))))
 (declare lyrics-result!)
@@ -93,22 +95,35 @@
     (when (and row (= :writing-lyrics (:status row)) (:get-task! sys))
       (try
         (let [snapshot ((:get-task! sys) (:lyrics-task-id row))
-              state (keyword (str (:state snapshot)))]
+              state (keyword (str (:state snapshot)))
+              result (:result snapshot)
+              matches? (and (= (:lyrics-task-id row) (:task_id snapshot) (:task_id result))
+                            (= id (:generation_id result))
+                            (= owner (:identity result))
+                            (pos-int? (:attempt snapshot)))]
           (case state
             :completed (lyrics-result! sys owner id (:lyrics-task-id row)
-                                       (source-manifest (:result snapshot)))
+                                       (when matches? (source-manifest result))
+                                       {:lyric-result-digest (when matches? (digest result))
+                                        :lyric-attempt (:attempt snapshot)})
             :failed (lyrics-result! sys owner id (:lyrics-task-id row) nil)
             :cancelled (issue! sys owner :cancel {:generation-id id})
-            nil))
+            nil)
+          snapshot)
         (catch Throwable _ nil)))))
 (defn get-song [sys owner id]
   (if (and (owner? owner) (text? id 128))
-    (let [_ (refresh! sys owner id)
+    (let [snapshot (refresh! sys owner id)
           result (qp/process-query (assoc sys :actor-id owner
                                           :query {:query/name :song/get :query/id (random-uuid)
                                                   :query/timestamp (OffsetDateTime/now)
                                                   :owner owner :generation-id id}))]
-      (if-let [row (:query/result result)] (view row) {:error :not-found}))
+      (if-let [row (:query/result result)]
+        (cond-> (view row)
+          (and (= :writing-lyrics (:status row)) snapshot)
+          (assoc :lyric-task-state (keyword (str (:state snapshot)))
+                 :recovery-required (= "uncertain" (:state snapshot))))
+        {:error :not-found}))
     {:error :not-found}))
 (defn- submit-pending! [sys owner id stage]
   (let [row (raw-song sys owner id)
@@ -151,13 +166,18 @@
        (integer? bpm) (<= 40 bpm 200)
        (text? key-scale 32) (re-matches #"[A-G](?:#|b)? (?:Major|Minor)" key-scale)
        (#{"3" "4" "6"} time-signature)))
-(defn lyrics-result! [sys owner id task-id manifest]
-  (if-not (raw-song sys owner id) {:error :not-found}
-    (let [valid? (and (map? manifest) (valid-manifest? manifest))
-          result (issue! sys owner :lyrics {:generation-id id :lyrics-task-id task-id
-                                             :manifest (when valid? manifest)
-                                             :manifest-digest (when valid? (manifest-digest manifest))})]
-      (if (:error result) result (get-song sys owner id)))))
+(defn lyrics-result!
+  ([sys owner id task-id manifest]
+   (lyrics-result! sys owner id task-id manifest nil))
+  ([sys owner id task-id manifest provenance]
+   (if-not (raw-song sys owner id) {:error :not-found}
+     (let [valid? (and (map? manifest) (valid-manifest? manifest))
+           result (issue! sys owner :lyrics {:generation-id id :lyrics-task-id task-id
+                                              :manifest (when valid? manifest)
+                                              :manifest-digest (when valid? (manifest-digest manifest))
+                                              :lyric-result-digest (when valid? (:lyric-result-digest provenance))
+                                              :lyric-attempt (when valid? (:lyric-attempt provenance))})]
+       (if (:error result) result (get-song sys owner id))))))
 (defn decide! [sys owner id {:keys [decision-id manifest-digest choice]}]
   (if-not (raw-song sys owner id) {:error :not-found}
     (if-not (and (text? decision-id 128) (text? manifest-digest 128)

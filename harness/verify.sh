@@ -11,6 +11,7 @@ allium check specs
 (cd "$ROOT/impl" && clojure -M:verify)
 pnpm --dir "$ROOT/impl/runtime" install --frozen-lockfile --ignore-scripts
 pnpm --dir "$ROOT/impl/runtime" run build
+node --test "$ROOT/impl/runtime/platform/agent-execution/pi-durable-task/song-lyric-owner.test.mjs"
 pnpm --dir "$ROOT/impl/runtime/products/voice-agent/apps/pi-agent" exec node --test live-protocol.test.mjs knowledge-worker.test.mjs knowledge-quality.test.mjs song-worker.test.mjs
 (cd "$ROOT/impl/runtime/products/voice-agent/apps/broker" &&
   uv sync --frozen --no-dev --quiet &&
@@ -39,6 +40,7 @@ python3 -m py_compile \
   "$ROOT/impl/qualification/restart_local_pi.py" \
   "$ROOT/impl/qualification/sitecustomize.py"
 python3 -m py_compile "$ROOT/impl/qualification/local_release.py" \
+  "$ROOT/impl/qualification/qualify_durable_song.py" \
   "$ROOT/impl/qualification/restart_supervised_pi.py" \
   "$ROOT/impl/qualification/incident_source.py" \
   "$ROOT/impl/qualification/test_local_release.py"

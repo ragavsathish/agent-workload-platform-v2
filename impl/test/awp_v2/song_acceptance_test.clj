@@ -146,3 +146,70 @@
         (is (= :not-found (:error (song/cancel! sys other id))))
         (is (= :not-found (:error (song/audio sys other id))))
         (is (= 2 (count @calls)))))))
+
+(deftest durable-song-002-claimed-result-becomes-reviewed-manifest
+  (let [snapshot (atom nil)
+        sys (song/open-system {:eligible-workspaces #{"awp"}
+                               :submit-task! (fn [task] {:task-id (:task-id task)})
+                               :get-task! (fn [_] @snapshot)})]
+    (try
+      (let [created (song/create! sys owner request)
+            id (:id created)
+            task-id (:lyrics-task-id created)]
+        (is (= :writing-lyrics (:status created)))
+        (reset! snapshot {:task_id task-id :state "completed" :attempt 1
+                          :result {:task_id task-id :generation_id id :identity owner
+                                   :manifest {:title (:title manifest) :style (:style manifest)
+                                              :lyrics (:lyrics manifest)
+                                              :duration_seconds (:duration-seconds manifest)
+                                              :bpm (:bpm manifest) :key_scale (:key-scale manifest)
+                                              :time_signature (:time-signature manifest)}}})
+        (let [view (song/get-song sys owner id)]
+          (is (= :lyrics-ready (:status view)))
+          (is (= manifest (:manifest view)))
+          (is (string? (:lyric-result-digest view)))
+          (is (= 1 (:lyric-attempt view)))
+          (is (nil? (:audio-path view)))))
+      (finally (song/close-system! sys)))))
+
+(deftest durable-song-006-unrelated-completion-is-not-reviewable
+  (let [snapshot (atom nil)
+        sys (song/open-system {:eligible-workspaces #{"awp"}
+                               :submit-task! (fn [task] {:task-id (:task-id task)})
+                               :get-task! (fn [_] @snapshot)})]
+    (try
+      (let [created (song/create! sys owner request)
+            id (:id created)
+            task-id (:lyrics-task-id created)]
+        (reset! snapshot {:task_id task-id :state "completed" :attempt 1
+                          :result {:task_id task-id :generation_id id :identity other
+                                   :manifest {:title (:title manifest) :style (:style manifest)
+                                              :lyrics (:lyrics manifest)
+                                              :duration_seconds (:duration-seconds manifest)
+                                              :bpm (:bpm manifest) :key_scale (:key-scale manifest)
+                                              :time_signature (:time-signature manifest)}}})
+        (let [view (song/get-song sys owner id)]
+          (is (= :failed (:status view)))
+          (is (nil? (:manifest view)))
+          (is (= :not-ready (:error (song/render! sys owner id))))))
+      (finally (song/close-system! sys)))))
+
+(deftest durable-song-004-review-decision-guards-real-render-seam
+  (let [effects (atom [])
+        sys (song/open-system {:eligible-workspaces #{"awp"}
+                               :submit-task! (fn [task] {:task-id (:task-id task)})
+                               :run-render! (fn [_ work] (swap! effects conj work))})]
+    (try
+      (let [created (song/create! sys owner request)
+            id (:id created)
+            ready (song/lyrics-result! sys owner id (:lyrics-task-id created) manifest)]
+        (is (= :approval-required (:error (song/render! sys owner id))))
+        (is (= :conflict (:error (song/decide! sys owner id
+                                                 {:decision-id "wrong" :manifest-digest "changed"
+                                                  :choice :approved}))))
+        (is (empty? @effects))
+        (song/decide! sys owner id {:decision-id "rejected" :manifest-digest (:manifest-digest ready)
+                                    :choice :rejected})
+        (is (= :rejected (:error (song/render! sys owner id))))
+        (is (empty? @effects)))
+      (finally (song/close-system! sys)))))

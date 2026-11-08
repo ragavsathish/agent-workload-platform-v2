@@ -18,4 +18,6 @@ Candidate base: `3fcb8128e91e2cff409569e62c5e531e22bcb7a7`. Private state identi
 
 The opt-in acceptance run has 10 passes and the expected `release-005` failure. It must not be described as a fully qualified release. The earlier red baseline had 11 errors because the report module did not yet exist. The local Clojure test suite passed with 136 tests and 524 assertions after the taxonomy route change.
 
+Follow-up: [slice 16](durable-song-report.md) qualified `release-005` in a **new** fresh supervised state with a real claimed lyric task and complete owner-to-audio chain. This historical slice 15 ledger and its unqualified result remain unchanged.
+
 Separate-device tailnet media, external Gitea/image build, private v1 migration, model quality, deployed Grafana evidence, and pull request qualification remain open. The edge process ran separately on loopback, so this proof does not establish deployed supervision of that component. The v1 deployment was untouched.

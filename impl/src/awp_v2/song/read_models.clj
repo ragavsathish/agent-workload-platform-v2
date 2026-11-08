@@ -11,6 +11,8 @@
       :submitted (assoc-in state [:songs id :submission] :submitted)
       :lyrics (-> state (assoc-in [:songs id :manifest] (:manifest data))
                   (assoc-in [:songs id :manifest-digest] (:manifest-digest data))
+                  (assoc-in [:songs id :lyric-result-digest] (:lyric-result-digest data))
+                  (assoc-in [:songs id :lyric-attempt] (:lyric-attempt data))
                   (assoc-in [:songs id :status] :lyrics-ready))
       :lyric-failed (-> state (assoc-in [:songs id :status] :failed)
                         (assoc-in [:songs id :failure] "lyric generation failed"))

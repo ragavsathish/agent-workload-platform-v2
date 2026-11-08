@@ -63,6 +63,15 @@ git -C "$TARGET" gc -q --prune=now --aggressive
 [[ -f "$TARGET/specs/local-release-readiness.allium" ]] || {
   echo "FENCE FAILED: slice 15 behavior missing" >&2; exit 1;
 }
+[[ -f "$TARGET/docs/plan/16-durable-song-owner/spec.feature" ]] || {
+  echo "FENCE FAILED: slice 16 contract missing" >&2; exit 1;
+}
+[[ -f "$TARGET/raw/v1/song-owner-server.ts" ]] || {
+  echo "FENCE FAILED: pinned lyric owner protocol missing" >&2; exit 1;
+}
+[[ -f "$TARGET/specs/durable-song-owner.allium" ]] || {
+  echo "FENCE FAILED: slice 16 behavior missing" >&2; exit 1;
+}
 [[ "$(git -C "$TARGET" rev-list --all --count)" == 1 ]] || {
   echo "FENCE FAILED: prior history remains" >&2; exit 1
 }

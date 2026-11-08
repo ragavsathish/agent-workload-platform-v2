@@ -434,6 +434,40 @@
         (is (= 1 (count @calls)))
         (finally (session/close-system! reopened))))))
 
+;; @session-bootstrap-001
+(deftest session-bootstrap-001-rebuilds-owner-projections-and-recovers-ephemeral-state
+  (let [dir (room)
+        calls (atom [])
+        opts {:storage-dir dir
+              :owned-task? (fn [actor task] (and (= actor owner) (= task "task-1")))
+              :turn-driver (fn [request] (swap! calls conj request))}
+        first-system (session/open-system opts)
+        conversation-id (:id (session/fresh! first-system owner "bootstrap-fresh"))]
+    (session/submit! first-system owner
+                     {:turn-id "bootstrap-done" :origin :voice
+                      :messages [{:role "user" :content "persist me"}]})
+    (session/observe! first-system owner "bootstrap-done"
+                      {:kind :context-usage :tokens 8000 :contextWindow 16000
+                       :estimated false :canCompact true})
+    (session/settle! first-system owner "bootstrap-done" :completed "persisted answer")
+    (session/attach! first-system owner "task-1")
+    (session/submit! first-system owner
+                     {:turn-id "bootstrap-pending" :origin :voice
+                      :messages [{:role "user" :content "may still be running"}]})
+    (session/close-system! first-system)
+    (let [reopened (session/open-system opts)]
+      (try
+        (is (= conversation-id (:id (session/selection reopened owner))))
+        (is (= ["persist me" "persisted answer" "may still be running"]
+               (texts (session/transcript reopened owner))))
+        (is (= :completed (:status (session/turn reopened owner "bootstrap-done"))))
+        (is (= :uncertain (:status (session/turn reopened owner "bootstrap-pending"))))
+        (is (= 8000 (:tokens (session/context reopened owner))))
+        (is (nil? (:task-id (session/routing reopened owner))))
+        (is (= :not-found (:error (session/context reopened other))))
+        (is (= 2 (count @calls)))
+        (finally (session/close-system! reopened))))))
+
 (deftest session-009-transcript-bounds
   (with-session (fn [s _ _]
     (let [id (:id (fresh s 1))]

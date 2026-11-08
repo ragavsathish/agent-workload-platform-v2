@@ -13,25 +13,25 @@ This independent build was derived from the Slice 29 plan, scenarios, decisions,
 
 ## Remaining limits and assumptions
 
-1. **Grain application wiring.** ORC raw examples give concrete Grain v2/v3 handler, event read, and append-time CAS patterns, so those are used. The room lacks the AWP session app's Grain dependencies, command processor registration/bootstrap, session event schema registration, and projection rebuild wiring. Consequently Grain handlers could not be compiled or run here. The exact authenticated owner key in Grain command context is also not defined in the allowed docs.
+1. **Fenced-room scope versus current v2.** The clean-room fence intentionally removed `impl/` and its dependency setup, so this independent reconstruction could not compile Grain handlers or inspect the executable AWP bootstrap. The current v2 source does contain Grain SQLite event-store/LMDB startup, schema and event-model registration, command/query/read-model loading, event-model validation, and owner projection recovery in `impl/src/awp_v2/session/api.clj`. The public session API routes mutations and reads through Grain command/query processors. Existing acceptance tests prove close/reopen recovery; Slice 31 adds an explicit scenario covering owner projection rebuild and ephemeral recovery. The clean-room reconstruction therefore does not itself establish bootstrap completeness, but the bootstrap is not absent from the current v2 repository.
 2. **Trusted admission and shared mutation lock.** The command handler accepts selected/eligibility/busy flags from its caller because the slice defines those conditions but not the session read-model API or how turn, selection, attach, and detach handlers share the lock. Those values must come from trusted owner-scoped projections; client input must not control them. The Effect workflow alone cannot prove the full session mutation serialization invariant.
 3. **Pi branch proof.** v1 confirms the `getBranch()` and `compact()` calls and uses the tail `type`; D113 states that Pi branch entries expose IDs and parent IDs. The raw source does not include the dependency type declaration or establish atomic snapshot semantics. The adapter assumes `id`, `parentId`, and `type === "compaction"`, and that a proven result is exactly one entry after the persisted baseline count with its parent equal to that baseline leaf. This is conservative, explicit, and tested against the port shape, not against installed Pi.
 4. **HTTP/client integration.** Current pinned client methods use `/api/pi-context` and `/api/pi-context/compact` without an idempotency key. The Slice 29 docs require request identity retention and restoration after reload but omit field location, response schema, error semantics, key generation/reset rules, and Flutter persistence behavior. No client edits were made because those choices would invent the public protocol.
 5. **Uncertain resolution.** The contract says uncertain work stays held and cannot be reapplied but does not say whether later observation may settle it or how an operator safely releases it. The reconstruction treats uncertainty as terminal and lock-holding.
 
-## Proposed documentation correction (not applied)
+## Remaining reconstruction limits
 
-Specify the Grain runtime/bootstrap and session projection APIs; trusted owner-scoped admission facts and common lock integration for all session mutations; Pi branch entry and snapshot consistency types; the HTTP idempotency and context response schema plus client persistence behavior; and a safe policy for indefinitely uncertain commands. The plan references implementation files intentionally removed by the clean-room fence, so those details cannot be recovered from those citations.
+The clean-room reconstruction still cannot recover the trusted owner key contract or shared owner lock integration from permitted sources; Pi branch-entry types and snapshot consistency evidence; HTTP/client idempotency wire and reload persistence; or a safe operator resolution path for indefinitely uncertain effects. The current v2 implementation may satisfy some of these, but they require separate evidence audits and are not established by this clean-room run.
 
 ## Checks
 
 - Clojure focused tests: 4 tests, 16 assertions, 0 failures/errors.
 - `pnpm --dir impl/runtime test`: 2 TypeScript Effect tests pass (new command invokes once; retry reconciles, ambiguous evidence does not invoke again).
 - `allium check specs`: all contracts, including `specs/session-orchestration.allium`, pass with no diagnostics.
-- Grain handlers could not be compiled or run because Grain dependencies and AWP service bootstrap are absent from the fenced room.
-- Full `harness/verify.sh` was not run: the broader implementation/runtime/Flutter trees are absent. No tests used original implementation artifacts.
+- Grain handlers reconstructed in the fenced room could not be compiled or run there because that room excludes the repository dependencies and AWP service bootstrap. Current v2 session code was not used as input to the reconstruction.
+- Full `harness/verify.sh` was not run in the fenced room because its implementation/runtime/Flutter trees were intentionally removed. No reconstruction tests used original implementation artifacts.
 
-This is a partial clean-room reconstruction: it supplies Grain-pattern command/query handlers and a tested Effect workflow, but not executable AWP Grain app wiring or owner-client transport integration.
+This is a partial clean-room reconstruction: it supplies Grain-pattern command/query handlers and a tested Effect workflow, but the fence excludes the executable AWP Grain app and owner-client transport integration. Current v2 has executable Grain session wiring; Slice 31's acceptance test exercises it through the public system API and verifies reconstruction after close/reopen.
 
 ## Slice 30 disposition
 
@@ -41,9 +41,19 @@ context check is represented in the session contract and acceptance suite; a
 stale request clears the owner lock without claiming the Pi effect. The root
 build contract now records the selected stack, minimum bootstrap/owner-lock/
 projection obligations, and authority boundaries for Pi session history, Git,
-and object storage. The report remains a partial regeneration: it does not
-establish executable service bootstrap from the fence, prove Pi branch-entry
+and object storage. The report remains a partial regeneration: the fence does not
+include executable service bootstrap source, and the reconstruction does not prove Pi branch-entry
 types or snapshot consistency against installed dependencies, define an
 HTTP/client wire schema or reload persistence details, or decide an operator
 resolution path for indefinitely uncertain external effects. Those limits
 remain open and were not filled by invention in this slice.
+
+## Slice 31 disposition
+
+The current v2 repository already has executable session store startup and
+Grain processor registration in `impl/src/awp_v2/session/api.clj`; the live
+service opens that system before starting its HTTP bridge. Slice 31 strengthens
+the executable close/reopen acceptance evidence for projection reconstruction,
+owner isolation, and recovery of an unfinished turn and ephemeral task route.
+This proves the repository's system API path, not a separately deployed
+multi-process restart or external storage failover.

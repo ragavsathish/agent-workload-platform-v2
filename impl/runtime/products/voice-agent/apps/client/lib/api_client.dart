@@ -45,11 +45,13 @@ class VoiceApi {
     String path, {
     String method = 'GET',
     Object? body,
+    Map<String, String> requestHeaders = const {},
   }) async {
     final uri = _uri(path);
-    final headers = body == null
-        ? <String, String>{}
-        : {'Content-Type': 'application/json'};
+    final headers = <String, String>{
+      if (body != null) 'Content-Type': 'application/json',
+      ...requestHeaders,
+    };
     final response = method == 'POST'
         ? await _client.post(
             uri,
@@ -113,6 +115,33 @@ class VoiceApi {
 
   Future<void> stopTurn() async {
     await _json('/api/pi-turn/abort', method: 'POST');
+  }
+
+  Future<String?> taskRouting() async {
+    final taskId = (await _json('/api/pi-task-routing'))['taskId'];
+    if (taskId == null) return null;
+    if (taskId is! String) {
+      throw const ApiException('Task routing returned an invalid response.');
+    }
+    return taskId;
+  }
+
+  Future<void> attachTask(String id, String commandId) async {
+    await _json(
+      '/api/pi-task-routing/attach',
+      method: 'POST',
+      body: {'taskId': id},
+      requestHeaders: {'Idempotency-Key': commandId},
+    );
+  }
+
+  Future<void> detachTask(String commandId) async {
+    await _json(
+      '/api/pi-task-routing/detach',
+      method: 'POST',
+      body: const {},
+      requestHeaders: {'Idempotency-Key': commandId},
+    );
   }
 
   Future<List<AgentTask>> tasks() async {

@@ -89,12 +89,13 @@
       (is (some #{"task answer"} (texts (post server "transcript" {}))))
       (is (not (some #{"task prompt"} (texts (post server "history" {:conversation-id id})))))))))
 
-(deftest live-004-task-tool-can-attach-during-orchestrator-turn
+(deftest live-004-task-routing-waits-for-orchestrator-turn-to-settle
   (with-service (fn [server _ _]
     (fresh server "first")
     (submit server "tool-turn" "attach this task" "voice")
-    (is (= "task-1" (get-in (post server "attach" {:task-id "task-1"}) [:body :task-id])))
+    (is (= 409 (:status (post server "attach" {:task-id "task-1" :command-id "attach-during-turn"}))))
     (settle server "tool-turn" "attached")
+    (is (= "task-1" (get-in (post server "attach" {:task-id "task-1" :command-id "attach-after-turn"}) [:body :task-id])))
     (is (= "task-1" (get-in (submit server "following-turn" "continue" "voice") [:body :task-id]))))))
 
 (deftest live-005-selection-and-disconnect-release-attachment

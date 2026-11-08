@@ -172,6 +172,32 @@
       (is (some #{"task answer"} (texts (session/transcript s owner))))
       (is (not (some #{"task question"} (texts (session/history s owner id)))))))))
 
+(deftest routing-002-attachment-command-retry-is-idempotent-and-conflicts-on-new-input
+  (with-session (fn [s _ _]
+    (fresh s 1)
+    (is (= {:task-id "task-1"}
+           (session/attach! s owner "task-1" "route-command")))
+    (is (= {:task-id "task-1" :status :attached :reused? true}
+           (session/attach! s owner "task-1" "route-command")))
+    (is (= :conflict (:error (session/attach! s owner "task-2" "route-command"))))
+    (is (= "task-1" (:task-id (session/routing s owner)))))))
+
+(deftest routing-003-foreign-and-ineligible-tasks-return-the-same-refusal
+  (with-session (fn [s _ _]
+    (fresh s 1)
+    (is (= :not-found (:error (session/attach! s other "task-1" "foreign-route"))))
+    (is (= :not-found (:error (session/attach! s owner "terminal-task" "terminal-route"))))
+    (is (nil? (:task-id (session/routing s owner)))))))
+
+(deftest routing-004-detach-command-retry-is-idempotent
+  (with-session (fn [s _ _]
+    (fresh s 1)
+    (session/attach! s owner "task-1" "route-attach")
+    (is (= {:status :detached} (session/detach! s owner "route-detach")))
+    (is (= {:status :detached :reused? true}
+           (session/detach! s owner "route-detach")))
+    (is (nil? (:task-id (session/routing s owner)))))))
+
 (deftest session-013-selection-releases-task
   (with-session (fn [s _ _]
     (fresh s 1) (session/attach! s owner "task-1")
@@ -240,7 +266,7 @@
     (is (= :failed (:status (session/settle! s owner "failed" :failed nil))))
     (is (= :accepted (:status (turn s "next" "second" :typed)))))))
 
-(deftest session-010-and-012-restart-recovery
+(deftest routing-006-session-010-and-012-restart-recovery
   (let [dir (room)
         calls (atom [])
         opts {:storage-dir dir

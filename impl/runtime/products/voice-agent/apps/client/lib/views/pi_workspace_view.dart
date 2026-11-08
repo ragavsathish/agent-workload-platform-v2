@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 
@@ -88,6 +89,11 @@ class _PiWorkspaceViewState extends State<PiWorkspaceView> {
     entries: [],
   );
   List<AgentTask> _tasks = const [];
+  String? _attachedTaskId;
+  bool _routingAvailable = false;
+  bool _routingUncertain = false;
+  bool _routingBusy = false;
+  final Map<String, String> _routingCommandIds = {};
   List<PiSessionSummary> _sessions = const [];
   PiSessionSummary? _selectedSession;
   TranscriptSnapshot? _historicalSnapshot;
@@ -153,6 +159,7 @@ class _PiWorkspaceViewState extends State<PiWorkspaceView> {
     await Future.wait([
       _pollTranscript(),
       _pollTasks(),
+      _pollTaskRouting(),
       _pollContext(),
       _pollSessions(),
     ]);
@@ -189,8 +196,31 @@ class _PiWorkspaceViewState extends State<PiWorkspaceView> {
           _listeningTaskId != null) {
         unawaited(_pollTaskProgress());
       }
+      unawaited(_pollTaskRouting());
     } on Object catch (error) {
       if (mounted) setState(() => _error = '$error');
+    }
+  }
+
+  Future<void> _pollTaskRouting() async {
+    try {
+      final taskId = await widget.api.taskRouting();
+      if (mounted) {
+        setState(() {
+          _attachedTaskId = taskId;
+          _routingAvailable = true;
+          _routingUncertain = false;
+          if (taskId != null) _routingCommandIds.remove('attach:$taskId');
+          if (taskId == null) _routingCommandIds.remove('detach');
+        });
+      }
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          _routingAvailable = false;
+          _routingUncertain = '$error'.contains('uncertain');
+        });
+      }
     }
   }
 
@@ -649,6 +679,60 @@ class _PiWorkspaceViewState extends State<PiWorkspaceView> {
     }
   }
 
+  String _newRoutingCommandId() {
+    final suffix = List.generate(
+      16,
+      (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'),
+    ).join();
+    return 'routing-${DateTime.now().microsecondsSinceEpoch}-$suffix';
+  }
+
+  Future<void> _toggleTaskRouting(AgentTask task) async {
+    final detaching = _attachedTaskId == task.id;
+    final operation = detaching ? 'detach' : 'attach:${task.id}';
+    setState(() {
+      _routingBusy = true;
+      _error = null;
+    });
+    try {
+      final commandId = _routingCommandIds.putIfAbsent(
+        operation,
+        _newRoutingCommandId,
+      );
+      if (detaching) {
+        await widget.api.detachTask(commandId);
+      } else {
+        await widget.api.attachTask(task.id, commandId);
+      }
+      await _pollTaskRouting();
+    } on Object catch (error) {
+      if (mounted) setState(() => _error = '$error');
+      await _pollTaskRouting();
+    } finally {
+      if (mounted) setState(() => _routingBusy = false);
+    }
+  }
+
+  Future<void> _resetUncertainTaskRouting() async {
+    setState(() {
+      _routingBusy = true;
+      _error = null;
+    });
+    try {
+      final commandId = _routingCommandIds.putIfAbsent(
+        'detach',
+        _newRoutingCommandId,
+      );
+      await widget.api.detachTask(commandId);
+      await _pollTaskRouting();
+    } on Object catch (error) {
+      if (mounted) setState(() => _error = '$error');
+      await _pollTaskRouting();
+    } finally {
+      if (mounted) setState(() => _routingBusy = false);
+    }
+  }
+
   Future<void> _createTask() async {
     final instruction = await showDialog<String>(
       context: context,
@@ -761,6 +845,10 @@ class _PiWorkspaceViewState extends State<PiWorkspaceView> {
     WorkspaceSection.tasks => _TaskBoard(
       api: widget.api,
       tasks: _visibleTasks,
+      attachedTaskId: _attachedTaskId,
+      routingAvailable: _routingAvailable,
+      routingUncertain: _routingUncertain,
+      routingBusy: _routingBusy,
       busyTask: _taskBusy,
       listeningTaskId: _listeningTaskId,
       latestTaskProgress: _latestTaskProgress,
@@ -769,6 +857,8 @@ class _PiWorkspaceViewState extends State<PiWorkspaceView> {
         () => _expanded.contains(id) ? _expanded.remove(id) : _expanded.add(id),
       ),
       onAction: _act,
+      onToggleRouting: _toggleTaskRouting,
+      onResetRouting: _resetUncertainTaskRouting,
       onListen: _playTask,
       onToggleNarration: _toggleTaskNarration,
       onCreate: _taskBusy == 'new' ? null : _createTask,
@@ -1634,12 +1724,18 @@ class _TaskBoard extends StatelessWidget {
   const _TaskBoard({
     required this.api,
     required this.tasks,
+    required this.attachedTaskId,
+    required this.routingAvailable,
+    required this.routingUncertain,
+    required this.routingBusy,
     required this.busyTask,
     required this.listeningTaskId,
     required this.latestTaskProgress,
     required this.expanded,
     required this.onToggleDiagram,
     required this.onAction,
+    required this.onToggleRouting,
+    required this.onResetRouting,
     required this.onListen,
     required this.onToggleNarration,
     required this.onCreate,
@@ -1647,12 +1743,18 @@ class _TaskBoard extends StatelessWidget {
 
   final VoiceApi api;
   final List<AgentTask> tasks;
+  final String? attachedTaskId;
+  final bool routingAvailable;
+  final bool routingUncertain;
+  final bool routingBusy;
   final String? busyTask;
   final String? listeningTaskId;
   final String? latestTaskProgress;
   final Set<String> expanded;
   final ValueChanged<String> onToggleDiagram;
   final Future<void> Function(AgentTask task, String action) onAction;
+  final Future<void> Function(AgentTask task) onToggleRouting;
+  final VoidCallback onResetRouting;
   final Future<void> Function(AgentTask task) onListen;
   final ValueChanged<AgentTask> onToggleNarration;
   final VoidCallback? onCreate;
@@ -1680,6 +1782,15 @@ class _TaskBoard extends StatelessWidget {
                       'Run work directly with Pi Durable and follow execution to its output.',
                       style: TextStyle(color: PiColors.of(context).muted),
                     ),
+                    if (routingUncertain) ...[
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        key: const Key('reset-task-routing'),
+                        onPressed: routingBusy ? null : onResetRouting,
+                        icon: const Icon(Icons.link_off_rounded, size: 16),
+                        label: const Text('Reset uncertain routing'),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1717,6 +1828,9 @@ class _TaskBoard extends StatelessWidget {
                 child: _TaskCard(
                   api: api,
                   task: task,
+                  attached: attachedTaskId == task.id,
+                  routingAvailable: routingAvailable,
+                  routingBusy: routingBusy,
                   busy: busyTask == task.id,
                   listening: listeningTaskId == task.id,
                   latestProgress: listeningTaskId == task.id
@@ -1725,6 +1839,7 @@ class _TaskBoard extends StatelessWidget {
                   diagramExpanded: expanded.contains('task:${task.id}'),
                   onToggleDiagram: () => onToggleDiagram('task:${task.id}'),
                   onAction: (action) => onAction(task, action),
+                  onToggleRouting: () => onToggleRouting(task),
                   onListen: () => onListen(task),
                   onToggleNarration: () => onToggleNarration(task),
                 ),
@@ -1740,23 +1855,31 @@ class _TaskCard extends StatelessWidget {
   const _TaskCard({
     required this.api,
     required this.task,
+    required this.attached,
+    required this.routingAvailable,
+    required this.routingBusy,
     required this.busy,
     required this.listening,
     required this.latestProgress,
     required this.diagramExpanded,
     required this.onToggleDiagram,
     required this.onAction,
+    required this.onToggleRouting,
     required this.onListen,
     required this.onToggleNarration,
   });
 
   final VoiceApi api;
   final AgentTask task;
+  final bool attached;
+  final bool routingAvailable;
+  final bool routingBusy;
   final bool busy;
   final bool listening;
   final String? latestProgress;
   final bool diagramExpanded;
   final ValueChanged<String> onAction;
+  final VoidCallback onToggleRouting;
   final VoidCallback onToggleDiagram;
   final VoidCallback onListen;
   final VoidCallback onToggleNarration;
@@ -1960,6 +2083,20 @@ class _TaskCard extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
+                if (routingAvailable)
+                  OutlinedButton.icon(
+                    key: Key('task-routing-${task.id}'),
+                    onPressed: busy || routingBusy || listening
+                        ? null
+                        : onToggleRouting,
+                    icon: Icon(
+                      attached ? Icons.link_off_rounded : Icons.link_rounded,
+                      size: 16,
+                    ),
+                    label: Text(
+                      attached ? 'Detach from conversation' : 'Attach to conversation',
+                    ),
+                  ),
                 OutlinedButton.icon(
                   key: Key('cancel-${task.id}'),
                   onPressed: busy ? null : () => onAction('cancel'),

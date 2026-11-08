@@ -30,6 +30,7 @@ does not grant it workspace or owner authority.
 - The task view uses owner-scoped task and progress queries. It supports task
   creation, eligible cancellation, task attachment/detachment, and separate
   artifact retrieval.
+- Task attachment uses the coordinated owner routing flow in [slice 25](../25-task-routing-integration/plan.md); it is not a client-only state change.
 - Missing task artifacts produce a bounded retrieval error without changing
   the task's terminal outcome.
 - The browser and native shell preserve the private workspace origin. Spoken

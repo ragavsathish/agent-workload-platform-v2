@@ -37,6 +37,13 @@ entity TaskAttachment {
     active: Boolean
 }
 
+entity TaskRoutingCommand {
+    command_id: String
+    owner: String
+    operation: attach | detach
+    task_id: String?
+}
+
 entity PublicTranscriptEntry {
     conversation_id: String
     revision: Integer
@@ -210,14 +217,38 @@ rule RequestTurnStop {
 }
 
 rule AttachOwnedTask {
-    when: AttachTask(caller, task_id)
+    when: AttachTask(caller, task_id, command_id)
     requires: OwnedTask(owner: caller, task_id: task_id)
-    ensures: TaskAttachmentChanged(owner: caller, task_id: task_id, active: true)
+    requires: TaskEligible(owner: caller, task_id: task_id)
+    requires: not exists TaskRoutingCommand{command_id: command_id}
+    ensures: TaskAttachmentChanged(owner: caller, task_id: task_id, command_id: command_id, active: true)
+    ensures: TaskRoutingCommand.created(command_id: command_id, owner: caller, operation: attach, task_id: task_id)
 }
 
 rule DetachTask {
-    when: DetachTaskSession(caller)
-    ensures: TaskAttachmentReleased(owner: caller)
+    when: DetachTaskSession(caller, command_id)
+    requires: not exists TaskRoutingCommand{command_id: command_id}
+    ensures: TaskAttachmentReleased(owner: caller, command_id: command_id)
+    ensures: TaskRoutingCommand.created(command_id: command_id, owner: caller, operation: detach, task_id: null)
+}
+
+rule ReuseTaskRoutingCommand {
+    when: RetryTaskRouting(caller, command_id, operation, task_id)
+    let prior = TaskRoutingCommand{command_id: command_id}
+    requires: exists prior
+    requires: prior.owner = caller
+    requires: prior.operation = operation
+    requires: prior.task_id = task_id
+    ensures: TaskRoutingCommandReused(command_id: command_id)
+}
+
+rule RefuseConflictingTaskRoutingCommand {
+    when: RetryTaskRouting(caller, command_id, operation, task_id)
+    let prior = TaskRoutingCommand{command_id: command_id}
+    requires: exists prior
+    requires: prior.owner = caller
+    requires: prior.operation != operation or prior.task_id != task_id
+    ensures: TaskRoutingCommandConflict(command_id: command_id)
 }
 
 rule CompactSelectedContext {
@@ -324,8 +355,10 @@ surface OwnerConversation {
         ChangeSelection(caller, command_id)
         SubmitTurn(caller, turn_id, origin, input_digest, prompt)
         StopTurn(caller, turn_id)
-        AttachTask(caller, task_id)
-        DetachTaskSession(caller)
+        AttachTask(caller, task_id, command_id)
+        DetachTaskSession(caller, command_id)
+        RetryTaskRouting(caller, command_id, operation, task_id)
+        ReadTaskRouting(caller)
         CompactContext(caller)
         ListConversations(caller)
         ReadActiveTranscript(caller)

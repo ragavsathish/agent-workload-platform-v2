@@ -21,7 +21,7 @@
    "history" :history "transcript" :transcript "catalog" :catalog
    "context" :context "routing" :routing "turn" :turn "submit" :submit
    "observe" :observe "settle" :settle "stop" :stop
-   "compact" :compact "attach" :attach "detach" :detach
+   "compact" :compact "attach" :attach "detach" :detach "routing-command" :routing-command
    "voice-ended" :voice-ended})
 
 (defn- send! [^HttpExchange exchange code value]
@@ -67,6 +67,7 @@
     :catalog (session/catalog system owner)
     :context (session/context system owner)
     :routing (session/routing system owner)
+    :routing-command (session/routing-command system owner (:command-id data))
     :turn (session/turn system owner (:turn-id data))
     :submit (session/submit! system owner
                              {:turn-id (:turn-id data)
@@ -86,8 +87,8 @@
               result)
     :stop (session/stop! system owner (:turn-id data))
     :compact (session/compact! system owner (:command-id data) data)
-    :attach (session/attach! system owner (:task-id data))
-    :detach (session/detach! system owner)
+    :attach (session/attach! system owner (:task-id data) (:command-id data))
+    :detach (session/detach! system owner (:command-id data))
     :voice-ended (session/voice-ended! system owner)))
 
 (defn- status [result]

@@ -77,6 +77,9 @@
                       :schema [:map [:owner :string]] :reads #{:session/state}}
     :session/routing {:description "Selected routing target."
                       :schema [:map [:owner :string]] :reads #{:session/state}}
+    :session/routing-command {:description "One owner routing command receipt."
+                              :schema [:map [:owner :string] [:command-id :string]]
+                              :reads #{:session/state}}
     :session/turn {:description "One owner turn decision and outcome."
                    :schema [:map [:owner :string] [:turn-id :string]]
                    :reads #{:session/state}}}

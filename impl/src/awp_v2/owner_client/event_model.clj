@@ -8,6 +8,7 @@
     {:description "Conversation, task, context, and safe presentation workspace."
      :queries #{:session/selection :session/catalog :session/history
                 :session/transcript :session/context
+                :session/routing
                 :tasking/list :tasking/task :tasking/progress :tasking/artifact}
      :commands #{:session/fresh :session/resume :session/submit :session/stop
                  :session/compact :session/attach :session/detach
@@ -26,6 +27,18 @@
              {:from [:query :session/context]
               :to [:screen :owner-client/workspace]}
              {:from [:query :tasking/list]
+              :to [:screen :owner-client/workspace]}]}
+    :owner-client/route-task
+    {:description "The screen changes temporary task routing and reads back the route."
+     :steps [{:from [:screen :owner-client/workspace]
+              :to [:command :session/attach]}
+             {:from [:command :session/attach]
+              :to [:event :session/fact]}
+             {:from [:event :session/fact]
+              :to [:read-model :session/state]}
+             {:from [:read-model :session/state]
+              :to [:query :session/routing]}
+             {:from [:query :session/routing]
               :to [:screen :owner-client/workspace]}]}
     :owner-client/start-conversation
     {:description "The screen starts a conversation and refreshes its selection."

@@ -26,7 +26,8 @@ node --check "$ROOT/impl/runtime/products/voice-agent/apps/pi-agent/knowledge-qu
   PYTHONPATH=src:../../packages/telemetry/src .venv/bin/python test_live_proxy.py)
 (cd "$ROOT/impl/runtime/products/voice-agent/apps/edge" &&
   uv sync --frozen --no-dev --quiet &&
-  PYTHONPATH=.:../../packages/telemetry/src .venv/bin/python -c 'import bot')
+  PYTHONPATH=.:../../packages/telemetry/src .venv/bin/python -c 'import bot' &&
+  PYTHONPATH=.:../../packages/telemetry/src .venv/bin/python -m unittest test_task_routing.py -v)
 python3 - "$ROOT/impl/runtime" <<'PY'
 import ast
 import pathlib

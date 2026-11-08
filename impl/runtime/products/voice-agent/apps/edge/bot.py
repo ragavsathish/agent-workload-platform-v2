@@ -441,6 +441,33 @@ async def broker_detach_pi_task() -> None:
         raise RuntimeError("Pi task could not be detached")
 
 
+async def broker_pi_task_routing(
+    method: str, path: str, *, command_id: str | None = None, task_id: str | None = None,
+) -> dict[str, object]:
+    headers = {"Authorization": f"Bearer {required_env('INFERENCE_BROKER_TOKEN')}"}
+    if command_id:
+        headers["X-AWP-Command-Id"] = command_id
+    body = {"taskId": task_id} if task_id is not None else None
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0)) as client:
+        response = await client.request(
+            method,
+            f"{required_env('INFERENCE_BROKER_BASE_URL').rstrip('/')}/pi/tasks/{path}",
+            headers=headers,
+            json=body,
+        )
+    if response.is_error:
+        status = response.status_code if response.status_code in {400, 404, 409} else 502
+        try:
+            detail = response.json().get("detail", "Task routing is unavailable")
+        except ValueError:
+            detail = "Task routing is unavailable"
+        raise HTTPException(status_code=status, detail=detail)
+    result = response.json()
+    if not isinstance(result, dict):
+        raise HTTPException(status_code=502, detail="Invalid task routing response")
+    return result
+
+
 def knowledge_entry_path(entry_id: str, suffix: str) -> str:
     if re.fullmatch(r"[a-f0-9]{32}:entry:[1-9][0-9]*", entry_id) is None:
         raise HTTPException(status_code=400, detail="invalid journal entry ID")
@@ -708,6 +735,19 @@ async def run_bot(
             if not isinstance(payload, dict):
                 raise RuntimeError("agent gateway returned an invalid response")
             return payload
+
+
+async def require_attachable_owner_task(request: Request, task_id: str) -> dict[str, object]:
+    try:
+        task = await owner_gateway_request(request, "GET", f"/tasks/{task_id}")
+    except HTTPException as exc:
+        if exc.status_code in {403, 404}:
+            # Do not disclose whether a task exists for another owner.
+            raise HTTPException(status_code=404, detail="task is not available") from exc
+        raise
+    if task.get("status") not in {"pending", "running", "sleeping"}:
+        raise HTTPException(status_code=409, detail="task is not eligible for attachment")
+    return task
 
     async def gateway_list_request(path: str, **kwargs) -> list[dict[str, object]]:
         with telemetry.observe("gateway.get"):
@@ -1532,6 +1572,52 @@ if __name__ == "__main__":
         validate_http_identity(request)
         return JSONResponse(
             await broker_abort_pi_turn(),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/api/pi-task-routing")
+    async def get_pi_task_routing(request: Request):
+        validate_http_identity(request)
+        return JSONResponse(
+            await broker_pi_task_routing("GET", "routing"),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.post("/api/pi-task-routing/attach")
+    async def attach_pi_task_from_workspace(request: Request):
+        validate_http_identity(request)
+        try:
+            payload = await request.json()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="invalid task attachment request") from exc
+        task_id = payload.get("taskId") if isinstance(payload, dict) else None
+        if (
+            not isinstance(task_id, str)
+            or re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", task_id) is None
+            or set(payload) != {"taskId"}
+        ):
+            raise HTTPException(status_code=400, detail="invalid task attachment request")
+        # The task API is the owner authority; Grain independently checks the
+        # same owner and active status before recording the route.
+        await require_attachable_owner_task(request, task_id)
+        command_id = request.headers.get("idempotency-key") or uuid.uuid4().hex
+        if len(command_id) > 128:
+            raise HTTPException(status_code=400, detail="invalid task attachment command ID")
+        return JSONResponse(
+            await broker_pi_task_routing(
+                "POST", "attach", command_id=command_id, task_id=task_id,
+            ),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.post("/api/pi-task-routing/detach")
+    async def detach_pi_task_from_workspace(request: Request):
+        validate_http_identity(request)
+        command_id = request.headers.get("idempotency-key") or uuid.uuid4().hex
+        if len(command_id) > 128:
+            raise HTTPException(status_code=400, detail="invalid task detach command ID")
+        return JSONResponse(
+            await broker_pi_task_routing("POST", "detach", command_id=command_id),
             headers={"Cache-Control": "no-store"},
         )
 

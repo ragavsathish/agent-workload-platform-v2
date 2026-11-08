@@ -69,6 +69,15 @@
       {:query/result {:conversation-id id :task-id (:attachment state)}}
       (missing))))
 
+(defquery :session routing-command
+  {:grain.event-model/reads #{:session/state}}
+  [{:keys [query] :as context}]
+  (let [state (authorized-state context)]
+    (if state
+      {:query/result (or (get-in state [:routing-commands (:command-id query)])
+                         {:operation nil})}
+      (missing))))
+
 (defquery :session turn
   {:grain.event-model/reads #{:session/state}}
   [{:keys [query] :as context}]

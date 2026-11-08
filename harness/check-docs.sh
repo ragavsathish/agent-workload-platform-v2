@@ -163,6 +163,7 @@ for id in $(rg -o '@owner-client-[0-9]+' docs/plan/24-owner-client/spec.feature 
   test_id="${id//-/_}"
   if ! rg -q "$id|$test_id" \
       impl/runtime/products/voice-agent/apps/client/test/owner_workspace_acceptance_test.dart \
+      impl/runtime/products/voice-agent/apps/client/test/owner_task_routing_acceptance_test.dart \
       impl/runtime/products/voice-agent/apps/client/test/transcript_view_test.dart \
       impl/runtime/products/voice-agent/apps/client/test/embedded_navigation_policy_test.dart \
       impl/runtime/products/voice-agent/apps/client/browser_test/mcp_app_renderers.browser.test.js \
@@ -170,6 +171,19 @@ for id in $(rg -o '@owner-client-[0-9]+' docs/plan/24-owner-client/spec.feature 
       impl/test/awp_v2/artifact_acceptance_test.clj \
       impl/test/awp_v2/session_acceptance_test.clj; then
     echo "Acceptance scenario $id has no named client or server check" >&2
+    exit 1
+  fi
+done
+
+for id in $(rg -o '@routing-[0-9]+' docs/plan/25-task-routing-integration/spec.feature | tr -d '@'); do
+  test_id="${id//-/_}"
+  if ! rg -q "$id|$test_id" \
+      impl/test/awp_v2/session_acceptance_test.clj \
+      impl/runtime/products/voice-agent/apps/pi-agent/live-protocol.test.mjs \
+      impl/runtime/products/voice-agent/apps/client/test/owner_task_routing_acceptance_test.dart \
+      impl/runtime/products/voice-agent/apps/broker/test_live_proxy.py \
+      impl/runtime/products/voice-agent/apps/edge/test_task_routing.py; then
+    echo "Acceptance scenario $id has no named routing check" >&2
     exit 1
   fi
 done

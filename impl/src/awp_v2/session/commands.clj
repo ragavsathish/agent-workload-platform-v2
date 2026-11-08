@@ -29,6 +29,7 @@
                       {:keys [owner data]} :command :as context}]
   (let [state (models/owner-state context owner)
         prior-selection (get-in state [:selection-commands (:command-id data)])
+        prior-routing (get-in state [:routing-commands (:command-id data)])
         prior-turn (get-in state [:turns (:turn-id data)])
         selected (:selection state)
         same-selection? (= prior-selection
@@ -107,12 +108,29 @@
 
           (= op :attach)
           (cond
+            prior-routing
+            (if (and (= :attach (:operation prior-routing))
+                     (= (:task-id data) (:task-id prior-routing))
+                     (= (:task-id data) (:attachment state)))
+              {:value {:task-id (:task-id data) :status :attached :reused? true}}
+              (refuse :conflict))
             (nil? selected) (refuse :not-found)
+            (busy? state) (refuse :busy)
             (not (and owned-task? (owned-task? owner (:task-id data))))
             (refuse :not-found)
             :else {:facts [[:task-attached data]] :value {:task-id (:task-id data)}})
 
-          (#{:detach :voice-ended} op)
+          (= op :detach)
+          (cond
+            prior-routing
+            (if (and (= :detach (:operation prior-routing))
+                     (nil? (:attachment state)))
+              {:value {:status :detached :reused? true}}
+              (refuse :conflict))
+            (busy? state) (refuse :busy)
+            :else {:facts [[:task-detached data]] :value {:status :detached}})
+
+          (= op :voice-ended)
           {:facts [[:task-detached data]] :value {:status :detached}}
 
           :else (refuse :incorrect))]

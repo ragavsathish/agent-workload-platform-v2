@@ -19,7 +19,9 @@ type VoiceAgentPort = {
   contextSnapshot(): Promise<PublicContextUsage>;
   compact(): Promise<PublicContextUsage>;
   abort(): Promise<void>;
-  detachTaskSession(): Promise<void>;
+  attachTaskSession(taskId: string, commandId?: string): Promise<{ taskId: string; isStreaming: boolean }>;
+  taskRoutingSnapshot(): Promise<{ taskId: string | null }>;
+  detachTaskSession(commandId?: string): Promise<void>;
   turn(messages: unknown, turnId?: string, origin?: "voice" | "typed"): Promise<string>;
   streamTurn(messages: unknown, onDelta: (delta: string) => void,
     turnId?: string, origin?: "voice" | "typed"): Promise<string>;
@@ -39,6 +41,8 @@ type VoiceRoute =
   | { kind: "context" }
   | { kind: "compact" }
   | { kind: "abort" }
+  | { kind: "attach-task" }
+  | { kind: "task-routing" }
   | { kind: "detach-task" }
   | { kind: "task-narration" }
   | { kind: "turn"; stream: boolean }
@@ -54,6 +58,8 @@ export function matchVoiceRoute(method = "", url = ""): VoiceRoute {
   if (method === "GET" && url === "/v1/context") return { kind: "context" };
   if (method === "POST" && url === "/v1/context/compact") return { kind: "compact" };
   if (method === "POST" && url === "/v1/turn/abort") return { kind: "abort" };
+  if (method === "POST" && url === "/v1/tasks/attach") return { kind: "attach-task" };
+  if (method === "GET" && url === "/v1/tasks/routing") return { kind: "task-routing" };
   if (method === "POST" && url === "/v1/tasks/detach") return { kind: "detach-task" };
   if (method === "POST" && url === "/v1/tasks/narration") return { kind: "task-narration" };
   if (method === "POST" && (url === "/v1/turn" || url === "/v1/turn/stream")) {
@@ -149,9 +155,46 @@ export function createVoiceHttpServer(options: {
       await agent.abort();
       return sendJson(response, 200, { status: "stopped" });
     }
+    if (route.kind === "task-routing") {
+      try {
+        return sendJson(response, 200, await agent.taskRoutingSnapshot());
+      } catch (error) {
+        return sendJson(response, 409, {
+          detail: errorMessage(error, "Task routing is uncertain"),
+        });
+      }
+    }
+    if (route.kind === "attach-task") {
+      try {
+        const body = await readBody(request);
+        const taskId = body && typeof body === "object" && !Array.isArray(body)
+          ? (body as Record<string, unknown>).taskId : undefined;
+        const commandId = request.headers["x-awp-command-id"];
+        if (typeof taskId !== "string" || taskId.length > 128
+          || (commandId !== undefined && typeof commandId !== "string")) {
+          return sendJson(response, 400, { detail: "invalid task attachment request" });
+        }
+        const result = await agent.attachTaskSession(taskId, commandId);
+        return sendJson(response, 200, result);
+      } catch (error) {
+        return sendJson(response, 409, {
+          detail: errorMessage(error, "Pi task could not be attached"),
+        });
+      }
+    }
     if (route.kind === "detach-task") {
-      await agent.detachTaskSession();
-      return sendJson(response, 200, { status: "detached" });
+      try {
+        const commandId = request.headers["x-awp-command-id"];
+        if (commandId !== undefined && typeof commandId !== "string") {
+          return sendJson(response, 400, { detail: "invalid task detach request" });
+        }
+        await agent.detachTaskSession(commandId);
+        return sendJson(response, 200, { status: "detached" });
+      } catch (error) {
+        return sendJson(response, 409, {
+          detail: errorMessage(error, "Pi task could not be detached"),
+        });
+      }
     }
     if (route.kind === "task-narration") {
       try {

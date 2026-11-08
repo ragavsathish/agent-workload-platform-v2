@@ -1,5 +1,6 @@
 -- allium: 3
 -- Cites docs/plan/24-owner-client/spec.feature,
+-- docs/plan/25-task-routing-integration/spec.feature,
 -- docs/wiki/owner-client.md, and raw/v1/client-source-capture.md.
 
 surface OwnerWorkspace {
@@ -14,12 +15,13 @@ surface OwnerWorkspace {
         ReadSessionHistory(caller, owner, conversation_id)
         ReadSessionTranscript(caller, owner)
         ReadSessionContext(caller, owner)
+        ReadTaskRouting(caller)
         StartFresh(caller, command_id, new_id)
         ResumeSaved(caller, command_id, target_id)
         SubmitTurn(caller, turn_id, origin, input_digest, prompt)
         StopTurn(caller, turn_id)
-        AttachTask(caller, task_id)
-        DetachTaskSession(caller)
+        AttachTask(caller, task_id, command_id)
+        DetachTaskSession(caller, command_id)
         CompactContext(caller)
         ListOwnedTasks(caller, owner)
         ReadOwnedTask(caller, owner, request_id)

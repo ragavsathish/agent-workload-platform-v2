@@ -169,8 +169,16 @@
                                  :contextWindow (:contextWindow data)
                                  :estimated true)))))
 
-      :task-attached (assoc owner-state :attachment (:task-id data))
-      :task-detached (assoc owner-state :attachment nil)
+      :task-attached
+      (cond-> (assoc owner-state :attachment (:task-id data))
+        (:command-id data)
+        (assoc-in [:routing-commands (:command-id data)]
+                  {:operation :attach :task-id (:task-id data)}))
+      :task-detached
+      (cond-> (assoc owner-state :attachment nil)
+        (:command-id data)
+        (assoc-in [:routing-commands (:command-id data)]
+                  {:operation :detach}))
       owner-state)))
 
 (defreadmodel :session state

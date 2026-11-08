@@ -36,11 +36,12 @@ Feature: Private owner workspace
     Then one task identity is shown with its status and bounded progress
 
   @owner-client-006
-  Scenario: Task routing remains server controlled
-    Given the server records an owner-authorized task attachment
-    When the owner sends a later turn and the server releases the attachment
-    Then the server routes and releases turns according to its recorded state
-    And the client exposes no direct attach or detach control until the Pi and Grain effects are integrated
+  Scenario: Attach and detach an owned task
+    Given the owner has an eligible durable task
+    When the owner attaches it and sends a later turn
+    Then that turn is routed to the task without changing the selected conversation
+    When the owner detaches the task and sends another turn
+    Then that turn is routed to the selected conversation
 
   @owner-client-007
   Scenario: Retrieve a task artifact separately

@@ -138,6 +138,12 @@ git -C "$TARGET" gc -q --prune=now --aggressive
 [[ -f "$TARGET/specs/owner-client.allium" ]] || {
   echo "FENCE FAILED: slice 24 behavior missing" >&2; exit 1;
 }
+[[ -f "$TARGET/docs/plan/25-task-routing-integration/spec.feature" ]] || {
+  echo "FENCE FAILED: slice 25 contract missing" >&2; exit 1;
+}
+[[ -f "$TARGET/docs/wiki/task-routing.md" ]] || {
+  echo "FENCE FAILED: slice 25 domain rules missing" >&2; exit 1;
+}
 [[ -f "$TARGET/raw/v1/client-source-capture.md" && -d "$TARGET/raw/v1/client" ]] || {
   echo "FENCE FAILED: pinned owner client evidence missing" >&2; exit 1;
 }

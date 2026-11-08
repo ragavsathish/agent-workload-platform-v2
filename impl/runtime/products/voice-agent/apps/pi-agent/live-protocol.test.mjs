@@ -43,7 +43,7 @@ async function waitForGrain(port, process) {
   throw new Error("Grain bridge did not start");
 }
 
-test("live-001/002/004/005/006/007/008 Pi route and Grain process journey", async (t) => {
+test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @routing-005 @routing-006 Pi route and Grain process journey", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "awp-v2-live-protocol-"));
   const socketDir = await mkdtemp("/tmp/awp-live-sock-");
   t.after(() => rm(socketDir, { recursive: true, force: true }));
@@ -86,13 +86,16 @@ test("live-001/002/004/005/006/007/008 Pi route and Grain process journey", asyn
   await writeFile(join(agentDir, "auth.json"), "{}");
 
   const taskId = "4b860912-01a3-455b-9fa4-7a71c93500ee";
+  const otherTaskId = "5c971a23-12b4-466c-af15-8b82d04611ff";
   execFileSync("clojure", [
     "-J--add-opens=java.base/java.nio=ALL-UNNAMED",
     "-J--add-exports=java.base/sun.nio.ch=ALL-UNNAMED", "-M", "-e",
-    `(require '[awp-v2.tasking.api :as t]) (let [s (t/open-system {:storage-dir ${JSON.stringify(taskingDir)} :eligible-workspaces #{"project-a"}})] (t/submit! s ${JSON.stringify(owner)} {:request-id #uuid ${JSON.stringify(taskId)} :owner ${JSON.stringify(owner)} :instruction "Live task" :workspace "project-a"}) (t/dispatch! s #uuid ${JSON.stringify(taskId)} "project-a") (t/close-system! s))`,
+    `(require '[awp-v2.tasking.api :as t]) (let [s (t/open-system {:storage-dir ${JSON.stringify(taskingDir)} :eligible-workspaces #{"project-a"}})] (t/submit! s ${JSON.stringify(owner)} {:request-id #uuid ${JSON.stringify(taskId)} :owner ${JSON.stringify(owner)} :instruction "Live task" :workspace "project-a"}) (t/dispatch! s #uuid ${JSON.stringify(taskId)} "project-a") (t/submit! s ${JSON.stringify(owner)} {:request-id #uuid ${JSON.stringify(otherTaskId)} :owner ${JSON.stringify(owner)} :instruction "Other live task" :workspace "project-a"}) (t/dispatch! s #uuid ${JSON.stringify(otherTaskId)} "project-a") (t/close-system! s))`,
   ], { cwd: implDir, stdio: "ignore" });
   const taskPrompts = [];
+  let taskSocketConnections = 0;
   const taskSocket = createSocketServer((socket) => {
+    taskSocketConnections += 1;
     const send = (record) => socket.write(`${JSON.stringify(record)}\n`);
     send({ type: "remote_attached", taskId });
     let buffer = "";
@@ -119,6 +122,26 @@ test("live-001/002/004/005/006/007/008 Pi route and Grain process journey", asyn
   });
   await new Promise((resolveListen) => taskSocket.listen(join(socketDir, `${taskId}.sock`), resolveListen));
   t.after(() => taskSocket.close());
+  let otherTaskSocketConnections = 0;
+  const otherTaskSocket = createSocketServer((socket) => {
+    otherTaskSocketConnections += 1;
+    socket.write(`${JSON.stringify({ type: "remote_attached", taskId: otherTaskId })}\n`);
+    let buffer = "";
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      while (buffer.includes("\n")) {
+        const end = buffer.indexOf("\n");
+        const record = JSON.parse(buffer.slice(0, end));
+        buffer = buffer.slice(end + 1);
+        if (record.type === "get_state") socket.write(`${JSON.stringify({ type: "response", id: record.id,
+          success: true, data: { isStreaming: false, messageCount: 0 } })}\n`);
+      }
+    });
+  });
+  await new Promise((resolveListen) => otherTaskSocket.listen(
+    join(socketDir, `${otherTaskId}.sock`), resolveListen,
+  ));
+  t.after(() => otherTaskSocket.close());
 
   const startGrain = () => spawn("clojure", [
     "-J--add-opens=java.base/java.nio=ALL-UNNAMED",
@@ -225,7 +248,26 @@ test("live-001/002/004/005/006/007/008 Pi route and Grain process journey", asyn
     ["typed", "Pi heard typed", "uncertain", "spoken", "Pi heard spoken"]);
   const catalog = await call("GET", "/v1/sessions");
   assert.equal(catalog.body.sessions[0].id, selected.id);
-  await agent.attachTask(taskId);
+  const attachedRoute = await call("POST", "/v1/tasks/attach", { taskId },
+    { "x-awp-command-id": "protocol-task-attach" });
+  assert.equal(attachedRoute.status, 200);
+  assert.equal((await call("GET", "/v1/tasks/routing")).body.taskId, taskId);
+  const attachedRetry = await call("POST", "/v1/tasks/attach", { taskId },
+    { "x-awp-command-id": "protocol-task-attach" });
+  assert.equal(attachedRetry.status, 200);
+  const conflictingRetry = await call("POST", "/v1/tasks/attach", { taskId: otherTaskId },
+    { "x-awp-command-id": "protocol-task-attach" });
+  assert.equal(conflictingRetry.status, 409,
+    JSON.stringify(await grainClient.call("routing-command", { "command-id": "protocol-task-attach" })));
+  assert.equal(otherTaskSocketConnections, 0);
+  assert.equal(taskSocketConnections, 1);
+  assert.equal((await call("GET", "/v1/tasks/routing")).body.taskId, taskId);
+  const missingTask = "6da82b34-23c5-477d-b026-9c93e15722aa";
+  const failedAttach = await call("POST", "/v1/tasks/attach", { taskId: missingTask },
+    { "x-awp-command-id": "protocol-failed-attach" });
+  assert.equal(failedAttach.status, 409);
+  assert.equal((await call("GET", "/v1/tasks/routing")).body.taskId, taskId);
+  assert.equal(taskSocketConnections, 2);
   const attached = await call("POST", "/v1/turn", { messages: [
     { role: "system", content: "Answer briefly." }, { role: "user", content: "task prompt" },
   ] }, { "x-awp-turn-id": "protocol-task", "x-awp-origin": "voice" });
@@ -279,6 +321,8 @@ test("live-001/002/004/005/006/007/008 Pi route and Grain process journey", asyn
   }
   assert.ok(["uncertain", "interrupted"].includes(interruptedTurn?.status),
     JSON.stringify(interruptedTurn));
+  await agent.attachTaskSession(taskId, "protocol-restart-attachment");
+  assert.equal((await call("GET", "/v1/tasks/routing")).body.taskId, taskId);
   grain.kill("SIGTERM");
   await new Promise((resolveExit) => grain.once("exit", resolveExit));
   grain = startGrain();
@@ -287,6 +331,19 @@ test("live-001/002/004/005/006/007/008 Pi route and Grain process journey", asyn
   const recovered = (await call("GET", "/v1/transcript")).body.entries;
   assert.deepEqual(recovered.slice(0, history.body.entries.length), history.body.entries);
   assert.equal(recovered.at(-1).status, "uncertain");
+  const staleRoute = await call("GET", "/v1/tasks/routing");
+  assert.equal(staleRoute.status, 409);
+  assert.match(staleRoute.body.detail, /uncertain/u);
+  const heldTurn = await call("POST", "/v1/turn", { messages: [
+    { role: "system", content: "Answer briefly." }, { role: "user", content: "held until route repair" },
+  ] }, { "x-awp-turn-id": "protocol-held-routing", "x-awp-origin": "typed" });
+  assert.equal(heldTurn.status, 502);
+  assert.equal(modelCalls, 3);
+  assert.deepEqual(taskPrompts, ["task prompt"]);
+  const reconciled = await call("POST", "/v1/tasks/detach", {},
+    { "x-awp-command-id": "protocol-reconcile-detach" });
+  assert.equal(reconciled.status, 200);
+  assert.equal((await call("GET", "/v1/tasks/routing")).body.taskId, null);
   const unauthorized = await call("GET", "/v1/sessions", undefined,
     { authorization: "Bearer wrong" });
   assert.equal(unauthorized.status, 401);

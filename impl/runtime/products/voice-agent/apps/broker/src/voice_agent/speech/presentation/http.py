@@ -102,6 +102,10 @@ class TaskNarrationRequest(BaseModel):
     events: list[str] = Field(min_length=1, max_length=40)
 
 
+class PiTaskAttachmentRequest(BaseModel):
+    taskId: str = Field(pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await asyncio.to_thread(load_model, os.environ["MLX_STT_MODEL"])
@@ -620,23 +624,59 @@ async def abort_pi_turn(request: Request, _: None = Depends(authenticate)) -> Re
 
 
 @app.post("/v1/pi/tasks/detach", response_model=None)
-async def detach_pi_task(request: Request, _: None = Depends(authenticate)) -> Response:
+async def detach_pi_task(
+    request: Request,
+    _: None = Depends(authenticate),
+    x_awp_command_id: Annotated[str | None, Header(alias="X-AWP-Command-Id")] = None,
+) -> Response:
     """Release the voice process's live attachment to a durable Pi task."""
+    if x_awp_command_id is not None and not (1 <= len(x_awp_command_id) <= 128):
+        raise HTTPException(status_code=400, detail="invalid task detach command ID")
+    return await _pi_task_route_request(
+        request, "/v1/tasks/detach", method="POST", command_id=x_awp_command_id,
+    )
 
+
+async def _pi_task_route_request(
+    request: Request, path: str, *, method: str, command_id: str | None = None,
+    body: bytes | None = None,
+) -> Response:
+    headers = _pi_headers()
+    if command_id:
+        headers["X-AWP-Command-Id"] = command_id
     try:
-        response = await request.app.state.http.post(
-            f"{_pi_service_url()}/v1/tasks/detach",
-            headers=_pi_headers(),
-            timeout=10.0,
+        response = await request.app.state.http.request(
+            method, f"{_pi_service_url()}{path}", headers=headers, content=body, timeout=10.0,
         )
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail="Pi task could not be detached") from exc
-    if response.status_code != 200 or len(response.content) > 16_384:
-        raise HTTPException(status_code=502, detail="Pi task could not be detached")
+        raise HTTPException(status_code=502, detail="Pi task routing is unavailable") from exc
+    if response.status_code not in {200, 400, 404, 409} or len(response.content) > 16_384:
+        raise HTTPException(status_code=502, detail="Pi task routing is unavailable")
     return Response(
         content=response.content,
+        status_code=response.status_code,
         media_type="application/json",
         headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.get("/v1/pi/tasks/routing", response_model=None)
+async def get_pi_task_routing(request: Request, _: None = Depends(authenticate)) -> Response:
+    return await _pi_task_route_request(request, "/v1/tasks/routing", method="GET")
+
+
+@app.post("/v1/pi/tasks/attach", response_model=None)
+async def attach_pi_task(
+    request: Request,
+    payload: PiTaskAttachmentRequest,
+    _: None = Depends(authenticate),
+    x_awp_command_id: Annotated[str | None, Header(alias="X-AWP-Command-Id")] = None,
+) -> Response:
+    if x_awp_command_id is not None and not (1 <= len(x_awp_command_id) <= 128):
+        raise HTTPException(status_code=400, detail="invalid task attachment command ID")
+    return await _pi_task_route_request(
+        request, "/v1/tasks/attach", method="POST", command_id=x_awp_command_id,
+        body=json.dumps({"taskId": payload.taskId}).encode("utf-8"),
     )
 
 

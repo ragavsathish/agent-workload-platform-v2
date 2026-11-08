@@ -1,4 +1,4 @@
-"""Protocol check for the broker's production Pi forwarding routes."""
+"""Protocol check for the broker's production Pi forwarding routes; @routing-001 @routing-004."""
 
 import asyncio
 import json
@@ -26,6 +26,12 @@ async def main() -> None:
             return httpx.Response(201, json={"id": "selected"})
         if request.url.path == "/v1/context":
             return httpx.Response(200, json={"tokens": 19, "canCompact": False})
+        if request.url.path == "/v1/tasks/attach":
+            return httpx.Response(200, json={"taskId": "4b860912-01a3-455b-9fa4-7a71c93500ee"})
+        if request.url.path == "/v1/tasks/routing":
+            return httpx.Response(200, json={"taskId": "4b860912-01a3-455b-9fa4-7a71c93500ee"})
+        if request.url.path == "/v1/tasks/detach":
+            return httpx.Response(200, json={"status": "detached"})
         return httpx.Response(404, json={"detail": "unexpected route"})
 
     broker.app.state.http = httpx.AsyncClient(transport=httpx.MockTransport(host))
@@ -63,9 +69,37 @@ async def main() -> None:
         assert context.json()["tokens"] == 19
         assert forwarded[-1].headers["x-awp-owner"] == "owner@example.test"
 
+        task_id = "4b860912-01a3-455b-9fa4-7a71c93500ee"
+        attached = await client.post("/v1/pi/tasks/attach", headers={
+            "authorization": f"Bearer {broker.BROKER_TOKEN}",
+            "x-awp-command-id": "route-command",
+        }, json={"taskId": task_id})
+        assert attached.status_code == 200, attached.text
+        assert attached.json()["taskId"] == task_id
+        assert forwarded[-1].url.path == "/v1/tasks/attach"
+        assert forwarded[-1].headers["x-awp-command-id"] == "route-command"
+        assert forwarded[-1].headers["x-awp-owner"] == "owner@example.test"
+        assert json.loads(forwarded[-1].content) == {"taskId": task_id}
+
+        routing = await client.get("/v1/pi/tasks/routing", headers={
+            "authorization": f"Bearer {broker.BROKER_TOKEN}",
+        })
+        assert routing.status_code == 200
+        assert routing.json()["taskId"] == task_id
+        assert forwarded[-1].url.path == "/v1/tasks/routing"
+
+        detached = await client.post("/v1/pi/tasks/detach", headers={
+            "authorization": f"Bearer {broker.BROKER_TOKEN}",
+            "x-awp-command-id": "route-detach",
+        })
+        assert detached.status_code == 200
+        assert detached.json()["status"] == "detached"
+        assert forwarded[-1].url.path == "/v1/tasks/detach"
+        assert forwarded[-1].headers["x-awp-command-id"] == "route-detach"
+
         denied = await client.post("/v1/pi/chat/completions", json={})
         assert denied.status_code == 401
-        assert len(forwarded) == 3
+        assert len(forwarded) == 6
 
     await broker.app.state.http.aclose()
 

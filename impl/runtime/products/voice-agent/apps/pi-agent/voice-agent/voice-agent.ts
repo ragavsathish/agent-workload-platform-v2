@@ -142,6 +142,8 @@ export class VoiceAgent {
   private readonly transcript: PublicTranscript;
   private activeAssistantId?: string;
   private readonly operations = createSerialExecutor();
+  private routingQueue: Promise<void> = Promise.resolve();
+  private routingBusy = false;
   private activeDeltaSink?: (delta: string) => void;
   private estimatedContextTokens?: number;
   private compacting = false;
@@ -239,6 +241,19 @@ export class VoiceAgent {
     throw new Error("Pi voice agent is closed");
   }
 
+  private withRoutingTransition<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.routingQueue.then(async () => {
+      this.routingBusy = true;
+      try {
+        return await operation();
+      } finally {
+        this.routingBusy = false;
+      }
+    });
+    this.routingQueue = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
   private observe(kind: string, observation: Record<string, unknown>): void {
     const turnId = this.activeTurnId;
     if (!turnId) return;
@@ -246,19 +261,75 @@ export class VoiceAgent {
       this.grain.call("observe", { "turn-id": turnId, observation: { kind, ...observation } }));
   }
 
-  private attachTask(taskId: string): Promise<{ taskId: string; isStreaming: boolean }> {
+  async attachTaskSession(taskId: string, commandId = randomUUID()): Promise<{ taskId: string; isStreaming: boolean }> {
+    return this.withRoutingTransition(() => this.attachTaskSessionOnce(taskId, commandId));
+  }
+
+  private async attachTaskSessionOnce(taskId: string, commandId: string): Promise<{ taskId: string; isStreaming: boolean }> {
+    if (this.operations.isBusy()) {
+      throw new Error("Pi is busy; stop or finish the active turn before routing a task");
+    }
     const remote = this.remoteTask;
     const grain = this.grain;
-    return Effect.runPromise(Effect.gen(function* () {
-      const state = yield* Effect.tryPromise(() => remote.attach(taskId));
-      yield* Effect.tryPromise(() => grain.call("attach", { "task-id": taskId })).pipe(
-        Effect.catchAll((error) => Effect.gen(function* () {
-          yield* Effect.tryPromise(() => remote.detach());
-          return yield* Effect.fail(error);
-        })),
-      );
+    const routing = await grain.call("routing");
+    const recordedTaskId = typeof routing["task-id"] === "string" ? routing["task-id"] : undefined;
+    const priorTaskId = remote.attachedTaskId;
+    const priorCommand = await grain.call("routing-command", { "command-id": commandId });
+    const priorOperation = priorCommand.operation;
+    const priorCommandTaskId = typeof priorCommand["task-id"] === "string"
+      ? priorCommand["task-id"] : undefined;
+    if (priorOperation !== undefined && priorOperation !== null
+      && (priorOperation !== "attach" || priorCommandTaskId !== taskId)) {
+      throw new Error("task routing command identity conflicts with a prior input");
+    }
+    if (priorOperation === "attach") {
+      if (recordedTaskId !== taskId || priorTaskId !== taskId) {
+        throw new Error("task routing command completed earlier; current routing has changed");
+      }
+      const current = await remote.state();
+      return { taskId, isStreaming: current.isStreaming };
+    }
+    if (recordedTaskId === taskId && priorTaskId === taskId) {
+      // Ask Grain to validate the command receipt even for a no-op retry; a
+      // reused command identity with different input must still conflict.
+      await grain.call("attach", { "task-id": taskId, "command-id": commandId });
+      const current = await remote.state();
+      return { taskId, isStreaming: current.isStreaming };
+    }
+    if (recordedTaskId !== priorTaskId) {
+      throw new Error("task routing is uncertain; inspect routing before attaching a task");
+    }
+    try {
+      const state = await remote.attach(taskId);
+      await grain.call("attach", { "task-id": taskId, "command-id": commandId });
       return state;
-    }));
+    } catch (error) {
+      try {
+        if (priorTaskId) await remote.attach(priorTaskId);
+        else await remote.detach();
+      } catch {
+        // The route remains fail-closed: runTurn compares the Grain decision
+        // with the live socket before dispatching any subsequent turn.
+      }
+      throw error;
+    }
+  }
+
+  private attachTask(taskId: string): Promise<{ taskId: string; isStreaming: boolean }> {
+    return this.attachTaskSession(taskId);
+  }
+
+  async taskRoutingSnapshot(): Promise<{ taskId: string | null }> {
+    if (this.routingBusy) {
+      throw new Error("task routing is uncertain while a route transition is in progress");
+    }
+    const routing = await this.grain.call("routing");
+    const recordedTaskId = typeof routing["task-id"] === "string" ? routing["task-id"] : undefined;
+    const liveTaskId = this.remoteTask.attachedTaskId;
+    if (recordedTaskId !== liveTaskId) {
+      throw new Error("task routing is uncertain; inspect before continuing");
+    }
+    return { taskId: recordedTaskId ?? null };
   }
 
   private activeSession(): AgentSession | undefined {
@@ -358,11 +429,22 @@ export class VoiceAgent {
   }
 
   async startFreshSession(commandId = randomUUID()): Promise<{ id: string }> {
+    return this.withRoutingTransition(() => this.startFreshSessionOnce(commandId));
+  }
+
+  private async startFreshSessionOnce(commandId: string): Promise<{ id: string }> {
     if (this.operations.isBusy()) {
       throw new Error("Pi is busy; stop or finish the active turn before starting a new session");
     }
-    const result = await this.grain.call("fresh", { "command-id": commandId });
+    const priorTaskId = this.remoteTask.attachedTaskId;
     await this.remoteTask.detach();
+    let result: Record<string, unknown>;
+    try {
+      result = await this.grain.call("fresh", { "command-id": commandId });
+    } catch (error) {
+      if (priorTaskId) await this.remoteTask.attach(priorTaskId).catch(() => undefined);
+      throw error;
+    }
     const manager = SessionManager.create(this.settings.cwd, this.settings.sessionDir,
       { id: String(result.id) });
     this.replaceWithUnbound(manager);
@@ -374,6 +456,10 @@ export class VoiceAgent {
   }
 
   async resumeSession(sessionId: string, commandId = randomUUID()): Promise<{ id: string } | undefined> {
+    return this.withRoutingTransition(() => this.resumeSessionOnce(sessionId, commandId));
+  }
+
+  private async resumeSessionOnce(sessionId: string, commandId: string): Promise<{ id: string } | undefined> {
     if (this.operations.isBusy()) {
       throw new Error("Pi is busy; stop or finish the active turn before resuming a session");
     }
@@ -391,8 +477,14 @@ export class VoiceAgent {
     const manager = path
       ? SessionManager.open(path, this.settings.sessionDir, this.settings.cwd)
       : SessionManager.create(this.settings.cwd, this.settings.sessionDir, { id: sessionId });
-    await this.grain.call("resume", { "command-id": commandId, "conversation-id": sessionId });
+    const priorTaskId = this.remoteTask.attachedTaskId;
     await this.remoteTask.detach();
+    try {
+      await this.grain.call("resume", { "command-id": commandId, "conversation-id": sessionId });
+    } catch (error) {
+      if (priorTaskId) await this.remoteTask.attach(priorTaskId).catch(() => undefined);
+      throw error;
+    }
     const entries = manager.getEntries();
     const usage = getLastAssistantUsage(entries);
     const modelChange = [...entries].reverse().find((entry) => entry.type === "model_change");
@@ -521,6 +613,7 @@ export class VoiceAgent {
 
   private async runTurn(rawMessages: unknown, turnId: string,
     origin: "voice" | "typed", onDelta?: (delta: string) => void): Promise<string> {
+    if (this.routingBusy) throw new Error("task routing is changing; inspect routing and retry");
     const parsed = parseVoiceTurn(rawMessages);
     const decision = await this.grain.call("submit", {
       "turn-id": turnId, origin, messages: rawMessages,
@@ -590,12 +683,40 @@ export class VoiceAgent {
     else await this.activeSession()?.abort();
   }
 
-  async detachTaskSession(): Promise<void> {
+  async detachTaskSession(commandId = randomUUID()): Promise<void> {
+    return this.withRoutingTransition(() => this.detachTaskSessionOnce(commandId));
+  }
+
+  private async detachTaskSessionOnce(commandId: string): Promise<void> {
+    if (this.operations.isBusy()) {
+      throw new Error("Pi is busy; stop or finish the active turn before detaching a task");
+    }
+    const priorTaskId = this.remoteTask.attachedTaskId;
+    const routing = await this.grain.call("routing");
+    const recordedTaskId = typeof routing["task-id"] === "string" ? routing["task-id"] : undefined;
+    const priorCommand = await this.grain.call("routing-command", { "command-id": commandId });
+    const priorOperation = priorCommand.operation;
+    if (priorOperation !== undefined && priorOperation !== null
+      && priorOperation !== "detach") {
+      throw new Error("task routing command identity conflicts with a prior input");
+    }
+    if (priorOperation === "detach") {
+      if (recordedTaskId !== undefined || priorTaskId !== undefined) {
+        throw new Error("task routing command completed earlier; current routing has changed");
+      }
+      return;
+    }
     await this.remoteTask.detach();
-    await this.grain.call("detach");
+    try {
+      await this.grain.call("detach", { "command-id": commandId });
+    } catch (error) {
+      if (priorTaskId) await this.remoteTask.attach(priorTaskId).catch(() => undefined);
+      throw error;
+    }
   }
 
   async close(): Promise<void> {
+    await this.routingQueue;
     const session = this.activeSession();
     if (this.sessionState.kind === "active") this.sessionState.unsubscribe();
     this.sessionState = { kind: "closed" };

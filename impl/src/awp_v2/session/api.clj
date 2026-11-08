@@ -116,6 +116,10 @@
 (defn catalog [system actor] (read! system actor :catalog {}))
 (defn context [system actor] (read! system actor :context {}))
 (defn routing [system actor] (read! system actor :routing {}))
+(defn routing-command [system actor command-id]
+  (if (valid-command-id? command-id)
+    (read! system actor :routing-command {:command-id command-id})
+    {:error :incorrect}))
 (defn turn [system actor turn-id] (read! system actor :turn {:turn-id turn-id}))
 
 (defn- parsed-turn [messages origin]
@@ -204,9 +208,15 @@
                                 (some? tokens) (assoc :tokens tokens
                                                       :contextWindow contextWindow)))
     {:error :incorrect}))
-(defn attach! [system actor task-id]
-  (issue! system actor :attach {:task-id task-id :at (now)}))
-(defn detach! [system actor]
-  (issue! system actor :detach {:at (now)}))
+(defn attach! [system actor task-id & [command-id]]
+  (if (or (nil? command-id) (valid-command-id? command-id))
+    (issue! system actor :attach (cond-> {:task-id task-id :at (now)}
+                                   command-id (assoc :command-id command-id)))
+    {:error :incorrect}))
+(defn detach! [system actor & [command-id]]
+  (if (or (nil? command-id) (valid-command-id? command-id))
+    (issue! system actor :detach (cond-> {:at (now)}
+                                  command-id (assoc :command-id command-id)))
+    {:error :incorrect}))
 (defn voice-ended! [system actor]
   (issue! system actor :voice-ended {:at (now)}))

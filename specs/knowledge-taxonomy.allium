@@ -1,0 +1,178 @@
+-- allium: 3
+-- Sources: docs/plan/10-knowledge-taxonomy/spec.feature,
+-- docs/wiki/knowledge-taxonomy.md, raw/v1/knowledge-processor.mjs.
+
+entity TaxonomyVersion {
+    version_id: String
+    status: String
+}
+
+entity KnowledgeCategory {
+    category_id: String
+    version_id: String
+    parent_id: String
+    kind: String
+}
+
+entity CategoryMapping {
+    item_id: String
+    from_version: String
+    to_version: String
+    category_id: String
+    decision_id: String
+}
+
+entity ModelProposal {
+    proposal_id: String
+    result_id: String
+    owner: String
+    source_id: String
+    category_id: String
+    taxonomy_version: String
+    evidence: String
+    model_version: String
+    prompt_version: String
+    status: String
+    revision: Integer
+}
+
+entity ReviewedRelation {
+    relation_id: String
+    owner: String
+    source_id: String
+    left_id: String
+    right_id: String
+    relation_kind: String
+    evidence: String
+    status: String
+}
+
+entity ModelQualityGate {
+    gate_id: String
+    corpus_digest: String
+    taxonomy_version: String
+    status: String
+}
+
+rule DefineTaxonomyVersion {
+    when: TaxonomyDefined(version_id)
+    requires: not exists TaxonomyVersion{version_id: version_id}
+    ensures: TaxonomyVersion.created(version_id: version_id, status: "active")
+}
+
+rule DefineKnowledgeCategory {
+    when: CategoryDefined(category_id, version_id, parent_id, kind)
+    let version = TaxonomyVersion{version_id: version_id}
+    requires: exists version
+    requires: version.status = "active"
+    requires: not exists KnowledgeCategory{category_id: category_id, version_id: version_id}
+    ensures: KnowledgeCategory.created(category_id: category_id, version_id: version_id, parent_id: parent_id, kind: kind)
+}
+
+rule MapCategoryVersion {
+    when: CategoryMappingDecided(item_id, from_version, to_version, category_id, decision_id)
+    let version = TaxonomyVersion{version_id: to_version}
+    let category = KnowledgeCategory{category_id: category_id, version_id: to_version}
+    requires: exists version
+    requires: exists category
+    requires: not exists CategoryMapping{item_id: item_id, to_version: to_version}
+    ensures: CategoryMapping.created(item_id: item_id, from_version: from_version, to_version: to_version, category_id: category_id, decision_id: decision_id)
+}
+
+rule RecordModelProposal {
+    when: ProposalValidated(proposal_id, result_id, owner, source_id, category_id, taxonomy_version, evidence, model_version, prompt_version)
+    let category = KnowledgeCategory{category_id: category_id, version_id: taxonomy_version}
+    requires: exists category
+    requires: not exists ModelProposal{proposal_id: proposal_id}
+    ensures: ModelProposal.created(proposal_id: proposal_id, result_id: result_id, owner: owner, source_id: source_id, category_id: category_id, taxonomy_version: taxonomy_version, evidence: evidence, model_version: model_version, prompt_version: prompt_version, status: "pending", revision: 0)
+}
+
+rule DecideModelProposal {
+    when: ProposalReviewed(proposal_id, owner, expected_revision, decision)
+    let proposal = ModelProposal{proposal_id: proposal_id}
+    requires: exists proposal
+    requires: proposal.owner = owner
+    requires: proposal.revision = expected_revision
+    requires: proposal.status = "pending"
+    ensures: proposal.status = decision
+    ensures: proposal.revision = expected_revision + 1
+}
+
+rule RevokeModelProposal {
+    when: ProposalRevoked(proposal_id, owner, expected_revision)
+    let proposal = ModelProposal{proposal_id: proposal_id}
+    requires: exists proposal
+    requires: proposal.owner = owner
+    requires: proposal.revision = expected_revision
+    requires: proposal.status = "accepted"
+    ensures: proposal.status = "revoked"
+    ensures: proposal.revision = expected_revision + 1
+}
+
+rule RecordReviewedRelation {
+    when: RelationAccepted(relation_id, owner, source_id, left_id, right_id, relation_kind, evidence)
+    let left = ModelProposal{proposal_id: left_id}
+    let right = ModelProposal{proposal_id: right_id}
+    requires: exists left
+    requires: exists right
+    requires: left.owner = owner
+    requires: right.owner = owner
+    requires: left.status = "accepted"
+    requires: right.status = "accepted"
+    requires: not exists ReviewedRelation{relation_id: relation_id}
+    ensures: ReviewedRelation.created(relation_id: relation_id, owner: owner, source_id: source_id, left_id: left_id, right_id: right_id, relation_kind: relation_kind, evidence: evidence, status: "accepted")
+}
+
+rule RevokeReviewedRelation {
+    when: RelationRevoked(relation_id, owner)
+    let relation = ReviewedRelation{relation_id: relation_id}
+    requires: exists relation
+    requires: relation.owner = owner
+    requires: relation.status = "accepted"
+    ensures: relation.status = "revoked"
+}
+
+rule OpenModelQualityGate {
+    when: QualityGateDefined(gate_id, corpus_digest, taxonomy_version)
+    requires: not exists ModelQualityGate{gate_id: gate_id}
+    ensures: ModelQualityGate.created(gate_id: gate_id, corpus_digest: corpus_digest, taxonomy_version: taxonomy_version, status: "open")
+}
+
+rule PassModelQualityGate {
+    when: QualityEvidenceAccepted(gate_id)
+    let gate = ModelQualityGate{gate_id: gate_id}
+    requires: exists gate
+    requires: gate.status = "open"
+    ensures: gate.status = "passed"
+}
+
+surface TaxonomyAdministration {
+    facing version: TaxonomyVersion
+    exposes:
+        version.version_id
+    provides:
+        TaxonomyDefined(version_id)
+        CategoryDefined(category_id, version_id, parent_id, kind)
+        CategoryMappingDecided(item_id, from_version, to_version, category_id, decision_id)
+}
+
+surface ProposalReview {
+    facing proposal: ModelProposal
+    exposes:
+        proposal.proposal_id
+    provides:
+        ProposalValidated(proposal_id, result_id, owner, source_id, category_id, taxonomy_version, evidence, model_version, prompt_version)
+        ProposalReviewed(proposal_id, owner, expected_revision, decision)
+        ProposalRevoked(proposal_id, owner, expected_revision)
+        RelationAccepted(relation_id, owner, source_id, left_id, right_id, relation_kind, evidence)
+        RelationRevoked(relation_id, owner)
+}
+
+surface ModelQualityReview {
+    facing gate: ModelQualityGate
+    exposes:
+        gate.gate_id
+    provides:
+        QualityGateDefined(gate_id, corpus_digest, taxonomy_version)
+        QualityEvidenceAccepted(gate_id)
+}

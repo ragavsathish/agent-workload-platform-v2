@@ -122,6 +122,7 @@ export function preparePendingCandidates(drafts) {
     id: `legacy-${sourceIndex + 1}-${index + 1}`,
     owner: "unverified-owner", sourceId: item.messageId ?? item.id ?? `legacy-source-${index + 1}`,
     sourceText: item.transcript, branch: draft.purpose === "classifier_owner_turn_annotation_draft" ? "assertion" : "journal",
+    modelSuggestions: item.predictedEntries ?? [],
     semanticFamilyId: item.semanticFamilyId ?? `unassigned-${sourceIndex + 1}-${index + 1}`,
     split: item.split ?? "unassigned", sourceKind: item.sourceKind ?? "unverified",
     errorSlice: item.errorSlice ?? "unassigned", sampleKind: "unassigned",

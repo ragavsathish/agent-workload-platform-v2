@@ -92,6 +92,29 @@
 (defn taxonomy-outcomes [system actor] (read! system actor :taxonomy-outcomes {}))
 (defn quality-cases [system actor] (read! system actor :quality-cases {}))
 (defn quality-run [system actor run-id] (read! system actor :quality-run-status {:run-id run-id}))
+(defn workbench-view [system actor] (read! system actor :workbench-view {}))
+
+(def ^:private workbench-ops
+  #{:workbench-case :workbench-metadata :workbench-family :workbench-review
+    :workbench-privacy :workbench-disposition})
+(def ^:private workbench-fields
+  {:workbench-case #{:case-id :source-id :source-digest :branch}
+   :workbench-metadata #{:snapshot-id :snapshot-digest :legacy-id :resource-digest}
+   :workbench-family #{:case-id :family-id :split :expected-revision :action-id :at}
+   :workbench-review #{:case-id :expected-digest :decision :reviewer-role :expected-revision :action-id :at}
+   :workbench-privacy #{:case-id :decision :expected-revision :action-id :at}
+   :workbench-disposition #{:snapshot-id :snapshot-digest :legacy-id :disposition :source-id
+                            :reason-digest :evidence-digest :verified-link-digest
+                            :expected-revision :action-id :at}})
+(defn workbench-command! [system actor owner op data]
+  (if (and (contains? workbench-ops op) (map? data)
+           (= (set (keys data)) (get workbench-fields op))
+           (every? (fn [value] (or (and (string? value) (<= (count value) 256))
+                                   (keyword? value)
+                                   (and (integer? value) (<= 0 value))))
+                   (vals data)))
+    (issue-as! system actor owner op data)
+    {:error :incorrect}))
 
 (defn quality-register-case! [system owner {:keys [case-id source-id branch family-id split source-digest] :as data}]
   (if (and (every? #(nonblank-bounded? % 256) [case-id source-id family-id source-digest])

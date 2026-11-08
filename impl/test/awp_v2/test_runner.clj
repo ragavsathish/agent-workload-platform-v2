@@ -11,6 +11,7 @@
             [awp-v2.grounded-relations-acceptance-test]
             [awp-v2.relation-model-reliability-acceptance-test]
             [awp-v2.knowledge-quality-acceptance-test]
+            [awp-v2.workbench-acceptance-test]
             [awp-v2.song-acceptance-test]
             [awp-v2.incident-acceptance-test]
             [awp-v2.incident-adapter-test]
@@ -28,6 +29,7 @@
                                           'awp-v2.grounded-relations-acceptance-test
                                           'awp-v2.relation-model-reliability-acceptance-test
                                           'awp-v2.knowledge-quality-acceptance-test
+                                          'awp-v2.workbench-acceptance-test
                                           'awp-v2.song-acceptance-test
                                           'awp-v2.incident-acceptance-test
                                           'awp-v2.incident-adapter-test

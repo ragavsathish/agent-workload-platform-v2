@@ -105,6 +105,15 @@ git -C "$TARGET" gc -q --prune=now --aggressive
 [[ -f "$TARGET/specs/relation-model-reliability.allium" ]] || {
   echo "FENCE FAILED: slice 20 behavior missing" >&2; exit 1;
 }
+[[ -f "$TARGET/docs/plan/21-private-review-workbench/spec.feature" ]] || {
+  echo "FENCE FAILED: slice 21 contract missing" >&2; exit 1;
+}
+[[ -f "$TARGET/raw/v1/journal-review-mcp-server.ts" ]] || {
+  echo "FENCE FAILED: pinned private review evidence missing" >&2; exit 1;
+}
+[[ -f "$TARGET/specs/private-review-workbench.allium" ]] || {
+  echo "FENCE FAILED: slice 21 behavior missing" >&2; exit 1;
+}
 [[ "$(git -C "$TARGET" rev-list --all --count)" == 1 ]] || {
   echo "FENCE FAILED: prior history remains" >&2; exit 1
 }

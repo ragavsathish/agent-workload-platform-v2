@@ -56,6 +56,8 @@ python3 -m unittest discover -s "$ROOT/impl/deployment" -p test_artifact_deliver
 python3 -m unittest discover -s "$ROOT/impl/deployment" -p test_task_worker_delivery.py -v
 python3 -m unittest discover -s "$ROOT/impl/knowledge-migration" -p test_snapshot.py -v
 python3 -m unittest discover -s "$ROOT/impl/knowledge-migration" -p test_continuity.py -v
+python3 -m py_compile "$ROOT/impl/private-review/workbench.py" "$ROOT/impl/private-review/server.py"
+python3 -m unittest discover -s "$ROOT/impl/private-review" -p test_workbench.py -v
 if command -v docker >/dev/null 2>&1; then
   AWP_PUBLIC_EDGE_ENV="$ROOT/impl/deployment/edge.env.example" \
     docker compose -f "$ROOT/impl/deployment/compose.yml" config --quiet

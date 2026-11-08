@@ -56,3 +56,8 @@
 (defquery :knowledge quality-run-status {:grain.event-model/reads #{:knowledge/state}} [ctx]
   (if-let [value (get-in (state ctx) [:quality-runs (get-in ctx [:query :run-id])])]
     {:query/result value} (missing)))
+(defquery :knowledge workbench-view {:grain.event-model/reads #{:knowledge/state}} [ctx]
+  (let [s (state ctx)]
+    {:query/result {:cases (->> (:workbench-cases s) vals (sort-by :case-id) vec)
+                    :metadata (->> (:workbench-metadata s) vals (mapcat vals)
+                                   (sort-by (juxt :snapshot-id :legacy-id)) vec)}}))

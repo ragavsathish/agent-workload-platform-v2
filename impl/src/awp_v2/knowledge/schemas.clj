@@ -29,7 +29,13 @@
    :knowledge/quality-review command-schema
    :knowledge/quality-run command-schema
    :knowledge/quality-holdout command-schema
-   :knowledge/quality-verdict command-schema})
+   :knowledge/quality-verdict command-schema
+   :knowledge/workbench-case command-schema
+   :knowledge/workbench-metadata command-schema
+   :knowledge/workbench-family command-schema
+   :knowledge/workbench-review command-schema
+   :knowledge/workbench-privacy command-schema
+   :knowledge/workbench-disposition command-schema})
 (defevent :knowledge/fact "One committed source, extraction, review, or account fact."
   {:schema [:map [:owner :string] [:kind :keyword] [:data :map]]})
 (defschemas queries
@@ -48,4 +54,5 @@
    :knowledge/taxonomy-relation-outcomes [:map [:owner :string]]
    :knowledge/taxonomy-outcomes [:map [:owner :string]]
    :knowledge/quality-cases [:map [:owner :string]]
-   :knowledge/quality-run-status [:map [:owner :string] [:run-id :string]]})
+   :knowledge/quality-run-status [:map [:owner :string] [:run-id :string]]
+   :knowledge/workbench-view [:map [:owner :string]]})

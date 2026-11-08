@@ -94,6 +94,43 @@
     :quality-verdict (-> state
                          (assoc-in [:quality-runs (:run-id data) :status] (:outcome data))
                          (assoc-in [:quality-runs (:run-id data) :metrics-digest] (:metrics-digest data)))
+    :workbench-case (assoc-in state [:workbench-cases (:case-id data)]
+                              (assoc data :family-id "" :split :unassigned :review-status :pending
+                                     :privacy-status :pending :expected-digest "" :last-reviewer ""
+                                     :revision 0 :history []))
+    :workbench-metadata (assoc-in state [:workbench-metadata (:snapshot-id data) (:legacy-id data)]
+                                  (assoc data :disposition :quarantined :source-id ""
+                                         :reason-digest "" :evidence-digest "" :revision 0 :history []))
+    :workbench-family (-> state
+                          (assoc-in [:workbench-cases (:case-id data) :family-id] (:family-id data))
+                          (assoc-in [:workbench-cases (:case-id data) :split] (:split data))
+                          (update-in [:workbench-cases (:case-id data) :revision] inc)
+                          (update-in [:workbench-cases (:case-id data) :history] conj data)
+                          (assoc-in [:workbench-actions (:action-id data)] data))
+    :workbench-review (-> state
+                          (assoc-in [:workbench-cases (:case-id data) :review-status] (:decision data))
+                          (assoc-in [:workbench-cases (:case-id data) :expected-digest] (:expected-digest data))
+                          (assoc-in [:workbench-cases (:case-id data) :last-reviewer] (:actor data))
+                          (update-in [:workbench-cases (:case-id data) :revision] inc)
+                          (update-in [:workbench-cases (:case-id data) :history] conj data)
+                          (assoc-in [:workbench-actions (:action-id data)] data))
+    :workbench-privacy (-> state
+                           (assoc-in [:workbench-cases (:case-id data) :privacy-status] (:decision data))
+                           (update-in [:workbench-cases (:case-id data) :revision] inc)
+                           (update-in [:workbench-cases (:case-id data) :history] conj data)
+                           (assoc-in [:workbench-actions (:action-id data)] data))
+    :workbench-disposition (-> state
+                               (assoc-in [:workbench-metadata (:snapshot-id data) (:legacy-id data) :disposition]
+                                         (:disposition data))
+                               (assoc-in [:workbench-metadata (:snapshot-id data) (:legacy-id data) :source-id]
+                                         (:source-id data))
+                               (assoc-in [:workbench-metadata (:snapshot-id data) (:legacy-id data) :reason-digest]
+                                         (:reason-digest data))
+                               (assoc-in [:workbench-metadata (:snapshot-id data) (:legacy-id data) :evidence-digest]
+                                         (:evidence-digest data))
+                               (update-in [:workbench-metadata (:snapshot-id data) (:legacy-id data) :revision] inc)
+                               (update-in [:workbench-metadata (:snapshot-id data) (:legacy-id data) :history] conj data)
+                               (assoc-in [:workbench-actions (:action-id data)] data))
     :legacy-snapshot (assoc-in state [:legacy-snapshots (:snapshot-id data)] (select-keys data [:snapshot-id :digest]))
     :legacy-resource (assoc-in state [:legacy-resources (:snapshot-id data) (:legacy-id data)] (:resource data))
     :legacy-switch (assoc state :read-source :import :selected-snapshot (:snapshot-id data))

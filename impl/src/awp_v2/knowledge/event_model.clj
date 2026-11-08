@@ -29,7 +29,13 @@
                              :quality-review "ApproveReviewCase"
                              :quality-run "StartQualityRun"
                              :quality-holdout "ConsumeLockedHoldout"
-                             :quality-verdict "RecordQualityVerdict"}]
+                             :quality-verdict "RecordQualityVerdict"
+                             :workbench-case "RegisterReviewCase"
+                             :workbench-metadata "AccountResource"
+                             :workbench-family "AssignCaseFamily"
+                             :workbench-review "RecordIndependentReview"
+                             :workbench-privacy "RecordPrivacyReview"
+                             :workbench-disposition "ResolveMetadata"}]
               [(keyword "knowledge" (name op))
                {:description (name op)
                 :schema [:map [:owner :string] [:data :map]]
@@ -37,13 +43,19 @@
                 :grain/allium [{:spec (cond
                                        (#{:legacy-snapshot :legacy-resource :legacy-switch :legacy-rollback} op)
                                        "specs/knowledge-extraction-migration.allium"
+                                       (= :workbench-metadata op)
+                                       "specs/private-knowledge-continuity.allium"
                                        (#{:taxonomy-relation-attempt :taxonomy-relation-correct} op)
                                        "specs/grounded-relations.allium"
                                        (#{:taxonomy-proposal :taxonomy-review :taxonomy-map :taxonomy-model-outcome
                                           :taxonomy-relation :taxonomy-relation-review} op)
                                        "specs/knowledge-taxonomy.allium"
-                                       (#{:quality-case :quality-review :quality-run :quality-holdout :quality-verdict} op)
+                                       (#{:quality-case :quality-review :quality-run :quality-holdout :quality-verdict
+                                          :workbench-case} op)
                                        "specs/knowledge-quality.allium"
+                                       (#{:workbench-family :workbench-review :workbench-privacy
+                                          :workbench-disposition} op)
+                                       "specs/private-review-workbench.allium"
                                        :else "specs/personal-knowledge.allium")
                                 :kind :rule :name rule}]}]))
    :events {:knowledge/fact {:description "One knowledge decision or external outcome."
@@ -65,7 +77,8 @@
                                         :taxonomy-relation-outcomes [:map [:owner :string]]
                                         :taxonomy-outcomes [:map [:owner :string]]
                                         :quality-cases [:map [:owner :string]]
-                                        :quality-run-status [:map [:owner :string] [:run-id :string]]}]
+                                        :quality-run-status [:map [:owner :string] [:run-id :string]]
+                                        :workbench-view [:map [:owner :string]]}]
                        [(keyword "knowledge" (name op))
                         {:description (name op) :schema schema :reads #{:knowledge/state}}]))
    :flows {:knowledge/intake {:description "A completed turn becomes independently tracked work."

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Private knowledge review</title>
+  <link rel="stylesheet" href="/style.css">
+  <script defer src="/app.js"></script>
+</head>
+<body>
+  <header><h1>Private knowledge review</h1><p>Every decision is explicit. Quality and migration have separate gates.</p></header>
+  <section id="login"><label>Local access token <input id="token" type="password" autocomplete="off"></label><button id="unlock">Unlock</button><p>Read the owner token from the private workspace. A separate reviewer token is required for independent labels.</p></section>
+  <main id="workbench" hidden>
+    <div class="status"><span id="identity"></span><span id="progress"></span><button id="refresh">Refresh</button><button id="lock">Lock</button></div>
+    <nav><button id="casesTab">Quality cases</button><button id="metadataTab">Unlinked metadata</button></nav>
+    <div class="columns">
+      <aside><h2 id="queueTitle">Queue</h2><div id="rows"></div></aside>
+      <article>
+        <h2 id="rowTitle">Select a row</h2>
+        <p id="rowStatus"></p>
+        <pre id="source"></pre>
+        <section id="caseForm" hidden>
+          <h3>Family and partition</h3>
+          <label>Family ID <input id="familyId"></label>
+          <label>Partition <select id="split"><option value="development">Development</option><option value="challenge">Challenge</option><option value="locked_holdout">Locked holdout</option><option value="production_shadow">Production shadow</option></select></label>
+          <button id="saveFamily">Record family decision</button>
+          <h3>Private draft</h3>
+          <label>Expected items (JSON array; empty array means an explicit empty answer)
+            <textarea id="expected" rows="8" spellcheck="false">[]</textarea></label>
+          <label>Private note <textarea id="note" rows="3"></textarea></label>
+          <button id="saveDraft">Save draft only</button>
+          <h3>Independent review</h3>
+          <p>Every expected item needs a kind, an exact evidence excerpt, and origin: observed, miss, or correction. Reviewer actions require a separate reviewer token.</p>
+          <label>Decision <select id="reviewDecision"><option value="approved">Approve label</option><option value="disputed">Dispute label</option><option value="rejected">Reject case</option><option value="adjudicated">Adjudicate dispute</option></select></label>
+          <button id="saveReview">Record review decision</button>
+          <h3>Privacy review</h3>
+          <button id="privacyPass">Approve privacy</button><button id="privacyFail">Fail privacy</button>
+        </section>
+        <section id="metadataForm" hidden>
+          <h3>Metadata disposition</h3>
+          <label>Decision <select id="disposition"><option value="quarantined">Keep quarantined</option><option value="excluded-metadata">Exclude non-knowledge metadata</option><option value="linked">Link to verified frozen source</option></select></label>
+          <label>Reason <textarea id="reason" rows="3"></textarea></label>
+          <label>Evidence <textarea id="evidence" rows="3"></textarea></label>
+          <label>Frozen source ID for verified link <input id="sourceId"></label>
+          <button id="saveDisposition">Record owner disposition</button>
+        </section>
+        <p id="feedback" role="status"></p>
+      </article>
+    </div>
+  </main>
+</body>
+</html>

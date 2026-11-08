@@ -82,6 +82,14 @@ for id in $(rg -o '@continuity-[0-9]+' docs/plan/18-private-knowledge-continuity
   fi
 done
 
+for id in $(rg -o '@workbench-[0-9]+' docs/plan/21-private-review-workbench/spec.feature | tr -d '@'); do
+  test_id="${id//-/_}"
+  if ! rg -q "$test_id" impl/private-review/test_workbench.py; then
+    echo "Acceptance scenario $id has no named check" >&2
+    exit 1
+  fi
+done
+
 for id in $(rg -o '@relation-[0-9]+' docs/plan/19-grounded-relations/spec.feature | tr -d '@'); do
   if ! rg -q "$id" impl/test/awp_v2/grounded_relations_acceptance_test.clj; then
     echo "Acceptance scenario $id has no named check" >&2

@@ -116,6 +116,33 @@ class GatewayHandler(BaseHTTPRequestHandler):
             operation, payload = "account", {"account-id": parts[3]}
         elif len(parts) == 5 and parts[:3] == ["v1", "knowledge", "sources"] and parts[4] == "tasks" and self.command == "GET":
             operation, payload = "tasks", {"source-id": parts[3]}
+        elif len(parts) >= 4 and parts[:3] == ["v1", "knowledge", "taxonomy"]:
+            tail = parts[3:]
+            if tail == ["categories"] and self.command == "GET":
+                operation = "taxonomy-categories"
+            elif tail == ["proposals"] and self.command == "GET":
+                operation = "taxonomy-proposals"
+            elif tail == ["current"] and self.command == "GET":
+                operation = "taxonomy-current"
+            elif tail == ["relations"] and self.command == "GET":
+                operation = "taxonomy-relations"
+            elif tail == ["concepts"] and self.command == "GET":
+                operation = "taxonomy-concepts"
+            elif len(tail) == 2 and tail[0] == "proposals" and self.command == "GET":
+                operation, payload = "taxonomy-item", {"proposal-id": tail[1]}
+            elif len(tail) == 3 and tail[0] == "proposals" and tail[2] == "review" and self.command == "POST":
+                operation = "taxonomy-review"
+                payload = {"proposal-id": tail[1], "action-id": body.get("actionId"),
+                           "expected-revision": body.get("expectedRevision"), "decision": body.get("decision")}
+            elif tail == ["relations"] and self.command == "POST":
+                operation = "taxonomy-relation"
+                payload = {"relation-id": body.get("relationId"), "left-id": body.get("leftId"),
+                           "right-id": body.get("rightId"), "relation-kind": body.get("relationKind"),
+                           "source-id": body.get("sourceId"), "evidence": body.get("evidence")}
+            elif len(tail) == 3 and tail[0] == "relations" and tail[2] == "review" and self.command == "POST":
+                operation = "taxonomy-relation-review"
+                payload = {"relation-id": tail[1], "action-id": body.get("actionId"),
+                           "expected-revision": body.get("expectedRevision"), "decision": body.get("decision")}
         if operation is None:
             self._send(404, {"detail": "not found"})
             return

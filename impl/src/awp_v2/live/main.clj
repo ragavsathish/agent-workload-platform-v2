@@ -57,7 +57,9 @@
         knowledge-system (knowledge/open-system
                            {:storage-dir (or (System/getenv "AWP_KNOWLEDGE_STORAGE_DIR")
                                              (str (required "AWP_SESSION_STORAGE_DIR") "-knowledge"))
-                            :after-write! (fn [system owner] (orc-adapter/sync-owner! system owner))
+                            :after-write! (fn [system owner]
+                                            (orc-adapter/sync-owner! system owner)
+                                            (orc-adapter/sync-taxonomy-owner! system owner))
                             :run-worker! (when-let [script (System/getenv "AWP_KNOWLEDGE_WORKER_SCRIPT")]
                                            (native-worker/runner {:script script}))
                             :submit-task! (if (System/getenv "AWP_KNOWLEDGE_WORKER_SCRIPT")

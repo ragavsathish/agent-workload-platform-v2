@@ -38,6 +38,11 @@ python3 -m py_compile \
   "$ROOT/impl/qualification/run_local_stack.py" \
   "$ROOT/impl/qualification/restart_local_pi.py" \
   "$ROOT/impl/qualification/sitecustomize.py"
+python3 -m py_compile "$ROOT/impl/qualification/local_release.py" \
+  "$ROOT/impl/qualification/restart_supervised_pi.py" \
+  "$ROOT/impl/qualification/incident_source.py" \
+  "$ROOT/impl/qualification/test_local_release.py"
+python3 -m unittest discover -s "$ROOT/impl/qualification" -p test_local_release_model.py -v
 (cd "$ROOT/impl/qualification" && "$ROOT/impl/runtime/products/voice-agent/apps/edge/.venv/bin/python" -m unittest test_voice_media_unit.py)
 python3 -m py_compile "$ROOT/impl/deployment/deployment.py" \
   "$ROOT/impl/deployment/gateway.py" "$ROOT/impl/deployment/stack.py" \

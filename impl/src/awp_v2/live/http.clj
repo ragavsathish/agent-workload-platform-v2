@@ -2,6 +2,8 @@
   (:require [awp-v2.session.api :as session]
             [awp-v2.incident.api :as incident]
             [awp-v2.knowledge.api :as knowledge]
+            [awp-v2.knowledge.orc-adapter :as orc-adapter]
+            [awp-v2.knowledge.taxonomy :as taxonomy]
             [awp-v2.song.api :as song]
             [awp-v2.tasking.api :as tasking]
             [awp-v2.tasking.lifecycle :as task-life]
@@ -211,6 +213,28 @@
                                                                (some-> (:status data) keyword)
                                                                {:task-id (:task-id data) :reason (:reason data)
                                                                 :suggestions (mapv #(update % :kind keyword) (:suggestions data))})
+                                 "taxonomy-categories" (taxonomy/categories (or (:taxonomy-version data) "personal-v1"))
+                                 "taxonomy-proposals" (knowledge/taxonomy-proposals knowledge-system owner)
+                                 "taxonomy-item" (knowledge/taxonomy-item knowledge-system owner (:proposal-id data))
+                                 "taxonomy-current" (knowledge/taxonomy-current knowledge-system owner)
+                                 "taxonomy-relations" (knowledge/taxonomy-relations knowledge-system owner)
+                                 "taxonomy-concepts" (orc-adapter/taxonomy-owner-concepts knowledge-system owner)
+                                 "taxonomy-propose" (knowledge/taxonomy-propose! knowledge-system owner
+                                                                                  (select-keys data [:proposal-id :result-id :source-id :category-id
+                                                                                                     :taxonomy-version :text :evidence :model-version
+                                                                                                     :prompt-version :candidate-uri :trace-id]))
+                                 "taxonomy-review" (knowledge/taxonomy-review! knowledge-system owner
+                                                                                (:proposal-id data) (:action-id data)
+                                                                                (:expected-revision data)
+                                                                                (some-> (:decision data) keyword))
+                                 "taxonomy-relation" (knowledge/taxonomy-relation! knowledge-system owner
+                                                                                    (update (select-keys data [:relation-id :left-id :right-id
+                                                                                                               :relation-kind :source-id :evidence])
+                                                                                            :relation-kind keyword))
+                                 "taxonomy-relation-review" (knowledge/taxonomy-relation-review! knowledge-system owner
+                                                                                                  (:relation-id data) (:action-id data)
+                                                                                                  (:expected-revision data)
+                                                                                                  (some-> (:decision data) keyword))
                                  {:error :not-found})]
                     (send! exchange (status result) result))))
               (catch Throwable _ (send! exchange 400 {:error "invalid request"})))))))

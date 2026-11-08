@@ -174,7 +174,10 @@ export function processWork(work: Work, services: Services) {
 }
 
 export const defaultServices = (): Services => ({
-  modelBase: (process.env.DIGITAL_TWIN_MODEL_BASE_URL ?? "http://127.0.0.1:11434").replace(/\/$/u, ""),
+  // The source host often supplies an OpenAI-compatible /v1 endpoint. This
+  // worker uses Ollama's native /api/chat path, so retain the origin only.
+  modelBase: (process.env.DIGITAL_TWIN_MODEL_BASE_URL ?? "http://127.0.0.1:11434")
+    .replace(/\/$/u, "").replace(/\/v1$/u, ""),
   model: process.env.DIGITAL_TWIN_MODEL ?? "qwen3.5:9b-mlx",
   classifierBase: (process.env.DIGITAL_TWIN_CLASSIFIER_BASE_URL ?? "http://127.0.0.1:8010").replace(/\/$/u, ""),
   classifierModel: process.env.DIGITAL_TWIN_CLASSIFIER_MODEL ?? "von-1.3.0",

@@ -57,6 +57,12 @@ git -C "$TARGET" gc -q --prune=now --aggressive
 [[ -f "$TARGET/raw/v1/task-image-ensure.py" ]] || {
   echo "FENCE FAILED: pinned task image evidence missing" >&2; exit 1;
 }
+[[ -f "$TARGET/docs/plan/15-local-release-readiness/spec.feature" ]] || {
+  echo "FENCE FAILED: slice 15 contract missing" >&2; exit 1;
+}
+[[ -f "$TARGET/specs/local-release-readiness.allium" ]] || {
+  echo "FENCE FAILED: slice 15 behavior missing" >&2; exit 1;
+}
 [[ "$(git -C "$TARGET" rev-list --all --count)" == 1 ]] || {
   echo "FENCE FAILED: prior history remains" >&2; exit 1
 }

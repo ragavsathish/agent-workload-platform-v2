@@ -88,4 +88,12 @@ for id in $(rg -o '@delivery-[0-9]+' docs/plan/13-task-worker-delivery/spec.feat
   fi
 done
 
+for id in $(rg -o '@release-[0-9]+' docs/plan/15-local-release-readiness/spec.feature | tr -d '@'); do
+  test_id="${id//-/_}"
+  if ! rg -q "$test_id" impl/qualification/test_local_release.py; then
+    echo "Acceptance scenario $id has no named test" >&2
+    exit 1
+  fi
+done
+
 echo "documentation gate OK"

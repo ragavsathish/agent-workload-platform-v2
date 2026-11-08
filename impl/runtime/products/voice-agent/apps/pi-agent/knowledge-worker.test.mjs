@@ -1,7 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Effect } from "effect";
-import { processWork } from "./dist/knowledge-worker.js";
+import { defaultServices, processWork } from "./dist/knowledge-worker.js";
+
+test("native model path uses origin when source configuration ends in /v1", () => {
+  const before = process.env.DIGITAL_TWIN_MODEL_BASE_URL;
+  try {
+    process.env.DIGITAL_TWIN_MODEL_BASE_URL = "http://127.0.0.1:11434/v1";
+    assert.equal(defaultServices().modelBase, "http://127.0.0.1:11434");
+  } finally {
+    if (before === undefined) delete process.env.DIGITAL_TWIN_MODEL_BASE_URL;
+    else process.env.DIGITAL_TWIN_MODEL_BASE_URL = before;
+  }
+});
 
 const base = { owner: "owner@example.test", sourceId: "c:m", taskId: "task-1",
   transcript: "I learned that retries need stable identifiers.", capturedAt: "2026-11-08T10:00:00Z" };

@@ -72,5 +72,5 @@ Feature: Private owner workspace
     And camera access is not requested
     And navigation remains within the configured private workspace
 
-  # Android and iOS wrappers are scaffolded with neutral IDs. Platform builds
-  # and system permission prompt timing are unqualified in this change.
+  # Android debug build and emulator launch are recorded in the native client
+  # report. iOS build and prompt-on-voice-start remain unqualified.

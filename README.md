@@ -10,6 +10,7 @@ Slices 01–16 implement tasking, session CQRS, live voice, personal knowledge, 
 - [Knowledge continuity](impl/qualification/private-knowledge-continuity-report.md): the shadow rehearsal reconciled 413 mapped resources; 12 unlinked metadata records remain quarantined. No live read switch or owner approval is recorded.
 - [ORC relations](impl/qualification/relation-model-reliability-report.md): synthetic model-to-Grain proposals are staged pending owner review. The Codex experiment is synthetic protocol evidence; it does not qualify semantic accuracy.
 - [Public candidate](impl/qualification/public-candidate-report.md): prepared-only. No authenticated v2 public route or separate-device owner journey has been qualified.
+- [Native owner client](impl/qualification/native-client-report.md): Android debug build and emulator launch passed; iOS build and real microphone prompt timing remain unqualified.
 - [PR soundtrack](docs/plan/14-pr-soundtrack/plan.md): the procedure remains manual; real pull request publication and reviewer access have not been qualified.
 
 Local acceptance evidence is not external deployment parity. Keep the v1 service and owner reads authoritative until the applicable private and public gates have been explicitly reviewed and approved.

@@ -32,3 +32,18 @@ Specify the Grain runtime/bootstrap and session projection APIs; trusted owner-s
 - Full `harness/verify.sh` was not run: the broader implementation/runtime/Flutter trees are absent. No tests used original implementation artifacts.
 
 This is a partial clean-room reconstruction: it supplies Grain-pattern command/query handlers and a tested Effect workflow, but not executable AWP Grain app wiring or owner-client transport integration.
+
+## Slice 30 disposition
+
+Slice 30 corrected the active-turn flow in durable plan/scenario/wiki language
+and added a terminal stale-context rejection after turn settlement. The fresh
+context check is represented in the session contract and acceptance suite; a
+stale request clears the owner lock without claiming the Pi effect. The root
+build contract now records the selected stack, minimum bootstrap/owner-lock/
+projection obligations, and authority boundaries for Pi session history, Git,
+and object storage. The report remains a partial regeneration: it does not
+establish executable service bootstrap from the fence, prove Pi branch-entry
+types or snapshot consistency against installed dependencies, define an
+HTTP/client wire schema or reload persistence details, or decide an operator
+resolution path for indefinitely uncertain external effects. Those limits
+remain open and were not filled by invention in this slice.

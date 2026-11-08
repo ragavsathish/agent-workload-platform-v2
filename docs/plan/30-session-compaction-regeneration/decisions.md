@@ -24,3 +24,10 @@ This correction documents durable architecture and queue semantics without
 inventing request or response fields for a client protocol that the pinned
 source does not define. Client persistence details remain explicitly bounded
 by the existing owner-client contract until a separate decision resolves them.
+
+## D118 — Stale queued compaction is rejected without an external effect
+
+After the turn settles, the command rechecks current selected conversation,
+attachment state, and refreshed context eligibility. If any check fails, the
+queued command reaches a rejected terminal state, releases its session lock,
+and never calls Pi. A later deliberate attempt uses a new command identity.

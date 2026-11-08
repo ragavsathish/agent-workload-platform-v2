@@ -1,5 +1,7 @@
 (ns awp-v2.live.main
   (:require [awp-v2.live.http :as http]
+            [awp-v2.incident.api :as incident]
+            [awp-v2.incident.adapter :as incident-adapter]
             [awp-v2.knowledge.api :as knowledge]
             [awp-v2.knowledge.gateway-adapter :as knowledge-gateway]
             [awp-v2.knowledge.native-worker :as native-worker]
@@ -24,6 +26,23 @@
                         (map str/trim) (remove str/blank?) set)
         task-system (tasking/open-system {:storage-dir (required "AWP_TASKING_STORAGE_DIR")
                                           :eligible-workspaces workspaces})
+        incident-source (when-let [rules-file (System/getenv "AWP_INCIDENT_RULES_FILE")]
+                          (incident-adapter/adapter
+                            {:alerts-url (or (System/getenv "AWP_INCIDENT_ALERTS_URL")
+                                             "http://127.0.0.1:3300/api/prometheus/grafana/api/v1/alerts")
+                             :metrics-url (or (System/getenv "AWP_INCIDENT_METRICS_URL")
+                                              "http://127.0.0.1:9091")
+                             :password-file (required "AWP_INCIDENT_GRAFANA_PASSWORD_FILE")}))
+        incident-workspace (or (System/getenv "AWP_INCIDENT_WORKSPACE") "scratch")
+        _ (when (and incident-source (not (contains? workspaces incident-workspace)))
+            (throw (ex-info "incident scratch workspace is not eligible" {})))
+        incident-system (incident/open-system
+                          {:storage-dir (or (System/getenv "AWP_INCIDENT_STORAGE_DIR")
+                                            (str (required "AWP_SESSION_STORAGE_DIR") "-incidents"))
+                           :task-system task-system :workspace incident-workspace
+                           :rules (when incident-source
+                                    (incident-adapter/load-rules (required "AWP_INCIDENT_RULES_FILE")))
+                           :metric-fetch! (:metric-fetch! incident-source)})
         owned-task? (fn [owner task-id]
                       (try
                         (let [task (lifecycle/task-state task-system (parse-uuid task-id))]
@@ -74,15 +93,23 @@
                   :owned-task? owned-task?})
         server (http/start! {:system system
                              :task-system task-system
+                             :incident-system incident-system
                              :knowledge-system knowledge-system
                              :song-system song-system
                              :token (required "AWP_GRAIN_SESSION_TOKEN")
                              :port (Integer/parseInt (or (System/getenv "AWP_GRAIN_SESSION_PORT")
-                                                         "9447"))})]
+                                                         "9447"))})
+        poller (atom nil)]
+    (incident/recover! incident-system)
+    (when incident-source
+      (reset! poller (incident-adapter/start-poller! incident-system
+                                                      (required "AWP_OWNER_IDENTITY") incident-source)))
     (.addShutdownHook (Runtime/getRuntime)
       (Thread. (fn []
+                 (when-let [running @poller] (.shutdownNow running))
                  (http/stop! server)
                  (session/close-system! system)
+                 (incident/close-system! incident-system)
                  (knowledge/close-system! knowledge-system)
                  (song/close-system! song-system)
                  (tasking/close-system! task-system))))

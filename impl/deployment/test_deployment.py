@@ -238,6 +238,47 @@ class DeploymentAcceptance(unittest.TestCase):
         denied.exception.close()
         self.assertEqual(len(seen), 2)
 
+    def test_incident_owner_route_forwards_only_owned_reads(self):
+        seen = []
+        class InternalHandler(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_POST(self):
+                size = int(self.headers.get("Content-Length", "0"))
+                seen.append((self.path, json.loads(self.rfile.read(size)),
+                             self.headers.get("X-AWP-Owner"), self.headers.get("Authorization")))
+                value = json.dumps({"epoch-id": "epoch-1", "finding-status": "unjudged"}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(value)))
+                self.end_headers()
+                self.wfile.write(value)
+        internal = ThreadingHTTPServer(("127.0.0.1", 0), InternalHandler)
+        thread = threading.Thread(target=internal.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(lambda: (internal.shutdown(), internal.server_close(), thread.join()))
+        grain = GrainTaskClient(f"http://127.0.0.1:{internal.server_port}", "inner-token", "owner@example.test")
+        gateway = GatewayServer(("127.0.0.1", 0), grain, "outer-token", "owner@example.test")
+        outer_thread = threading.Thread(target=gateway.serve_forever, daemon=True)
+        outer_thread.start()
+        self.addCleanup(lambda: (gateway.shutdown(), gateway.server_close(), outer_thread.join()))
+        base = f"http://127.0.0.1:{gateway.server_port}/v1/incidents"
+        def read(identity, path):
+            return urllib.request.urlopen(urllib.request.Request(
+                base + path + f"?identity={identity}",
+                headers={"Authorization": "Bearer outer-token"}), timeout=10)
+        with read("owner@example.test", "/epoch-1") as response:
+            self.assertEqual(json.load(response)["epoch-id"], "epoch-1")
+        with read("owner@example.test", "") as response:
+            self.assertEqual(response.status, 200)
+        self.assertEqual(seen, [
+            ("/internal/incident/get", {"epoch-id": "epoch-1"}, "owner@example.test", "Bearer inner-token"),
+            ("/internal/incident/list", {}, "owner@example.test", "Bearer inner-token")])
+        with self.assertRaises(urllib.error.HTTPError) as denied:
+            read("foreign@example.test", "/epoch-1")
+        self.assertEqual(denied.exception.code, 403)
+        denied.exception.close()
+        self.assertEqual(len(seen), 2)
+
     def test_deploy_007_interrupted_claim_recovery(self):
         class Grain:
             def __init__(self):

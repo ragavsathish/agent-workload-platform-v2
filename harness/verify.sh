@@ -53,4 +53,5 @@ fi
 "$ROOT/harness/session-probe.sh"
 "$ROOT/harness/knowledge-probe.sh"
 "$ROOT/harness/song-probe.sh"
+"$ROOT/harness/incident-probe.sh"
 echo "verify OK: documentation, source hashes, behavior, runtime topology, and public module probe"

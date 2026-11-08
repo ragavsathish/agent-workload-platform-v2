@@ -1,5 +1,6 @@
 (ns awp-v2.live.http
   (:require [awp-v2.session.api :as session]
+            [awp-v2.incident.api :as incident]
             [awp-v2.knowledge.api :as knowledge]
             [awp-v2.song.api :as song]
             [awp-v2.tasking.api :as tasking]
@@ -109,7 +110,7 @@
       "interrupt" (tasking/interrupt! task-system task-id)
       {:error "not-found"})))
 
-(defn start! [{:keys [system task-system knowledge-system song-system token port host] :or {port 0 host "127.0.0.1"}}]
+(defn start! [{:keys [system task-system knowledge-system song-system incident-system token port host] :or {port 0 host "127.0.0.1"}}]
   (when-not (and system (string? token) (not (str/blank? token)))
     (throw (ex-info "system and token required" {})))
   (let [server (HttpServer/create (InetSocketAddress. ^String host (int port)) 0)]
@@ -232,6 +233,24 @@
                     (if (bytes? result)
                       (send-audio! exchange result)
                       (send! exchange (status result) result)))))
+              (catch Throwable _ (send! exchange 400 {:error "invalid request"})))))))
+    (when incident-system
+      (.createContext server "/internal/incident"
+        (reify HttpHandler
+          (handle [_ exchange]
+            (try
+              (let [auth (.getFirst (.getRequestHeaders exchange) "Authorization")
+                    owner (.getFirst (.getRequestHeaders exchange) "X-AWP-Owner")
+                    op (last (str/split (.getPath (.getRequestURI exchange)) #"/"))]
+                (cond
+                  (not= auth (str "Bearer " token)) (send! exchange 401 {:error "unauthorized"})
+                  (or (str/blank? owner) (> (count owner) 256)) (send! exchange 400 {:error "invalid owner"})
+                  :else (let [data (parse-body exchange)
+                              result (case op
+                                       "list" (incident/incidents incident-system owner)
+                                       "get" (incident/incident incident-system owner (:epoch-id data))
+                                       {:error :not-found})]
+                          (send! exchange (status result) result))))
               (catch Throwable _ (send! exchange 400 {:error "invalid request"})))))))
     (.setExecutor server (java.util.concurrent.Executors/newVirtualThreadPerTaskExecutor))
     (.start server)

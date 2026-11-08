@@ -66,4 +66,11 @@ for id in $(rg -o '@taxonomy-[0-9]+' docs/plan/10-knowledge-taxonomy/spec.featur
   fi
 done
 
+for id in $(rg -o '@incident-[0-9]+' docs/plan/11-operational-incidents/spec.feature | tr -d '@'); do
+  if ! rg -q "$id" impl/test/awp_v2/incident_acceptance_test.clj; then
+    echo "Acceptance scenario $id has no named test" >&2
+    exit 1
+  fi
+done
+
 echo "documentation gate OK"

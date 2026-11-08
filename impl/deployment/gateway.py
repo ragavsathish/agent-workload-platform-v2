@@ -148,6 +148,29 @@ class GatewayHandler(BaseHTTPRequestHandler):
         except OSError:
             self._send(503, {"detail": "song authority unavailable"})
 
+    def _incident(self, parts: list[str]) -> None:
+        if parts == ["v1", "incidents"] and self.command == "GET":
+            operation, payload = "list", {}
+        elif len(parts) == 3 and parts[:2] == ["v1", "incidents"] and self.command == "GET":
+            operation, payload = "get", {"epoch-id": parts[2]}
+        else:
+            self._send(404, {"detail": "not found"})
+            return
+        request = urllib.request.Request(
+            f"{self.server.grain.base_url}/internal/incident/{operation}",
+            data=json.dumps(payload).encode(), method="POST",
+            headers={"Authorization": f"Bearer {self.server.grain.token}",
+                     "X-AWP-Owner": self.server.owner, "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                self._send(response.status, json.load(response))
+        except urllib.error.HTTPError as error:
+            try: value = json.load(error)
+            except (ValueError, OSError): value = {"detail": "incident request failed"}
+            self._send(error.code, value)
+        except OSError:
+            self._send(503, {"detail": "incident authority unavailable"})
+
     def _handle(self) -> None:
         if self.path == "/health":
             self._send(200, {"status": "ready"})
@@ -157,7 +180,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
             return
         parsed = urlsplit(self.path)
         parts = parsed.path.strip("/").split("/")
-        if parts[0] != "v1" or len(parts) < 2 or parts[1] not in {"tasks", "knowledge", "music"}:
+        if parts[0] != "v1" or len(parts) < 2 or parts[1] not in {"tasks", "knowledge", "music", "incidents"}:
             self._send(404, {"detail": "not found"})
             return
         query = parse_qs(parsed.query)
@@ -171,6 +194,9 @@ class GatewayHandler(BaseHTTPRequestHandler):
             return
         if parts[1] == "music":
             self._song(parts, body)
+            return
+        if parts[1] == "incidents":
+            self._incident(parts)
             return
         client = self.server.grain
         if len(parts) == 2 and self.command == "POST":

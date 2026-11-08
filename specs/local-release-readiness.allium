@@ -1,0 +1,126 @@
+-- allium: 3
+-- Cites docs/plan/15-local-release-readiness/spec.feature,
+-- docs/wiki/local-release-readiness.md, and raw/v1/expanded-storming.md.
+
+entity LocalRelease {
+    release_id: String
+    version: String
+    state_identity: String
+    owner: String
+    status: starting | ready | degraded | stopped
+}
+
+entity ReleaseJourney {
+    journey_id: String
+    release_id: String
+    kind: conversation | task | knowledge | song | incident
+    owner: String
+    outcome: pending | exercised | failed | unavailable | unqualified
+    evidence_digest: String?
+}
+
+entity ReleaseGate {
+    gate_id: String
+    release_id: String
+    kind: external_media | external_image | private_migration | model_quality | pull_request
+    outcome: open | qualified | failed
+    evidence_digest: String?
+}
+
+rule BeginLocalRelease {
+    when: ReleaseStarted(release_id, version, state_identity, owner)
+    requires: not exists LocalRelease{release_id: release_id}
+    requires: version != ""
+    requires: state_identity != ""
+    ensures: LocalRelease.created(release_id: release_id, version: version, state_identity: state_identity, owner: owner, status: starting)
+}
+
+rule RecordReadyServices {
+    when: RequiredServicesReady(release_id)
+    let release = LocalRelease{release_id: release_id}
+    requires: exists release
+    requires: release.status = starting
+    ensures: release.status = ready
+}
+
+rule RecordUnavailableService {
+    when: RequiredServiceUnavailable(release_id)
+    let release = LocalRelease{release_id: release_id}
+    requires: exists release
+    requires: release.status = starting or release.status = ready
+    ensures: release.status = degraded
+}
+
+rule StopLocalRelease {
+    when: ReleaseStopped(release_id)
+    let release = LocalRelease{release_id: release_id}
+    requires: exists release
+    requires: release.status = ready or release.status = degraded
+    ensures: release.status = stopped
+}
+
+rule RestartLocalRelease {
+    when: ReleaseRestarted(release_id)
+    let release = LocalRelease{release_id: release_id}
+    requires: exists release
+    requires: release.status = stopped
+    ensures: release.status = starting
+}
+
+rule BeginOwnerJourney {
+    when: JourneyStarted(journey_id, release_id, kind, owner)
+    let release = LocalRelease{release_id: release_id}
+    requires: exists release
+    requires: release.owner = owner
+    requires: not exists ReleaseJourney{journey_id: journey_id}
+    ensures: ReleaseJourney.created(journey_id: journey_id, release_id: release_id, kind: kind, owner: owner, outcome: pending, evidence_digest: null)
+}
+
+rule SettleOwnerJourney {
+    when: JourneyObserved(journey_id, outcome, evidence_digest)
+    let journey = ReleaseJourney{journey_id: journey_id}
+    requires: exists journey
+    requires: journey.outcome = pending
+    requires: outcome = exercised or outcome = failed or outcome = unavailable or outcome = unqualified
+    requires: outcome = exercised implies evidence_digest != ""
+    ensures: journey.outcome = outcome
+    ensures: journey.evidence_digest = evidence_digest
+}
+
+rule RecordExternalGate {
+    when: ExternalGateObserved(gate_id, release_id, kind, outcome, evidence_digest)
+    let release = LocalRelease{release_id: release_id}
+    requires: exists release
+    requires: not exists ReleaseGate{gate_id: gate_id}
+    requires: outcome = open or outcome = qualified or outcome = failed
+    requires: outcome = qualified implies evidence_digest != ""
+    ensures: ReleaseGate.created(gate_id: gate_id, release_id: release_id, kind: kind, outcome: outcome, evidence_digest: evidence_digest)
+}
+
+invariant ClaimedJourneyHasEvidence {
+    for journey in ReleaseJourneys:
+        journey.outcome = exercised implies journey.evidence_digest != null
+}
+
+invariant ClaimedExternalGateHasEvidence {
+    for gate in ReleaseGates:
+        gate.outcome = qualified implies gate.evidence_digest != null
+}
+
+surface LocalReleaseReport {
+    facing release: LocalRelease
+    exposes:
+        release.release_id
+        release.version
+        release.state_identity
+        release.status
+    provides:
+        ReleaseStarted(release_id, version, state_identity, owner)
+        RequiredServicesReady(release_id)
+        RequiredServiceUnavailable(release_id)
+        ReleaseStopped(release_id)
+        ReleaseRestarted(release_id)
+        JourneyStarted(journey_id, release_id, kind, owner)
+        JourneyObserved(journey_id, outcome, evidence_digest)
+        ExternalGateObserved(gate_id, release_id, kind, outcome, evidence_digest)
+}

@@ -175,6 +175,14 @@
           (update-in [:contexts id :revision] (fnil inc 0))
           (assoc-in [:contexts id :canCompact] false))
 
+      :context-compaction-rejected
+      (-> owner-state
+          (assoc :pending-compaction nil)
+          (assoc-in [:compactions (:command-id data) :status] :rejected)
+          (assoc-in [:compactions (:command-id data) :rejection-reason] (:reason data))
+          (update-in [:contexts id :revision] (fnil inc 0))
+          (assoc-in [:contexts id :canCompact] false))
+
       :context-compaction-completed
       (-> owner-state
           (assoc :pending-compaction nil)

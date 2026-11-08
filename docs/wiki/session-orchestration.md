@@ -47,12 +47,17 @@ it. The task's own identity and history remain with the task. See the
 | Compact context | Authenticated owner; serialized with turns | Retained context changes; its usage projection refreshes. |
 | Attach or detach task | Eligible task identity and owner control | Following turns route to that task, or return to the selected orchestrator conversation. |
 
-V2 records a context-compaction command identity, selected conversation, and Pi
-branch leaf in owner event store before invoking Pi. owner event store marks completion only after the
+V2 records a context-compaction command identity and selected conversation.
+If a request arrives during an active turn, the same identity is queued. After
+the turn settles, trusted owner, selection, context eligibility, and session
+state are revalidated; only then is the baseline Pi branch leaf recorded before
+invoking Pi. owner event store marks completion only after the
 Pi session contains a new compaction entry parented to that leaf. If the branch
 does not prove the effect, the command remains pending/uncertain and is not
 invoked again automatically. Pending compaction blocks turns, selection, and
-task routing so the branch cursor cannot move underneath reconciliation. The
+task routing so the branch cursor cannot move underneath reconciliation. If
+refreshed context is no longer eligible, queued work is rejected and releases
+its lock without calling Pi. The
 owner-scoped context read exposes the pending command identity/status, allowing
 the owner client to resume it after a lost response or page reload. See
 [slice 29](../plan/29-session-compaction-reconciliation/plan.md).

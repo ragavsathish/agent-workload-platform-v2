@@ -128,6 +128,17 @@
                 (busy? state)
                 {:value {:status :queued :command-id (:command-id data)
                          :conversation-id selected :reused? true :effect-claim? false}}
+                (or (nil? selected)
+                    (not= selected (:conversation-id prior-compaction))
+                    (:attachment state)
+                    (not (get-in state [:contexts selected :canCompact])))
+                {:facts [[:context-compaction-rejected
+                          {:command-id (:command-id data)
+                           :conversation-id (:conversation-id prior-compaction)
+                           :reason :stale-context :at (:at data)}]]
+                 :value {:status :rejected :command-id (:command-id data)
+                         :conversation-id (:conversation-id prior-compaction)
+                         :reason :stale-context :effect-claim? false}}
                 (not (and (valid-command-id? (:baseline-leaf-id data))
                           (integer? (:baseline-entry-count data))
                           (pos? (:baseline-entry-count data)))) (refuse :incorrect)

@@ -1,9 +1,9 @@
 # Slice 29: session compaction reconciliation
 
 Cites the [session orchestration rules](../../wiki/session-orchestration.md),
-the [session CQRS slice](../03-session-orchestration/plan.md), the [live Pi
-integration](../../../../impl/live-session-integration-notes.md), and the
-[pinned client source](../../raw/v1/client-source-capture.md).
+the [session CQRS slice](../03-session-orchestration/plan.md), the durable
+[build contract](../../BUILD-CONTRACT.md), the pinned [AWP source inventory](../../raw/v1/manifest.md),
+and pinned [ORC evidence](../../raw/orc/manifest.md).
 
 ## Goal
 
@@ -23,8 +23,11 @@ external provider call that did not append a Pi compaction entry.
 
 ## Acceptance
 
-- Rejected commands (no selection, stale context, active turn, foreign owner,
-  conflicting identity) produce no pending compaction fact.
+- Rejected commands (no selection, stale context, foreign owner, conflicting
+  identity, or failed post-turn revalidation) produce no pending compaction
+  fact. A request during an active turn is queued with its command identity;
+  it is promoted after turn settlement only after owner, selection, eligibility,
+  and session state are revalidated.
 - One accepted command ID records a pending operation and baseline Pi leaf
   before any Pi compaction call. Identical retries return the same operation;
   changed input under that ID conflicts.
@@ -35,6 +38,9 @@ external provider call that did not append a Pi compaction entry.
   the operation remains uncertain and is never reapplied automatically.
 - A pending or uncertain compaction blocks turn admission, selection, attach,
   detach, and another compaction for that owner. Completion releases the lock.
+- A queued compaction holds its command identity and conversation across the
+  active turn. It does not call Pi until the turn settles and promotion
+  succeeds; a failed revalidation rejects the queued request without an effect.
 - A later explicit compaction after new eligible context uses a distinct
   command identity.
 - Context queries expose only safe compaction status and owner-scoped fields;

@@ -268,6 +268,49 @@
     (is (= :busy (:error (session/attach! s owner "task-1" "attach-lock"))))
     (is (= :busy (:error (session/detach! s owner "detach-lock")))))))
 
+;; @session-compaction-007
+(deftest session-compaction-007-active-turn-compaction-promotes-after-revalidation
+  (with-session (fn [s _ _]
+    (fresh s 1)
+    (turn s "queued-turn" "enough context" :voice)
+    (session/observe! s owner "queued-turn" {:kind :context-usage :tokens 8000
+                                               :contextWindow 16000 :estimated false
+                                               :canCompact true})
+    (is (= :queued (:status (session/compact! s owner "queued-compact"))))
+    ;; The settled turn refreshes trusted context eligibility before promotion.
+    (session/observe! s owner "queued-turn" {:kind :context-usage :tokens 9000
+                                               :contextWindow 16000 :estimated false
+                                               :canCompact true})
+    (finish s "queued-turn" "done")
+    (let [promoted (session/compact! s owner "queued-compact"
+                                     {:baseline-leaf-id "leaf-after-turn"
+                                      :baseline-entry-count 10})]
+      (is (= :pending (:status promoted)))
+      (is (true? (:effect-claim? promoted)))
+      (is (= "queued-compact" (:compactionCommandId (session/context s owner))))))))
+
+;; @session-compaction-008
+(deftest session-compaction-008-stale-queued-compaction-is-rejected-without-effect
+  (with-session (fn [s _ _]
+    (fresh s 1)
+    (turn s "stale-turn" "enough context" :voice)
+    (session/observe! s owner "stale-turn" {:kind :context-usage :tokens 8000
+                                              :contextWindow 16000 :estimated false
+                                              :canCompact true})
+    (is (= :queued (:status (session/compact! s owner "stale-compact"))))
+    ;; A refreshed but no longer eligible context must cancel the queued effect.
+    (session/observe! s owner "stale-turn" {:kind :context-usage :tokens 1200
+                                              :contextWindow 16000 :estimated false
+                                              :canCompact false})
+    (finish s "stale-turn" "done")
+    (let [rejected (session/compact! s owner "stale-compact"
+                                     {:baseline-leaf-id "leaf-after-turn"
+                                      :baseline-entry-count 10})]
+      (is (= :rejected (:status rejected)))
+      (is (= :stale-context (:reason rejected)))
+      (is (false? (:effect-claim? rejected)))
+      (is (= "rejected" (:compactionStatus (session/context s owner))))))))
+
 (deftest owner-client-006-session-012-task-routing-boundary
   (with-session (fn [s calls _]
     (let [id (:id (fresh s 1))]

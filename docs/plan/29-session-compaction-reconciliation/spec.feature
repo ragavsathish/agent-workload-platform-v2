@@ -46,3 +46,18 @@ Feature: Durable session context compaction
     When the owner reloads and queries context
     Then the owner-scoped context reports C and its pending or uncertain status
     And retry resumes C instead of creating a different operation
+
+  @session-compaction-007
+  Scenario: Queue compaction requested during an active turn
+    Given the owner has selected an eligible conversation and turn T is active
+    When the owner requests compaction with command identity C
+    Then C is retained as queued for that conversation
+    And no Pi compaction effect runs while T is active
+
+  @session-compaction-008
+  Scenario: Promote queued compaction after turn settlement
+    Given compaction C is queued behind active turn T
+    When T settles
+    Then C is revalidated against current owner, selection, context, and session state
+    And C becomes pending before any Pi compaction effect
+    And a failed revalidation rejects C without running the Pi effect

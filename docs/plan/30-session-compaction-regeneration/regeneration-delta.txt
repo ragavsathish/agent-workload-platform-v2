@@ -1,0 +1,34 @@
+# Slice 29 clean-room regeneration delta
+
+This independent build was derived from the Slice 29 plan, scenarios, decisions, session wiki, Allium contract, permitted pinned v1 evidence, and pinned ORC Grain examples. No original `impl/`, prior implementation commit, or agent summary was consulted. Durable source docs were not modified.
+
+## Reconstructed
+
+- `impl/src/awp_v2/session/compaction.clj` implements the pure command admission/reconciliation rules and safe owner context projection.
+- `impl/src/awp_v2/session/grain_commands.clj` adds Grain `defcommand` handlers for durable pending, settled, and uncertain facts. It uses ORC's `->event`, `es/read`, flattened event-field, and `:command-result/cas` patterns. Command and owner tags distinguish retries and serialize admission through an append-time owner CAS.
+- `impl/src/awp_v2/session/grain_queries.clj` adds an owner-scoped `defquery` returning only command identity, conversation identity, and status.
+- `impl/runtime/session-compaction.ts` is a TypeScript Effect workflow over Grain and Pi ports. It persists intent before Pi, invokes `compact()` only for newly accepted intent, and reconciles retries against the stored leaf and count without invoking Pi again.
+- `impl/test/awp_v2/session/compaction_test.clj` covers refusal, retry, settlement, uncertainty, owner visibility, and locking. `impl/runtime/session-compaction.test.ts` covers settlement and ambiguity/no-repeat behavior.
+- Pinned v1 evidence confirms `SessionManager.getBranch()`, branch entry `type`, `AgentSession.compact()`, the `canCompact` guard (token threshold, not currently compacting, existing leaf not already compaction), and current context route/method names.
+
+## Remaining limits and assumptions
+
+1. **Grain application wiring.** ORC raw examples give concrete Grain v2/v3 handler, event read, and append-time CAS patterns, so those are used. The room lacks the AWP session app's Grain dependencies, command processor registration/bootstrap, session event schema registration, and projection rebuild wiring. Consequently Grain handlers could not be compiled or run here. The exact authenticated owner key in Grain command context is also not defined in the allowed docs.
+2. **Trusted admission and shared mutation lock.** The command handler accepts selected/eligibility/busy flags from its caller because the slice defines those conditions but not the session read-model API or how turn, selection, attach, and detach handlers share the lock. Those values must come from trusted owner-scoped projections; client input must not control them. The Effect workflow alone cannot prove the full session mutation serialization invariant.
+3. **Pi branch proof.** v1 confirms the `getBranch()` and `compact()` calls and uses the tail `type`; D113 states that Pi branch entries expose IDs and parent IDs. The raw source does not include the dependency type declaration or establish atomic snapshot semantics. The adapter assumes `id`, `parentId`, and `type === "compaction"`, and that a proven result is exactly one entry after the persisted baseline count with its parent equal to that baseline leaf. This is conservative, explicit, and tested against the port shape, not against installed Pi.
+4. **HTTP/client integration.** Current pinned client methods use `/api/pi-context` and `/api/pi-context/compact` without an idempotency key. The Slice 29 docs require request identity retention and restoration after reload but omit field location, response schema, error semantics, key generation/reset rules, and Flutter persistence behavior. No client edits were made because those choices would invent the public protocol.
+5. **Uncertain resolution.** The contract says uncertain work stays held and cannot be reapplied but does not say whether later observation may settle it or how an operator safely releases it. The reconstruction treats uncertainty as terminal and lock-holding.
+
+## Proposed documentation correction (not applied)
+
+Specify the Grain runtime/bootstrap and session projection APIs; trusted owner-scoped admission facts and common lock integration for all session mutations; Pi branch entry and snapshot consistency types; the HTTP idempotency and context response schema plus client persistence behavior; and a safe policy for indefinitely uncertain commands. The plan references implementation files intentionally removed by the clean-room fence, so those details cannot be recovered from those citations.
+
+## Checks
+
+- Clojure focused tests: 4 tests, 16 assertions, 0 failures/errors.
+- `pnpm --dir impl/runtime test`: 2 TypeScript Effect tests pass (new command invokes once; retry reconciles, ambiguous evidence does not invoke again).
+- `allium check specs`: all contracts, including `specs/session-orchestration.allium`, pass with no diagnostics.
+- Grain handlers could not be compiled or run because Grain dependencies and AWP service bootstrap are absent from the fenced room.
+- Full `harness/verify.sh` was not run: the broader implementation/runtime/Flutter trees are absent. No tests used original implementation artifacts.
+
+This is a partial clean-room reconstruction: it supplies Grain-pattern command/query handlers and a tested Effect workflow, but not executable AWP Grain app wiring or owner-client transport integration.

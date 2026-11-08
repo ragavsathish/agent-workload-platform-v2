@@ -78,11 +78,14 @@ entity QueuedContextCompaction {
     conversation_id: String
     baseline_leaf_id: String?
     baseline_entry_count: Integer?
-    queue_state: queued | promoted
+    queue_state: queued | promoted | rejected
     transitions queue_state {
         queued -> promoted
+        queued -> rejected
         terminal: promoted
+        terminal: rejected
     }
+    rejection_reason: String?
 }
 rule StartFreshConversation {
     when: StartFresh(caller, command_id, new_id)
@@ -338,6 +341,12 @@ rule StartQueuedContextCompaction {
     requires: queued.owner = caller
     requires: queued.queue_state = queued
     requires: not Busy{owner: caller}
+    let active = ActiveSelection{owner: caller}
+    let context = ContextView{owner: caller}
+    requires: exists active
+    requires: active.conversation_id = queued.conversation_id
+    requires: exists context
+    requires: context.can_compact = true
     requires: queued.baseline_leaf_id = null or queued.baseline_leaf_id = baseline_leaf_id
     requires: queued.baseline_entry_count = null or queued.baseline_entry_count = baseline_entry_count
     requires: not exists ContextCompactionCommand{command_id: command_id}
@@ -349,6 +358,22 @@ rule StartQueuedContextCompaction {
         baseline_leaf_id: baseline_leaf_id,
         baseline_entry_count: baseline_entry_count,
         status: pending)
+}
+
+rule RejectStaleQueuedContextCompaction {
+    when: PromoteQueuedCompaction(caller, command_id, baseline_leaf_id, baseline_entry_count)
+    let queued = QueuedContextCompaction{command_id: command_id}
+    let active = ActiveSelection{owner: caller}
+    let context = ContextView{owner: caller}
+    requires: exists queued
+    requires: queued.owner = caller
+    requires: queued.queue_state = queued
+    requires: not Busy{owner: caller}
+    requires: not exists ContextCompactionCommand{command_id: command_id}
+    requires: not exists active or active.conversation_id != queued.conversation_id
+             or not exists context or context.can_compact != true
+    ensures: queued.queue_state = rejected
+    ensures: queued.rejection_reason = stale_context
 }
 
 rule SettleContextCompaction {

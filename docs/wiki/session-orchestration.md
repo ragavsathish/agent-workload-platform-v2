@@ -47,6 +47,14 @@ it. The task's own identity and history remain with the task. See the
 | Compact context | Authenticated owner; serialized with turns | Retained context changes; its usage projection refreshes. |
 | Attach or detach task | Eligible task identity and owner control | Following turns route to that task, or return to the selected orchestrator conversation. |
 
+An owner turn command carries a stable identity. If its response is lost, an
+identical retry returns the recorded decision; reusing the identity for changed
+input is refused. An uncertain external outcome is inspectable and is never
+automatically dispatched under a new identity. The typed owner client keeps
+the pending identity and exact input while the client remains open, so an
+explicit retry repeats the same command. See
+[slice 35](../plan/35-stable-owner-turn-retry/plan.md).
+
 V2 records a context-compaction command identity and selected conversation.
 If a request arrives during an active turn, the same identity is queued. After
 the turn settles, trusted owner, selection, context eligibility, and session

@@ -20,6 +20,8 @@ class VoiceApi {
   final Uri? _privateWorkspaceOrigin;
   String? _pendingCompactionId;
   Future<String>? _compactionIdentityLookup;
+  String? _pendingTurnId;
+  String? _pendingTurnMessage;
 
   String _newCommandId() {
     final random = Random.secure();
@@ -149,13 +151,30 @@ class VoiceApi {
   }
 
   Future<VisualResponse> sendMessage(String message) async {
+    var turnId = _pendingTurnId;
+    if (turnId != null && _pendingTurnMessage != message) {
+      throw const ApiException(
+        'A previous typed turn is unresolved. Retry it before sending another message.',
+      );
+    }
+    if (turnId == null) {
+      turnId = _newCommandId();
+      _pendingTurnId = turnId;
+      _pendingTurnMessage = message;
+    }
     final body = await _json(
       '/api/pi-message',
       method: 'POST',
       body: {'message': message},
+      requestHeaders: {'Idempotency-Key': turnId},
     );
-    return VisualResponse.fromValue(body) ??
-        (throw const ApiException('Pi returned an invalid response.'));
+    final response = VisualResponse.fromValue(body);
+    if (response == null) {
+      throw const ApiException('Pi returned an invalid response.');
+    }
+    _pendingTurnId = null;
+    _pendingTurnMessage = null;
+    return response;
   }
 
   Future<void> stopTurn() async {

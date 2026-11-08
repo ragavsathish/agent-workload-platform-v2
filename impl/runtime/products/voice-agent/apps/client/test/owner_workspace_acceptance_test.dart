@@ -304,6 +304,125 @@ void main() {
   });
 
   test(
+    '@owner-turn-001 retries an ambiguous typed turn with the same identity',
+    () async {
+      final requests = <http.Request>[];
+      final api = VoiceApi(
+        client: MockClient((request) async {
+          requests.add(request);
+          if (requests.length == 1) {
+            return http.Response(jsonEncode({'detail': 'response lost'}), 502);
+          }
+          return http.Response(
+            jsonEncode({
+              'spoken': jsonEncode({
+                'spoken': 'Recovered answer',
+                'presentation': {'kind': 'text'},
+              }),
+            }),
+            200,
+          );
+        }),
+      );
+      addTearDown(api.close);
+
+      await expectLater(
+        api.sendMessage('status please'),
+        throwsA(isA<ApiException>()),
+      );
+      await api.sendMessage('status please');
+
+      final turnIds = requests
+          .map((request) => request.headers['idempotency-key'])
+          .toList();
+      expect(turnIds, everyElement(matches(RegExp(r'^[a-f0-9]{48}$'))));
+      expect(turnIds.toSet(), hasLength(1));
+      expect(
+        requests.every(
+          (request) => jsonDecode(request.body)['message'] == 'status please',
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  test('@owner-turn-002 issues a fresh identity for a later command', () async {
+    final requests = <http.Request>[];
+    final api = VoiceApi(
+      client: MockClient((request) async {
+        requests.add(request);
+        return http.Response(
+          jsonEncode({
+            'spoken': jsonEncode({
+              'spoken': 'Answer',
+              'presentation': {'kind': 'text'},
+            }),
+          }),
+          200,
+        );
+      }),
+    );
+    addTearDown(api.close);
+
+    await api.sendMessage('same text');
+    await api.sendMessage('same text');
+
+    expect(requests[0].headers['idempotency-key'], isNotEmpty);
+    expect(requests[1].headers['idempotency-key'], isNotEmpty);
+    expect(
+      requests[0].headers['idempotency-key'],
+      isNot(requests[1].headers['idempotency-key']),
+    );
+  });
+
+  test(
+    '@owner-turn-003 does not reuse an uncertain identity for changed content',
+    () async {
+      final requests = <http.Request>[];
+      final api = VoiceApi(
+        client: MockClient((request) async {
+          requests.add(request);
+          if (requests.length == 1) {
+            return http.Response(jsonEncode({'detail': 'response lost'}), 502);
+          }
+          return http.Response(
+            jsonEncode({
+              'spoken': jsonEncode({
+                'spoken': 'Recovered answer',
+                'presentation': {'kind': 'text'},
+              }),
+            }),
+            200,
+          );
+        }),
+      );
+      addTearDown(api.close);
+
+      await expectLater(
+        api.sendMessage('first message'),
+        throwsA(isA<ApiException>()),
+      );
+      await expectLater(
+        api.sendMessage('changed message'),
+        throwsA(isA<ApiException>()),
+      );
+      await api.sendMessage('first message');
+
+      expect(requests, hasLength(2));
+      expect(
+        requests.every(
+          (request) => jsonDecode(request.body)['message'] == 'first message',
+        ),
+        isTrue,
+      );
+      expect(
+        requests.first.headers['idempotency-key'],
+        requests.last.headers['idempotency-key'],
+      );
+    },
+  );
+
+  test(
     '@owner-client-004 interrupts an active turn through the abort boundary',
     () async {
       late http.Request received;

@@ -209,6 +209,12 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
   ] }, { "x-awp-turn-id": "protocol-typed", "x-awp-origin": "typed" });
   assert.equal(retry.body.text, "Pi heard typed");
   assert.equal(modelCalls, 1);
+  const conflictingReuse = await call("POST", "/v1/turn", { messages: [
+    { role: "system", content: "Answer briefly." }, { role: "user", content: "changed typed" },
+  ] }, { "x-awp-turn-id": "protocol-typed", "x-awp-origin": "typed" });
+  assert.equal(conflictingReuse.status, 409);
+  assert.equal(conflictingReuse.body.code, "session-conflict");
+  assert.equal(modelCalls, 1);
   const uncertainId = "protocol-lost-answer";
   const uncertainMessages = [
     { role: "system", content: "Answer briefly." },

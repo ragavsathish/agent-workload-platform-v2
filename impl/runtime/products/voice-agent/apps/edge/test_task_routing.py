@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import os
 import unittest
 from unittest.mock import AsyncMock, patch
 
+import httpx
 from fastapi import HTTPException
 
 import bot
@@ -44,6 +47,36 @@ class TaskRoutingBoundaryTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 await bot.require_attachable_owner_task(object(), "owned-task"), expected
             )
+
+
+class TypedTurnIdentityTest(unittest.IsolatedAsyncioTestCase):
+    """@owner-turn-001 The owner command identity reaches the broker unchanged."""
+
+    async def test_typed_turn_forwards_stable_identity_to_broker(self) -> None:
+        forwarded: list[httpx.Request] = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            forwarded.append(request)
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": json.dumps({
+                    "spoken": "answer",
+                    "presentation": {"kind": "text"},
+                })}}]},
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+        with patch.dict(os.environ, {
+            "INFERENCE_BROKER_TOKEN": "test-token",
+            "INFERENCE_BROKER_BASE_URL": "https://broker.test",
+            "VOICE_DEFAULT_WORKSPACE": "/tmp/workspace",
+        }), patch.object(bot.httpx, "AsyncClient", return_value=client):
+            await bot.broker_pi_message("hello", "stable-owner-turn-id")
+        await client.aclose()
+
+        self.assertEqual(len(forwarded), 1)
+        self.assertEqual(forwarded[0].headers["x-awp-turn-id"], "stable-owner-turn-id")
+        self.assertEqual(forwarded[0].headers["x-awp-origin"], "typed")
 
 
 if __name__ == "__main__":

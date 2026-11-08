@@ -14,4 +14,4 @@ from the scenarios while the implementation is red. An independent gate checks
 the result. A later generation can remove `impl/` and rebuild from the durable
 documents through a clean-room fence.
 
-The current planned slice is [deployment levels](../plan/23-deployment-levels/plan.md).
+The current planned slice is [owner client](../plan/24-owner-client/plan.md).

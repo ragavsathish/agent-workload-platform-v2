@@ -26,6 +26,7 @@ Cites [the pinned v1 source inventory](../../raw/v1/manifest.md).
 - [Task result delivery](task-result-delivery.md) defines bounded answer presentation and owner-scoped patch or scratch workspace retrieval for [slice 12](../plan/12-task-result-delivery/plan.md).
 - [Pull request soundtrack](pr-soundtrack.md) defines the manual reviewer publication and qualification boundary for [slice 14](../plan/14-pr-soundtrack/plan.md).
 - [Supervised local release readiness](local-release-readiness.md) defines the evidence boundary for a real local owner journey across current services in [slice 15](../plan/15-local-release-readiness/plan.md).
+- [Owner workspace](owner-client.md) defines the owner-facing conversation, task, and presentation behaviors for [slice 24](../plan/24-owner-client/plan.md).
 
 The wiki records source-backed current behavior separately from agreed behavior
 and explicit v2 decisions. It does not describe the implementation.

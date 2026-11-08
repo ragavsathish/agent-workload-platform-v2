@@ -8,6 +8,7 @@
             [awp-v2.knowledge.native-worker :as native-worker]
             [awp-v2.knowledge.orc-adapter :as orc-adapter]
             [awp-v2.session.api :as session]
+            [awp-v2.owner-client.event-model]
             [awp-v2.song.api :as song]
             [awp-v2.song.native-worker :as song-worker]
             [awp-v2.song.pi-durable :as pi-durable]

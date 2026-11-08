@@ -3,6 +3,7 @@
             [ai.obney.grain.event-model.interface :as model]
             [awp-v2.tasking.api]
             [awp-v2.session.api]
+            [awp-v2.owner-client.event-model]
             [awp-v2.knowledge.api]
             [awp-v2.song.api]
             [awp-v2.deployment.api]))

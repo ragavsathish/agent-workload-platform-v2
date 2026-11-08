@@ -77,3 +77,15 @@
         (is (= [request-id request-id]
                (mapv :task-id (mapv deref calls))))
         (is (= 1 (tasking/accepted-count system)))))))
+
+(deftest owner-client-001-task-list-uses-owner-scoped-query
+  (with-system
+    (fn [system]
+      (let [alice-task (request request-id)
+            bob-task (-> (request #uuid "f1ff0f40-40c5-45b7-95a8-f8d7d6e39c12")
+                         (assoc :owner bob :instruction "Review Bob's change"))]
+        (tasking/submit! system alice alice-task)
+        (tasking/submit! system bob bob-task)
+        (is (= [request-id] (mapv :task-id (tasking/list-tasks system alice))))
+        (is (= [(:request-id bob-task)]
+               (mapv :task-id (tasking/list-tasks system bob))))))))

@@ -98,7 +98,7 @@
 (defn- task-operation [task-system owner op data]
   (let [task-id (some-> (:task-id data) parse-uuid)]
     (case op
-      "list" {:tasks (tasking/all-tasks task-system)}
+      "list" {:tasks (tasking/list-tasks task-system owner)}
       "submit" (tasking/submit! task-system owner
                                 {:request-id (parse-uuid (:request-id data))
                                  :owner owner
@@ -107,9 +107,7 @@
       "read" (let [task (task-life/task-state task-system task-id)]
                  (if (= (:owner task) (task-commands/canonical-owner owner))
                    task {:error "not-found"}))
-      "owned-list" {:tasks (->> (tasking/all-tasks task-system)
-                                (filter #(= (:owner %) (task-commands/canonical-owner owner)))
-                                vec)}
+      "owned-list" {:tasks (tasking/list-tasks task-system owner)}
       "abort" (tasking/abort! task-system owner task-id)
       "retry" (tasking/retry! task-system owner task-id)
       "owned-progress" (tasking/progress task-system owner task-id

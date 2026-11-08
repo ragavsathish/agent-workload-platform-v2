@@ -79,6 +79,14 @@
     :tasking/progress
     {:description "Bounded owner-visible progress."
      :schema [:map [:task-id :uuid] [:after :int] [:limit :int]]
+     :reads #{:tasking/requests :tasking/lifecycle}}
+    :tasking/list
+    {:description "List durable tasks for their authenticated owner."
+     :schema [:map]
+     :reads #{:tasking/requests :tasking/lifecycle}}
+    :tasking/artifact
+    {:description "Read a completed owner's declared task artifact reference."
+     :schema [:map [:task-id :uuid] [:kind :keyword]]
      :reads #{:tasking/requests :tasking/lifecycle}}}
    :flows
    {:tasking/admission

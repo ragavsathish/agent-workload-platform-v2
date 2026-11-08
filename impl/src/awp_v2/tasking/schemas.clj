@@ -31,4 +31,6 @@
 
 (defschemas queries
   {:tasking/task [:map [:request-id :uuid]]
-   :tasking/progress [:map [:task-id :uuid] [:after :int] [:limit :int]]})
+   :tasking/progress [:map [:task-id :uuid] [:after :int] [:limit :int]]
+   :tasking/list [:map]
+   :tasking/artifact [:map [:task-id :uuid] [:kind :keyword]]})

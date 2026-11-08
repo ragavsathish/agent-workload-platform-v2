@@ -1,0 +1,42 @@
+name: voice_agent_client
+description: Flutter client for the private Pi voice workspace on web, iOS, and Android.
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  cupertino_icons: ^1.0.8
+  flutter:
+    sdk: flutter
+  http: ^1.5.0
+  permission_handler: 12.0.1
+  web: ^1.1.1
+  webview_flutter: 4.14.1
+  webview_flutter_android: 4.14.1
+  webview_flutter_wkwebview: 3.27.0
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+  patrol: 4.10.0
+
+  test_api: any
+flutter:
+  uses-material-design: true
+  assets:
+    - design_system/fonts/LICENSE.md
+    - design_system/fonts/MATERIAL_ICONS_LICENSE.txt
+    - design_system/fonts/SOURCE.md
+  fonts:
+    - family: Source Code Pro
+      fonts:
+        - asset: design_system/fonts/SourceCodePro-Regular.ttf
+          weight: 400
+        - asset: design_system/fonts/SourceCodePro-Semibold.ttf
+          weight: 600
+
+patrol:
+  app_name: Pi Voice

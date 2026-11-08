@@ -1,0 +1,42 @@
+-- allium: 3
+-- Cites docs/plan/24-owner-client/spec.feature,
+-- docs/wiki/owner-client.md, and raw/v1/client-source-capture.md.
+
+surface OwnerWorkspace {
+    facing owner: String
+
+    exposes:
+        owner
+
+    provides:
+        ReadSessionSelection(caller, owner)
+        ReadSessionCatalog(caller, owner)
+        ReadSessionHistory(caller, owner, conversation_id)
+        ReadSessionTranscript(caller, owner)
+        ReadSessionContext(caller, owner)
+        StartFresh(caller, command_id, new_id)
+        ResumeSaved(caller, command_id, target_id)
+        SubmitTurn(caller, turn_id, origin, input_digest, prompt)
+        StopTurn(caller, turn_id)
+        AttachTask(caller, task_id)
+        DetachTaskSession(caller)
+        CompactContext(caller)
+        ListOwnedTasks(caller, owner)
+        ReadOwnedTask(caller, owner, request_id)
+        ReadTaskProgress(caller, owner, task_id, after, limit)
+        SubmitTask(caller, owner, request_id, instruction, workspace)
+        AbortTask(caller, task_id)
+        ReadTaskArtifact(caller, owner, task_id, artifact_name)
+
+    @guarantee ServerOwnsConversationAndTaskState
+        -- Selection, accepted turns, task state, and results are read from
+        -- server-owned projections after each command and after reload.
+
+    @guarantee OwnerScopedWorkspaceReads
+        -- Another owner's conversation, task, progress, or artifact is not
+        -- returned through this surface.
+
+    @guarantee SafePresentationOnly
+        -- Bounded presentations cannot access credentials, host tools, or
+        -- task controls.
+}

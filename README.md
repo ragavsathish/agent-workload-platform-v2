@@ -1,8 +1,8 @@
 # Agent Workload Platform v2
 
-AWP v2 rebuilds the current product one documented slice at a time. The [Löyly way of working](docs/wow/way-of-working.md) keeps pinned v1 evidence in `raw/`, stack-free behavior in the [domain wiki](docs/wiki/index.md) and [slice plans](docs/plan/23-deployment-levels/plan.md), and build choices under `impl/`.
+AWP v2 rebuilds the current product one documented slice at a time. The [Löyly way of working](docs/wow/way-of-working.md) keeps pinned v1 evidence in `raw/`, stack-free behavior in the [domain wiki](docs/wiki/index.md) and [slice plans](docs/plan/24-owner-client/plan.md), and build choices under `impl/`.
 
-Slices 01–16 implement tasking, session CQRS, live voice, personal knowledge, song, taxonomy, incidents, artifact delivery, worker delivery, and local release qualification. Slices 17–22 add a private knowledge-quality gate, Grain-backed ORC relations, a private owner review workbench, and an isolated public v2 candidate. Slice 23 specifies voice, durable, and full deployment levels. The [full local verifier](harness/verify.sh) covers the Grain event models, Allium contracts, acceptance suites, runtime builds, and deployment probes.
+Slices 01–16 implement tasking, session CQRS, live voice, personal knowledge, song, taxonomy, incidents, artifact delivery, worker delivery, and local release qualification. Slices 17–22 add a private knowledge-quality gate, Grain-backed ORC relations, a private owner review workbench, and an isolated public v2 candidate. Slice 23 adds voice, durable, and full deployment levels. Slice 24 specifies the missing owner client surface against the Grain session and task contracts. The [full local verifier](harness/verify.sh) covers the Grain event models, Allium contracts, acceptance suites, runtime builds, and deployment probes.
 
 ## Current qualification status
 
@@ -18,7 +18,7 @@ Local acceptance evidence is not external deployment parity. Keep the v1 service
 
 1. [Method](docs/wow/way-of-working.md) and [invariants](docs/wow/invariants.md)
 2. [Domain wiki](docs/wiki/index.md)
-3. [Latest slice](docs/plan/23-deployment-levels/plan.md) and [scenarios](docs/plan/23-deployment-levels/spec.feature)
+3. [Latest slice](docs/plan/24-owner-client/plan.md) and [scenarios](docs/plan/24-owner-client/spec.feature)
 4. [Pinned v1 evidence](raw/v1/manifest.md) when checking a claim
 5. Product implementation and qualification evidence under `impl/`
 

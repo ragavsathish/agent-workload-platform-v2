@@ -129,6 +129,18 @@ git -C "$TARGET" gc -q --prune=now --aggressive
 [[ -f "$TARGET/specs/deployment-levels.allium" ]] || {
   echo "FENCE FAILED: slice 23 behavior missing" >&2; exit 1;
 }
+[[ -f "$TARGET/docs/plan/24-owner-client/spec.feature" ]] || {
+  echo "FENCE FAILED: slice 24 contract missing" >&2; exit 1;
+}
+[[ -f "$TARGET/docs/wiki/owner-client.md" ]] || {
+  echo "FENCE FAILED: slice 24 domain rules missing" >&2; exit 1;
+}
+[[ -f "$TARGET/specs/owner-client.allium" ]] || {
+  echo "FENCE FAILED: slice 24 behavior missing" >&2; exit 1;
+}
+[[ -f "$TARGET/raw/v1/client-source-capture.md" && -d "$TARGET/raw/v1/client" ]] || {
+  echo "FENCE FAILED: pinned owner client evidence missing" >&2; exit 1;
+}
 [[ "$(git -C "$TARGET" rev-list --all --count)" == 1 ]] || {
   echo "FENCE FAILED: prior history remains" >&2; exit 1
 }

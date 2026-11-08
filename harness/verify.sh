@@ -9,6 +9,11 @@ shasum -a 256 -c raw/orc/SHA256SUMS
 allium check specs
 "$ROOT/impl/test.sh"
 (cd "$ROOT/impl" && clojure -M:verify)
+CLIENT="$ROOT/impl/runtime/products/voice-agent/apps/client"
+(cd "$CLIENT" && ./tool/flutterw pub get --enforce-lockfile)
+(cd "$CLIENT" && ./tool/flutterw analyze)
+(cd "$CLIENT" && ./tool/flutterw test)
+(cd "$CLIENT" && ./tool/flutterw build web --wasm --release)
 pnpm --dir "$ROOT/impl/runtime" install --frozen-lockfile --ignore-scripts
 pnpm --dir "$ROOT/impl/runtime" run build
 node --test "$ROOT/impl/runtime/platform/agent-execution/pi-durable-task/song-lyric-owner.test.mjs"

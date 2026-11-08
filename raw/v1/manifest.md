@@ -202,3 +202,25 @@ the uncommitted v1 deployment selection changes separately from the pinned
 baseline commit above. Its exact binary patch and digest are preserved in
 `deployment-levels-worktree.patch`; it is not represented as part of the pinned
 commit.
+
+## Current Grain topology note
+
+The current v1 worktree contains an untracked [Grain reverse-engineering
+note](grain-reverse-engineering-worktree.md) that maps C1–C9, records the
+current and proposed flows separately, and states the observed persistence
+boundaries. It is copied byte-for-byte from
+`docs/event-model/grain-reverse-engineering.md` and is not part of the pinned
+baseline commit. SHA-256:
+`d91178da261cf8efbcc0d914349cd3a0e8e1b80273a4494535753d1fcb0dea29`.
+
+## Owner client source snapshot
+
+The [client source snapshot](client/) copies the v1 Flutter library, tests,
+required bundled fonts, and package metadata from `products/voice-agent/apps/client` at the pinned
+`d8afdfc31ea3ac7d74eef625c8863f5954b75fcd` commit. No client-path worktree
+changes were present at capture time. The tree omits generated build/cache
+files. To avoid copying a private tailnet name, the default host was replaced
+with `voice.example.invalid` in `client/lib/platform/embedded_navigation_policy.dart`,
+`client/README.md`, and `client/test/transcript_view_test.dart`. All copied
+files have entries in [the client snapshot checksums](client/SHA256SUMS).
+The [capture note](client-source-capture.md) records this sanitization.

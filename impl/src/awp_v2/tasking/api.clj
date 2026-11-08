@@ -77,10 +77,13 @@
                                 :request-id request-id}))]
     (or (:query/result result) result)))
 
-(defn all-tasks [system]
-  (mapv (fn [[_ accepted]]
-          (lifecycle/task-state system (:task-id accepted)))
-        (read-models/requests system)))
+(defn list-tasks [system actor-id]
+  (let [result (qp/process-query
+                 (assoc (context system actor-id)
+                        :query {:query/name :tasking/list
+                                :query/id (random-uuid)
+                                :query/timestamp (OffsetDateTime/now)}))]
+    (or (:query/result result) [])))
 
 (defn accepted-count [system]
   (count (read-models/requests system)))
@@ -115,13 +118,15 @@
           (fail! system task-id "Task artifact capture failed."))))))
 
 (defn artifact [system actor-id task-id kind]
-  (let [task (task system actor-id task-id)
-        expected (if (= "scratch" (:workspace task)) "workspace" "patch")
-        descriptor (get-in task [:result :artifacts kind])]
-    (if (or (::anom/category task)
-            (not= :completed (:status task))
-            (not= expected kind)
-            (nil? descriptor))
+  (let [result (qp/process-query
+                 (assoc (context system actor-id)
+                        :query {:query/name :tasking/artifact
+                                :query/id (random-uuid)
+                                :query/timestamp (OffsetDateTime/now)
+                                :task-id task-id
+                                :kind (keyword kind)}))
+        descriptor (:query/result result)]
+    (if (or (::anom/category result) (nil? descriptor))
       {::anom/category ::anom/not-found ::anom/message "task artifact is unavailable"}
       (try
         (artifacts/read! system task-id kind descriptor)

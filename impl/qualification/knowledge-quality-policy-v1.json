@@ -1,0 +1,27 @@
+{
+  "id": "awp-knowledge-quality-v1",
+  "coverage": {
+    "journalKinds": ["thought", "idea", "question", "decision", "goal", "learning", "unclassified"],
+    "assertionKinds": ["none", "conversation_topic", "skill_evidence", "profile_update"],
+    "minPositivePerKind": 10,
+    "minNegativePerBranch": 30,
+    "minConceptRelation": 20,
+    "minNegativeRelations": 10,
+    "minRandomPerBranch": 10,
+    "difficultPatterns": ["command", "question", "quotation", "negation", "ambiguity", "correction", "third_party", "mixed_turn"]
+  },
+  "thresholds": {
+    "exactEvidence": 1,
+    "maxCrossOwner": 0,
+    "maxUnsupportedSkillProfile": 0,
+    "maxWrongPublishedRelations": 0,
+    "journalPrecision": 0.9,
+    "journalRecall": 0.8,
+    "assertionMacroF1": 0.85,
+    "assertionPerKindF1": 0.75,
+    "conceptPrecision": 0.9,
+    "conceptRecall": 0.8,
+    "relationPrecision": 0.95,
+    "relationRecall": 0.8
+  }
+}

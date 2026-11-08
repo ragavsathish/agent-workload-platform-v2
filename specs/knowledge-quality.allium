@@ -31,6 +31,13 @@ entity HoldoutUse {
     run_id: String
 }
 
+rule RegisterReviewCase {
+    when: PrivateCaseRegistered(case_id, owner, source_id, branch, family_id, partition, source_digest)
+    requires: not exists ReviewCase{case_id: case_id}
+    requires: source_digest != ""
+    ensures: ReviewCase.created(case_id: case_id, owner: owner, source_id: source_id, branch: branch, family_id: family_id, partition: partition, annotation_state: pending, privacy_state: pending, expected_digest: "")
+}
+
 rule ApproveReviewCase {
     when: IndependentCaseApproved(case_id, owner, source_id, branch, family_id, partition, expected_digest)
     let item = ReviewCase{case_id: case_id}
@@ -97,6 +104,7 @@ surface OwnerKnowledgeQuality {
         run.policy_id
         run.rollback_id
     provides:
+        PrivateCaseRegistered(case_id, owner, source_id, branch, family_id, partition, source_digest)
         IndependentCaseApproved(case_id, owner, source_id, branch, family_id, partition, expected_digest)
         FrozenQualityRunRequested(run_id, policy_id, baseline_id, candidate_id, corpus_id, partition, rollback_id)
         LockedHoldoutOpened(run_id, corpus_id, candidate_id)

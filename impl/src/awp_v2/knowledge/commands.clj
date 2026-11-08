@@ -45,7 +45,66 @@
         prior-result (get-in state [:taxonomy-result-ids (:result-id data)])
         result
         (cond
-          (not= actor-id owner) (refuse :not-found)
+          (and (= op :quality-review)
+               (not (and (not= actor-id owner)
+                         (fn? (:quality-review-authorized? context))
+                         ((:quality-review-authorized? context) actor-id owner)))) (refuse :not-found)
+          (and (not= op :quality-review) (not= actor-id owner)) (refuse :not-found)
+          (= op :quality-case)
+          (if-let [old (get-in state [:quality-cases (:case-id data)])]
+            (if (= (select-keys old [:case-id :source-id :branch :family-id :split :source-digest])
+                   (select-keys data [:case-id :source-id :branch :family-id :split :source-digest]))
+              {:value {:status :reused :case-id (:case-id data)}} (refuse :conflict))
+            (if (some #(and (= (:family-id %) (:family-id data)) (not= (:split %) (:split data)))
+                      (vals (:quality-cases state)))
+              (refuse :conflict)
+              {:fact data :value {:status :registered :case-id (:case-id data)}}))
+          (= op :quality-review)
+          (let [quality-case (get-in state [:quality-cases (:case-id data)])
+                prior (get-in state [:quality-actions (:action-id data)])]
+            (cond
+              (nil? quality-case) (refuse :not-found)
+              prior (if (= (dissoc prior :at) (dissoc data :at))
+                      {:value {:status :reused :case-id (:case-id data)}} (refuse :conflict))
+              (not (or (and (= :pending (:review-status quality-case))
+                            (= :independent (:reviewer-role data))
+                            (#{:approved :rejected :disputed} (:decision data)))
+                       (and (= :disputed (:review-status quality-case))
+                            (= :adjudicated (:decision data))
+                            (= :adjudicator (:reviewer-role data))
+                            (not= (:reviewer-id (last (:review-history quality-case))) actor-id))))
+              (refuse :conflict)
+              :else {:fact data :value {:status (:decision data) :case-id (:case-id data)}}))
+          (= op :quality-run)
+          (let [old (get-in state [:quality-runs (:run-id data)])
+                cases (mapv #(get-in state [:quality-cases %]) (:case-ids data))]
+            (cond
+              old (if (= (dissoc old :status :metrics-digest) data)
+                    {:value {:status :reused :run-id (:run-id data)}} (refuse :conflict))
+              (or (empty? cases) (some nil? cases)
+                  (not-every? #(and (#{:approved :adjudicated} (:review-status %))
+                                    (= :passed (:privacy-status %))
+                                    (= (:split %) (:split data))) cases)) (refuse :incorrect)
+              :else {:fact data :value {:status :prepared :run-id (:run-id data)}}))
+          (= op :quality-holdout)
+          (let [run (get-in state [:quality-runs (:run-id data)])]
+            (cond
+              (nil? run) (refuse :not-found)
+              (not= :locked_holdout (:split run)) (refuse :incorrect)
+              (not= :prepared (:status run)) (refuse :conflict)
+              (get-in state [:quality-holdouts (:corpus-digest run)]) (refuse :conflict)
+              :else {:fact {:run-id (:run-id data) :corpus-digest (:corpus-digest run)}
+                     :value {:status :consumed :run-id (:run-id data)}}))
+          (= op :quality-verdict)
+          (let [run (get-in state [:quality-runs (:run-id data)])]
+            (cond
+              (nil? run) (refuse :not-found)
+              (not (#{:prepared :running} (:status run))) (refuse :conflict)
+              (and (= :locked_holdout (:split run)) (not= :running (:status run))) (refuse :conflict)
+              (and (= :passed (:outcome data))
+                   (not (and (fn? (:quality-gate-authorized? context))
+                             ((:quality-gate-authorized? context) owner (:run-id data))))) (refuse :incorrect)
+              :else {:fact data :value {:status (:outcome data) :run-id (:run-id data)}}))
           (= op :intake)
           (if source
             (if (= (select-keys source [:conversation-id :message-id :transcript :captured-at])
@@ -221,3 +280,8 @@
 (defcommand :knowledge taxonomy-model-outcome {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :taxonomy-model-outcome ctx))
 (defcommand :knowledge taxonomy-relation {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :taxonomy-relation ctx))
 (defcommand :knowledge taxonomy-relation-review {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :taxonomy-relation-review ctx))
+(defcommand :knowledge quality-case {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :quality-case ctx))
+(defcommand :knowledge quality-review {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :quality-review ctx))
+(defcommand :knowledge quality-run {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :quality-run ctx))
+(defcommand :knowledge quality-holdout {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :quality-holdout ctx))
+(defcommand :knowledge quality-verdict {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :quality-verdict ctx))

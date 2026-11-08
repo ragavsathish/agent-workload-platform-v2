@@ -12,7 +12,8 @@ allium check specs
 pnpm --dir "$ROOT/impl/runtime" install --frozen-lockfile --ignore-scripts
 pnpm --dir "$ROOT/impl/runtime" run build
 node --test "$ROOT/impl/runtime/platform/agent-execution/pi-durable-task/song-lyric-owner.test.mjs"
-pnpm --dir "$ROOT/impl/runtime/products/voice-agent/apps/pi-agent" exec node --test live-protocol.test.mjs knowledge-worker.test.mjs knowledge-quality.test.mjs song-worker.test.mjs
+pnpm --dir "$ROOT/impl/runtime/products/voice-agent/apps/pi-agent" exec node --test live-protocol.test.mjs knowledge-worker.test.mjs knowledge-quality.test.mjs knowledge-quality-v2.test.mjs song-worker.test.mjs
+node --check "$ROOT/impl/runtime/products/voice-agent/apps/pi-agent/knowledge-quality-run.mjs"
 (cd "$ROOT/impl/runtime/products/voice-agent/apps/broker" &&
   uv sync --frozen --no-dev --quiet &&
   PYTHONPATH=src:../../packages/telemetry/src .venv/bin/python test_live_proxy.py)

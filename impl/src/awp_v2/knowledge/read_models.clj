@@ -60,6 +60,22 @@
                                   (update-in [:taxonomy-relations (:relation-id data) :reviews] conj
                                              (select-keys data [:action-id :expected-revision :decision :at]))
                                   (assoc-in [:taxonomy-actions (:action-id data)] data))
+    :quality-case (assoc-in state [:quality-cases (:case-id data)]
+                            (assoc data :review-status :pending :privacy-status :pending :review-history []))
+    :quality-review (-> state
+                        (assoc-in [:quality-cases (:case-id data) :review-status] (:decision data))
+                        (assoc-in [:quality-cases (:case-id data) :privacy-status] (:privacy-status data))
+                        (assoc-in [:quality-cases (:case-id data) :expected-digest] (:expected-digest data))
+                        (update-in [:quality-cases (:case-id data) :review-history] conj
+                                   (select-keys data [:action-id :reviewer-id :reviewer-role :decision :privacy-status :expected-digest :at]))
+                        (assoc-in [:quality-actions (:action-id data)] data))
+    :quality-run (assoc-in state [:quality-runs (:run-id data)] (assoc data :status :prepared))
+    :quality-holdout (-> state
+                         (assoc-in [:quality-runs (:run-id data) :status] :running)
+                         (assoc-in [:quality-holdouts (:corpus-digest data)] (:run-id data)))
+    :quality-verdict (-> state
+                         (assoc-in [:quality-runs (:run-id data) :status] (:outcome data))
+                         (assoc-in [:quality-runs (:run-id data) :metrics-digest] (:metrics-digest data)))
     :legacy-snapshot (assoc-in state [:legacy-snapshots (:snapshot-id data)] (select-keys data [:snapshot-id :digest]))
     :legacy-resource (assoc-in state [:legacy-resources (:snapshot-id data) (:legacy-id data)] (:resource data))
     :legacy-switch (assoc state :read-source :import :selected-snapshot (:snapshot-id data))

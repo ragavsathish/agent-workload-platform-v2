@@ -43,3 +43,8 @@
                         (sort-by :relation-id) vec)}))
 (defquery :knowledge taxonomy-outcomes {:grain.event-model/reads #{:knowledge/state}} [ctx]
   {:query/result (->> (:taxonomy-outcomes (state ctx)) vals (sort-by :result-id) vec)})
+(defquery :knowledge quality-cases {:grain.event-model/reads #{:knowledge/state}} [ctx]
+  {:query/result (->> (:quality-cases (state ctx)) vals (sort-by :case-id) vec)})
+(defquery :knowledge quality-run-status {:grain.event-model/reads #{:knowledge/state}} [ctx]
+  (if-let [value (get-in (state ctx) [:quality-runs (get-in ctx [:query :run-id])])]
+    {:query/result value} (missing)))

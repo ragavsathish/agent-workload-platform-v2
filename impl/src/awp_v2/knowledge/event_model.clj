@@ -22,7 +22,12 @@
                              :taxonomy-map "MapCategoryVersion"
                              :taxonomy-model-outcome "RecordModelOutcome"
                              :taxonomy-relation "ProposeRelation"
-                             :taxonomy-relation-review "DecideRelation"}]
+                             :taxonomy-relation-review "DecideRelation"
+                             :quality-case "RegisterReviewCase"
+                             :quality-review "ApproveReviewCase"
+                             :quality-run "StartQualityRun"
+                             :quality-holdout "ConsumeLockedHoldout"
+                             :quality-verdict "RecordQualityVerdict"}]
               [(keyword "knowledge" (name op))
                {:description (name op)
                 :schema [:map [:owner :string] [:data :map]]
@@ -33,6 +38,8 @@
                                        (#{:taxonomy-proposal :taxonomy-review :taxonomy-map :taxonomy-model-outcome
                                           :taxonomy-relation :taxonomy-relation-review} op)
                                        "specs/knowledge-taxonomy.allium"
+                                       (#{:quality-case :quality-review :quality-run :quality-holdout :quality-verdict} op)
+                                       "specs/knowledge-quality.allium"
                                        :else "specs/personal-knowledge.allium")
                                 :kind :rule :name rule}]}]))
    :events {:knowledge/fact {:description "One knowledge decision or external outcome."
@@ -49,7 +56,9 @@
                                         :taxonomy-proposals [:map [:owner :string]]
                                         :taxonomy-current [:map [:owner :string]]
                                         :taxonomy-relations [:map [:owner :string]]
-                                        :taxonomy-outcomes [:map [:owner :string]]}]
+                                        :taxonomy-outcomes [:map [:owner :string]]
+                                        :quality-cases [:map [:owner :string]]
+                                        :quality-run-status [:map [:owner :string] [:run-id :string]]}]
                        [(keyword "knowledge" (name op))
                         {:description (name op) :schema schema :reads #{:knowledge/state}}]))
    :flows {:knowledge/intake {:description "A completed turn becomes independently tracked work."

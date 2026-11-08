@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:awp:v2:knowledge-quality:private-corpus",
+  "title": "Private owner knowledge quality corpus",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["formatVersion", "datasetId", "cases"],
+  "properties": {
+    "formatVersion": { "const": 2 },
+    "datasetId": { "type": "string", "minLength": 1 },
+    "runConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runId", "owner", "partition", "baselineId", "candidateId", "rollbackId", "modelId", "promptId", "taxonomyId", "scorerId", "classifierId", "classifierThreshold", "workerDigest", "orcAdapterDigest"],
+      "properties": {
+        "runId": { "type": "string", "minLength": 1 },
+        "owner": { "type": "string", "minLength": 1 },
+        "partition": { "enum": ["development", "challenge", "locked_holdout", "production_shadow"] },
+        "baselineId": { "type": "string", "minLength": 1 },
+        "candidateId": { "type": "string", "minLength": 1 },
+        "rollbackId": { "type": "string", "minLength": 1 },
+        "modelId": { "type": "string", "minLength": 1 },
+        "classifierId": { "type": "string", "minLength": 1 },
+        "classifierThreshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "workerDigest": { "type": "string", "minLength": 1 },
+        "orcAdapterDigest": { "type": "string", "minLength": 1 },
+        "promptId": { "type": "string", "minLength": 1 },
+        "taxonomyId": { "type": "string", "minLength": 1 },
+        "scorerId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "owner", "sourceId", "sourceText", "branch", "semanticFamilyId", "split", "sourceKind", "errorSlice", "sampleKind", "annotationStatus", "privacyReview", "reviews", "expected"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "owner": { "type": "string", "minLength": 1 },
+          "sourceId": { "type": "string", "minLength": 1 },
+          "sourceText": { "type": "string", "minLength": 1 },
+          "branch": { "enum": ["journal", "assertion", "concept", "relation"] },
+          "semanticFamilyId": { "type": "string", "minLength": 1 },
+          "split": { "enum": ["development", "challenge", "locked_holdout", "production_shadow", "unassigned"] },
+          "sourceKind": { "type": "string", "minLength": 1 },
+          "errorSlice": { "type": "string", "minLength": 1 },
+          "sampleKind": { "enum": ["random", "targeted", "unassigned"] },
+          "annotationStatus": { "enum": ["pending", "reviewed", "adjudicated", "excluded"] },
+          "privacyReview": {
+            "type": "object",
+            "required": ["status"],
+            "properties": {
+              "status": { "enum": ["pending", "passed", "failed"] },
+              "reviewerId": { "type": "string" },
+              "reviewedAt": { "type": "string" }
+            }
+          },
+          "reviews": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["actorId", "role", "decision", "at"],
+              "properties": {
+                "actorId": { "type": "string", "minLength": 1 },
+                "role": { "enum": ["owner", "independent", "adjudicator"] },
+                "decision": { "enum": ["approved", "rejected", "disputed", "corrected"] },
+                "at": { "type": "string", "minLength": 1 }
+              }
+            }
+          },
+          "expected": {
+            "anyOf": [
+              { "type": "null" },
+              { "type": "array", "items": {
+                "type": "object",
+                "required": ["kind", "evidence"],
+                "properties": {
+                  "kind": { "type": "string", "minLength": 1 },
+                  "evidence": { "type": "string" },
+                  "text": { "type": "string" },
+                  "leftId": { "type": "string" },
+                  "rightId": { "type": "string" },
+                  "origin": { "enum": ["observed", "miss", "correction"] }
+                }
+              } }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

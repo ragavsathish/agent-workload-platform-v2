@@ -29,7 +29,7 @@
 (declare recover! daily-result! ingest-worker-result! ingest-daily-worker-result! schedule-worker!
          taxonomy-propose! taxonomy-review! taxonomy-map! taxonomy-item taxonomy-current
          taxonomy-relation! taxonomy-relations taxonomy-relation-review! taxonomy-model-outcome!
-         taxonomy-proposals)
+         taxonomy-proposals nonblank-bounded?)
 (defn open-system [{:keys [storage-dir] :as options}]
   (validator/verify-or-throw!)
   (let [owned? (nil? storage-dir)
@@ -53,19 +53,20 @@
     (if-let [category (::anom/category result)]
       {:error (keyword (::anom/message result)) :category category}
       {:error :incorrect})))
-(defn- issue! [system actor op data]
+(defn- issue-as! [system actor owner op data]
   (loop [attempt 0]
     (let [command {:command/name (keyword "knowledge" (name op)) :command/id (random-uuid)
-                   :command/timestamp (OffsetDateTime/now) :owner actor :data data}
+                   :command/timestamp (OffsetDateTime/now) :owner owner :data data}
           result (cp/process-command (assoc system :actor-id actor :command command))]
       (if (and (= ::anom/conflict (::anom/category result))
                (= "CAS failed" (::anom/message result)) (< attempt 12))
         (do (rmp/l1-clear!) (recur (inc attempt)))
         (let [value (response result :command/result)]
           (when (and (:after-write! system) (not (:error value)))
-            (try ((:after-write! system) system actor)
+            (try ((:after-write! system) system owner)
                  (catch Throwable _ nil)))
           value)))))
+(defn- issue! [system actor op data] (issue-as! system actor actor op data))
 (defn- read! [system actor op data]
   (response (qp/process-query (assoc system :actor-id actor
                                      :query (merge {:query/name (keyword "knowledge" (name op))
@@ -83,6 +84,49 @@
 (defn taxonomy-current [system actor] (read! system actor :taxonomy-current {}))
 (defn taxonomy-relations [system actor] (read! system actor :taxonomy-relations {}))
 (defn taxonomy-outcomes [system actor] (read! system actor :taxonomy-outcomes {}))
+(defn quality-cases [system actor] (read! system actor :quality-cases {}))
+(defn quality-run [system actor run-id] (read! system actor :quality-run-status {:run-id run-id}))
+
+(defn quality-register-case! [system owner {:keys [case-id source-id branch family-id split source-digest] :as data}]
+  (if (and (every? #(nonblank-bounded? % 256) [case-id source-id family-id source-digest])
+           (#{:journal :assertion :concept :relation} branch)
+           (#{:development :challenge :locked_holdout :production_shadow} split)
+           (= (set (keys data)) #{:case-id :source-id :branch :family-id :split :source-digest}))
+    (issue! system owner :quality-case data)
+    {:error :incorrect}))
+
+(defn quality-review-case! [system reviewer owner {:keys [case-id action-id decision privacy-status expected-digest reviewer-role] :as data}]
+  (if (and (every? #(nonblank-bounded? % 256) [case-id action-id expected-digest reviewer])
+           (#{:approved :rejected :disputed :adjudicated} decision)
+           (#{:independent :adjudicator} (or reviewer-role :independent))
+           (#{:passed :failed} privacy-status))
+    (issue-as! system reviewer owner :quality-review
+               (assoc (select-keys data [:case-id :action-id :decision :privacy-status :expected-digest])
+                      :reviewer-id reviewer :reviewer-role (or reviewer-role :independent)
+                      :at (str (OffsetDateTime/now))))
+    {:error :incorrect}))
+
+(defn quality-start-run! [system owner {:keys [run-id policy-digest corpus-digest baseline-id candidate-id
+                                              rollback-id config-digest split case-ids] :as data}]
+  (if (and (every? #(nonblank-bounded? % 256) [run-id policy-digest corpus-digest baseline-id
+                                               candidate-id rollback-id config-digest])
+           (#{:development :challenge :locked_holdout :production_shadow} split)
+           (vector? case-ids) (seq case-ids) (every? #(nonblank-bounded? % 256) case-ids)
+           (= (set (keys data)) #{:run-id :policy-digest :corpus-digest :baseline-id :candidate-id
+                                  :rollback-id :config-digest :split :case-ids}))
+    (issue! system owner :quality-run data)
+    {:error :incorrect}))
+
+(defn quality-consume-holdout! [system owner run-id]
+  (if (nonblank-bounded? run-id 256)
+    (issue! system owner :quality-holdout {:run-id run-id})
+    {:error :incorrect}))
+
+(defn quality-record-verdict! [system owner run-id outcome metrics-digest]
+  (if (and (nonblank-bounded? run-id 256) (nonblank-bounded? metrics-digest 256)
+           (#{:open :failed :passed} outcome))
+    (issue! system owner :quality-verdict {:run-id run-id :outcome outcome :metrics-digest metrics-digest})
+    {:error :incorrect}))
 
 (defn- nonblank-bounded? [value max-length]
   (and (string? value) (<= 1 (count value) max-length) (not (str/blank? value))))

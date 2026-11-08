@@ -8,6 +8,7 @@
             [awp-v2.knowledge-gateway-test]
             [awp-v2.knowledge-migration-acceptance-test]
             [awp-v2.knowledge-taxonomy-acceptance-test]
+            [awp-v2.knowledge-quality-acceptance-test]
             [awp-v2.song-acceptance-test]
             [awp-v2.incident-acceptance-test]
             [awp-v2.incident-adapter-test]
@@ -22,6 +23,7 @@
                                           'awp-v2.knowledge-gateway-test
                                           'awp-v2.knowledge-migration-acceptance-test
                                           'awp-v2.knowledge-taxonomy-acceptance-test
+                                          'awp-v2.knowledge-quality-acceptance-test
                                           'awp-v2.song-acceptance-test
                                           'awp-v2.incident-acceptance-test
                                           'awp-v2.incident-adapter-test

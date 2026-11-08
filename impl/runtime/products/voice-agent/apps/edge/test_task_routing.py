@@ -79,5 +79,25 @@ class TypedTurnIdentityTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(forwarded[0].headers["x-awp-origin"], "typed")
 
 
+class TypedTurnRecoveryTest(unittest.IsolatedAsyncioTestCase):
+    """@owner-turn-recovery-003 Keep the public receipt minimal."""
+
+    async def test_latest_receipt_is_bounded_and_drops_unrecognized_fields(self) -> None:
+        def response(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={
+                "turnId": "receipt-1", "status": "uncertain", "prompt": "private",
+                "fingerprint": "private",
+            })
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(response))
+        with patch.dict(os.environ, {
+            "INFERENCE_BROKER_TOKEN": "test-token",
+            "INFERENCE_BROKER_BASE_URL": "https://broker.test/v1",
+        }), patch.object(bot.httpx, "AsyncClient", return_value=client):
+            receipt = await bot.broker_latest_typed_turn_request()
+        await client.aclose()
+        self.assertEqual(receipt, {"turnId": "receipt-1", "status": "uncertain"})
+
+
 if __name__ == "__main__":
     unittest.main()

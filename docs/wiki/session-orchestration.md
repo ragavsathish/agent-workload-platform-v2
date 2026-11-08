@@ -70,6 +70,15 @@ owner-scoped context read exposes the pending command identity/status, allowing
 the owner client to resume it after a lost response or page reload. See
 [slice 29](../plan/29-session-compaction-reconciliation/plan.md).
 
+Typed-turn identity and outcome also survive owner-client reloads. The session
+query returns only the latest typed turn ID and bounded status for the
+selected conversation, excluding turns routed to an attached task. The workspace
+matches that ID to the user entry in the owner-visible transcript: completed
+answers are already restored there, while accepted or uncertain turns remain
+visible and keep their original identity and text. This reconciliation does
+not store prompt text in browser storage or repeat a Pi effect. See
+[slice 36](../plan/36-owner-turn-reload-recovery/plan.md).
+
 If restart or a failed Pi call leaves the compaction result unproven, the owner
 read reports an uncertain status and a bounded reason. The owner lock remains
 held: turns, selection, and task routing cannot move the Pi branch cursor. A

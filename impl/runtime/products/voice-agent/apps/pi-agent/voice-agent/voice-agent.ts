@@ -425,6 +425,14 @@ export class VoiceAgent {
     return await this.grain.call("transcript") as unknown as PublicTranscriptSnapshot;
   }
 
+  async latestTypedTurnSnapshot(): Promise<{ turnId: string | null; status: string }> {
+    const receipt = await this.grain.call("latest-typed-turn");
+    return {
+      turnId: typeof receipt["turn-id"] === "string" ? receipt["turn-id"] : null,
+      status: typeof receipt.status === "string" ? receipt.status : "none",
+    };
+  }
+
   async sessionCatalog(): Promise<{ sessions: PublicSessionSummary[] }> {
     return await this.grain.call("catalog") as { sessions: PublicSessionSummary[] };
   }

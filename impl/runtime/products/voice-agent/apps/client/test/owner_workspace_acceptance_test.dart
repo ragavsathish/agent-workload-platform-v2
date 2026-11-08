@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:voice_agent_client/api_client.dart';
+import 'package:voice_agent_client/models.dart';
 import 'package:voice_agent_client/views/pi_workspace_view.dart';
 
 void main() {
@@ -40,6 +41,8 @@ void main() {
           switch (request.url.path) {
             case '/api/pi-transcript':
               return http.Response(snapshot('Live answer'), 200);
+            case '/api/pi-turn/latest':
+              return http.Response(jsonEncode({'status': 'none'}), 200);
             case '/api/pi-sessions':
               return http.Response(
                 jsonEncode({
@@ -151,6 +154,8 @@ void main() {
                 }),
                 200,
               );
+            case '/api/pi-turn/latest':
+              return http.Response(jsonEncode({'status': 'none'}), 200);
             case '/api/pi-sessions':
               return http.Response(
                 jsonEncode({
@@ -208,6 +213,7 @@ void main() {
         paths,
         containsAll([
           '/api/pi-transcript',
+          '/api/pi-turn/latest',
           '/api/pi-sessions',
           '/api/tasks',
           '/api/pi-context',
@@ -258,6 +264,50 @@ void main() {
     expect(requests.every((r) => r.url.path.startsWith('/api/')), isTrue);
   });
 
+  testWidgets('@owner-turn-recovery-002 restores an unresolved typed turn after reload', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = VoiceApi(
+      client: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/pi-transcript':
+            return http.Response(jsonEncode({
+              'revision': 8,
+              'entries': [
+                {'id': 'reload-turn-user', 'timestamp': 1, 'role': 'user', 'text': 'recover this typed turn'},
+              ],
+            }), 200);
+          case '/api/pi-turn/latest':
+            return http.Response(jsonEncode({'turnId': 'reload-turn', 'status': 'uncertain'}), 200);
+          case '/api/tasks':
+            return http.Response('[]', 200);
+          case '/api/pi-sessions':
+            return http.Response(jsonEncode({'sessions': []}), 200);
+          case '/api/pi-context':
+            return http.Response(jsonEncode({'canCompact': false}), 200);
+          case '/api/pi-task-routing':
+            return http.Response(jsonEncode({'taskId': null}), 200);
+          default:
+            return http.Response('{}', 404);
+        }
+      }),
+    );
+    addTearDown(api.close);
+
+    await tester.pumpWidget(MaterialApp(home: PiWorkspaceView(api: api)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 20));
+
+    expect(find.byKey(const Key('typed-turn-recovery-status')), findsOneWidget);
+    expect(
+      tester.widget<TextField>(find.byKey(const Key('message-pi'))).controller!.text,
+      'recover this typed turn',
+    );
+    expect(find.text('recover this typed turn'), findsNWidgets(2));
+  });
+
   test('@owner-client-002 starts a fresh session and resumes the selected identity', () async {
     final requests = <http.Request>[];
     final api = VoiceApi(
@@ -301,6 +351,37 @@ void main() {
     expect(jsonDecode(received.body), {'message': 'status please'});
     expect(response.spoken, 'The answer');
     expect(response.presentation['kind'], 'mermaid');
+  });
+
+  test('@owner-turn-recovery-001 restores same identity from Grain receipt after reload', () async {
+    final requests = <http.Request>[];
+    final api = VoiceApi(client: MockClient((request) async {
+      requests.add(request);
+      if (request.url.path == '/api/pi-turn/latest') {
+        return http.Response(jsonEncode({'turnId': 'durable-turn', 'status': 'uncertain'}), 200);
+      }
+      return http.Response(jsonEncode({'detail': 'outcome still uncertain'}), 409);
+    }));
+    addTearDown(api.close);
+    final transcript = TranscriptSnapshot.fromJson({
+      'revision': 9,
+      'entries': [
+        {'id': 'durable-turn-user', 'timestamp': 1, 'role': 'user', 'text': 'original payload'},
+      ],
+    });
+
+    final receipt = await api.recoverTypedTurn(transcript);
+    expect(receipt.turnId, 'durable-turn');
+    expect(receipt.status, 'uncertain');
+    await expectLater(api.sendMessage('changed payload'), throwsA(isA<ApiException>()));
+    await expectLater(api.sendMessage('original payload'), throwsA(isA<ApiException>()));
+
+    expect(requests.map((request) => request.url.path), [
+      '/api/pi-turn/latest',
+      '/api/pi-message',
+    ]);
+    expect(requests.last.headers['idempotency-key'], 'durable-turn');
+    expect(jsonDecode(requests.last.body), {'message': 'original payload'});
   });
 
   test(

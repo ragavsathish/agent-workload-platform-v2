@@ -204,6 +204,9 @@ test("live-001/002/004/005/006/007/008 @routing-001 @routing-002 @routing-003 @r
   ] }, { "x-awp-turn-id": "protocol-typed", "x-awp-origin": "typed" });
   assert.equal(typed.status, 200);
   assert.equal(typed.body.text, "Pi heard typed");
+  const typedReceipt = await call("GET", "/v1/turn/latest");
+  assert.equal(typedReceipt.status, 200);
+  assert.deepEqual(typedReceipt.body, { turnId: "protocol-typed", status: "completed" });
   const retry = await call("POST", "/v1/turn", { messages: [
     { role: "system", content: "Answer briefly." }, { role: "user", content: "typed" },
   ] }, { "x-awp-turn-id": "protocol-typed", "x-awp-origin": "typed" });

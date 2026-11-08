@@ -31,6 +31,7 @@ Cites [the pinned v1 source inventory](../../raw/v1/manifest.md).
 - [Task request and agent task](tasking.md) defines admission identity, canonical input, and owner isolation for [slice 26](../plan/26-stable-task-admission/plan.md), extending the initial admission scenarios from [slice 01](../plan/01-task-admission/plan.md).
 - [Native owner client](owner-client.md) defines trusted-page microphone permission timing for [slice 27](../plan/27-native-voice-permission/plan.md) and iOS Simulator build qualification for [slice 28](../plan/28-ios-owner-client/plan.md).
 - [Current conversation orchestration](session-orchestration.md) defines durable context compaction and Pi branch reconciliation for [slice 29](../plan/29-session-compaction-reconciliation/plan.md).
+- [Current conversation orchestration](session-orchestration.md) also defines stable typed-turn retry identity for [slice 35](../plan/35-stable-owner-turn-retry/plan.md) and owner-safe reload recovery for [slice 36](../plan/36-owner-turn-reload-recovery/plan.md).
 
 The wiki records source-backed current behavior separately from agreed behavior
 and explicit v2 decisions. It does not describe the implementation.

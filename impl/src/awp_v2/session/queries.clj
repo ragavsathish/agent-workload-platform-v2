@@ -98,3 +98,20 @@
     (if turn
       {:query/result (select-keys turn [:turn-id :status :conversation-id :task-id :answer :stop-requested?])}
       (missing))))
+
+(defquery :session latest-typed-turn
+  {:grain.event-model/reads #{:session/state}}
+  [context]
+  (let [state (authorized-state context)
+        selected (:selection state)
+        latest (->> (:turns state)
+                    vals
+                    (filter #(and (= :typed (:origin %))
+                                  (= selected (:conversation-id %))
+                                  (nil? (:task-id %))))
+                    (sort-by :at)
+                    last)]
+    (cond
+      (nil? state) (missing)
+      latest {:query/result (select-keys latest [:turn-id :status])}
+      :else {:query/result {:status :none}})))

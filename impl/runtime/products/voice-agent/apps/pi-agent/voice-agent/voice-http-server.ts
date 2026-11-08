@@ -13,6 +13,7 @@ import type { NarrationRequest, TaskNarrator } from "./task-narrator.js";
 
 type VoiceAgentPort = {
   transcriptSnapshot(): Promise<PublicTranscriptSnapshot>;
+  latestTypedTurnSnapshot(): Promise<{ turnId: string | null; status: string }>;
   sessionCatalog(): Promise<{ sessions: PublicSessionSummary[] }>;
   historicalSession(sessionId: string): Promise<PublicTranscriptSnapshot | undefined>;
   startFreshSession(commandId?: string): Promise<{ id: string }>;
@@ -35,6 +36,7 @@ type TelemetryPort = {
 type VoiceRoute =
   | { kind: "health" }
   | { kind: "transcript" }
+  | { kind: "latest-typed-turn" }
   | { kind: "sessions" }
   | { kind: "new-session" }
   | { kind: "resume-session"; sessionId: string }
@@ -54,6 +56,7 @@ const MAX_BODY_BYTES = 131_072;
 export function matchVoiceRoute(method = "", url = ""): VoiceRoute {
   if (method === "GET" && url === "/health") return { kind: "health" };
   if (method === "GET" && url === "/v1/transcript") return { kind: "transcript" };
+  if (method === "GET" && url === "/v1/turn/latest") return { kind: "latest-typed-turn" };
   if (method === "GET" && url === "/v1/sessions") return { kind: "sessions" };
   if (method === "POST" && url === "/v1/sessions/new") return { kind: "new-session" };
   if (method === "GET" && url === "/v1/context") return { kind: "context" };
@@ -159,6 +162,9 @@ export function createVoiceHttpServer(options: {
     response.setHeader("cache-control", "no-store");
 
     if (route.kind === "transcript") return sendJson(response, 200, await agent.transcriptSnapshot());
+    if (route.kind === "latest-typed-turn") {
+      return sendJson(response, 200, await agent.latestTypedTurnSnapshot());
+    }
     if (route.kind === "sessions") return sendJson(response, 200, await agent.sessionCatalog());
     if (route.kind === "historical-session") {
       const snapshot = await agent.historicalSession(route.sessionId);

@@ -28,4 +28,5 @@
    :session/context [:map [:owner :string]]
    :session/routing [:map [:owner :string]]
    :session/routing-command [:map [:owner :string] [:command-id :string]]
-   :session/turn [:map [:owner :string] [:turn-id :string]]})
+   :session/turn [:map [:owner :string] [:turn-id :string]]
+   :session/latest-typed-turn [:map [:owner :string]]})

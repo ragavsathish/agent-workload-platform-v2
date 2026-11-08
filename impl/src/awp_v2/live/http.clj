@@ -24,6 +24,7 @@
    "compact-start" :compact-start "compact-complete" :compact-complete
    "compact-uncertain" :compact-uncertain
    "attach" :attach "detach" :detach "routing-command" :routing-command
+   "latest-typed-turn" :latest-typed-turn
    "voice-ended" :voice-ended})
 
 (defn- send! [^HttpExchange exchange code value]
@@ -71,6 +72,7 @@
     :routing (session/routing system owner)
     :routing-command (session/routing-command system owner (:command-id data))
     :turn (session/turn system owner (:turn-id data))
+    :latest-typed-turn (session/latest-typed-turn system owner)
     :submit (session/submit! system owner
                              {:turn-id (:turn-id data)
                               :origin (some-> (:origin data) keyword)

@@ -137,6 +137,49 @@
         (is (every? #(and (string? (:id %)) (integer? (:timestamp %)))
                     (:entries view))))))))
 
+(deftest owner-turn-recovery-001-latest-typed-receipt-survives-reopen
+  (let [dir (room) opts {:storage-dir dir :turn-driver (fn [_] nil)}
+        first-system (session/open-system opts)]
+    (fresh first-system 1)
+    (session/submit! first-system owner {:turn-id "reload-turn" :origin :typed
+      :messages [{:role "system" :content "stable"}
+                 {:role "user" :content "reload me"}]})
+    (session/close-system! first-system)
+    (let [reopened (session/open-system opts)]
+      (try
+        (is (= {:turn-id "reload-turn" :status :uncertain}
+               (session/latest-typed-turn reopened owner)))
+        (is (= {:error :not-found} (session/latest-typed-turn reopened other)))
+        (is (= ["reload me"]
+               (texts (session/transcript reopened owner))))
+        (finally (session/close-system! reopened))))))
+
+(deftest owner-turn-recovery-002-completed-turn-is-observable-after-reopen
+  (let [dir (room) opts {:storage-dir dir :turn-driver (fn [_] nil)}
+        first-system (session/open-system opts)]
+    (fresh first-system 1)
+    (turn first-system "done-turn" "completed prompt" :typed)
+    (finish first-system "done-turn" "durable answer")
+    (session/close-system! first-system)
+    (let [reopened (session/open-system opts)]
+      (try
+        (is (= {:turn-id "done-turn" :status :completed}
+               (session/latest-typed-turn reopened owner)))
+        (is (= ["completed prompt" "durable answer"]
+               (texts (session/transcript reopened owner))))
+        (finally (session/close-system! reopened))))))
+
+(deftest owner-turn-recovery-003-excludes-attached-task-turns
+  (with-session (fn [s _ _]
+    (fresh s 1)
+    (turn s "orchestrator-turn" "home" :typed)
+    (finish s "orchestrator-turn" "answer")
+    (session/attach! s owner "task-1")
+    (turn s "task-turn" "task question" :typed)
+    (finish s "task-turn" "task answer")
+    (is (= {:turn-id "orchestrator-turn" :status :completed}
+           (session/latest-typed-turn s owner))))))
+
 (deftest owner-client-004-session-010-stop-retains-selection
   (with-session (fn [s _ _]
     (let [id (:id (fresh s 1))]

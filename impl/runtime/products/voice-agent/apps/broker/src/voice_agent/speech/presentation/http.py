@@ -473,6 +473,28 @@ async def pi_transcript(request: Request, _: None = Depends(authenticate)) -> Re
     )
 
 
+@app.get("/v1/pi/turn/latest", response_model=None)
+async def pi_latest_typed_turn(request: Request, _: None = Depends(authenticate)) -> Response:
+    """Return a minimal owner-scoped typed-turn receipt from the Pi session."""
+
+    client: httpx.AsyncClient = request.app.state.http
+    try:
+        response = await client.get(
+            f"{_pi_service_url()}/v1/turn/latest",
+            headers=_pi_headers(),
+            timeout=10.0,
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Pi turn status is unavailable") from exc
+    if response.status_code != 200 or len(response.content) > 16_384:
+        raise HTTPException(status_code=502, detail="Pi turn status is unavailable")
+    return Response(
+        content=response.content,
+        media_type="application/json",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 async def _pi_sessions_request(
     client: httpx.AsyncClient,
     path: str,

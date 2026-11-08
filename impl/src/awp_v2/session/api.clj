@@ -126,6 +126,7 @@
     (read! system actor :routing-command {:command-id command-id})
     {:error :incorrect}))
 (defn turn [system actor turn-id] (read! system actor :turn {:turn-id turn-id}))
+(defn latest-typed-turn [system actor] (read! system actor :latest-typed-turn {}))
 
 (defn- parsed-turn [messages origin]
   (when (and (vector? messages) (<= 1 (count messages) 64)

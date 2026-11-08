@@ -98,7 +98,10 @@
                               :reads #{:session/state}}
     :session/turn {:description "One owner turn decision and outcome."
                    :schema [:map [:owner :string] [:turn-id :string]]
-                   :reads #{:session/state}}}
+                   :reads #{:session/state}}
+    :session/latest-typed-turn {:description "Latest typed turn receipt in the selected conversation."
+                                :schema [:map [:owner :string]]
+                                :reads #{:session/state}}}
    :flows
    {:session/orchestration
     {:description "Committed decisions rebuild owner reads."

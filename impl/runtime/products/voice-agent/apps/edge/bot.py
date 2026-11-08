@@ -235,6 +235,27 @@ async def broker_transcript_request() -> dict[str, object]:
     return payload
 
 
+async def broker_latest_typed_turn_request() -> dict[str, object]:
+    headers = {"Authorization": f"Bearer {required_env('INFERENCE_BROKER_TOKEN')}"}
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0)) as client:
+        response = await client.get(
+            f"{required_env('INFERENCE_BROKER_BASE_URL').rstrip('/')}/pi/turn/latest",
+            headers=headers,
+        )
+    if response.is_error or len(response.content) > 16_384:
+        raise HTTPException(status_code=502, detail="Pi turn status is unavailable")
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail="invalid Pi turn status")
+    turn_id = payload.get("turnId")
+    status = payload.get("status")
+    if (turn_id is not None and (not isinstance(turn_id, str) or len(turn_id) > 128)) or status not in {
+        "none", "accepted", "completed", "failed", "interrupted", "uncertain"
+    }:
+        raise HTTPException(status_code=502, detail="invalid Pi turn status")
+    return {"turnId": turn_id, "status": status}
+
+
 def playwright_trace_upstream(path: str) -> str:
     """Resolve a narrowly scoped Trace Viewer request to the host-side MCP service."""
 
@@ -1568,6 +1589,14 @@ if __name__ == "__main__":
                 "presentation": result.presentation,
                 "resourceUri": result.resource_uri,
             },
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/api/pi-turn/latest")
+    async def latest_pi_turn(request: Request):
+        validate_http_identity(request)
+        return JSONResponse(
+            await broker_latest_typed_turn_request(),
             headers={"Cache-Control": "no-store"},
         )
 

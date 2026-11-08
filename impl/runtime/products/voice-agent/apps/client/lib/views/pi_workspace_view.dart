@@ -88,6 +88,7 @@ class _PiWorkspaceViewState extends State<PiWorkspaceView> {
     revision: 0,
     entries: [],
   );
+  TypedTurnReceipt? _typedTurnReceipt;
   List<AgentTask> _tasks = const [];
   String? _attachedTaskId;
   bool _routingAvailable = false;
@@ -164,6 +165,27 @@ class _PiWorkspaceViewState extends State<PiWorkspaceView> {
       _pollContext(),
       _pollSessions(),
     ]);
+    await _recoverTypedTurn();
+  }
+
+  Future<void> _recoverTypedTurn() async {
+    try {
+      final receipt = await widget.api.recoverTypedTurn(_snapshot);
+      if (!mounted) return;
+      final entry = receipt.turnId == null
+          ? null
+          : _snapshot.entries
+                .where((item) => item.id == '${receipt.turnId}-user')
+                .firstOrNull;
+      setState(() {
+        _typedTurnReceipt = receipt;
+        if (receipt.unresolved && _message.text.isEmpty && entry != null) {
+          _message.text = entry.text;
+        }
+      });
+    } on Object catch (error) {
+      if (mounted) setState(() => _error = '$error');
+    }
   }
 
   Future<void> _pollTranscript() async {
@@ -468,6 +490,7 @@ class _PiWorkspaceViewState extends State<PiWorkspaceView> {
         _expanded.clear();
       });
       await Future.wait([_pollSessions(), _pollContext()]);
+      await _recoverTypedTurn();
       _scrollToEnd();
     } on Object catch (error) {
       if (mounted) setState(() => _error = '$error');
@@ -546,6 +569,7 @@ class _PiWorkspaceViewState extends State<PiWorkspaceView> {
         _expanded.clear();
       });
       await Future.wait([_pollSessions(), _pollContext()]);
+      await _recoverTypedTurn();
     } on Object catch (error) {
       if (mounted) setState(() => _error = '$error');
     } finally {
@@ -813,6 +837,15 @@ class _PiWorkspaceViewState extends State<PiWorkspaceView> {
                 text: _error!,
                 danger: true,
                 onDismiss: () => setState(() => _error = null),
+              ),
+            if (_typedTurnReceipt?.unresolved == true)
+              _NoticeBanner(
+                key: const Key('typed-turn-recovery-status'),
+                text: _typedTurnReceipt?.status == 'uncertain'
+                    ? 'The previous typed turn has an uncertain outcome. Its transcript is restored; retrying will not run the model again.'
+                    : 'The previous typed turn is still unresolved. Its transcript is restored; retrying will not run the model again.',
+                danger: false,
+                onDismiss: () => setState(() => _typedTurnReceipt = null),
               ),
             if (_playbackNotice != null)
               _NoticeBanner(

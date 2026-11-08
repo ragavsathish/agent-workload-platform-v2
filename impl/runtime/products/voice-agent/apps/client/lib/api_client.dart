@@ -22,6 +22,7 @@ class VoiceApi {
   Future<String>? _compactionIdentityLookup;
   String? _pendingTurnId;
   String? _pendingTurnMessage;
+  String? _pendingTurnStatus;
 
   String _newCommandId() {
     final random = Random.secure();
@@ -127,6 +128,28 @@ class VoiceApi {
 
   Future<TranscriptSnapshot> transcript() async =>
       TranscriptSnapshot.fromJson(await _json('/api/pi-transcript'));
+  Future<TypedTurnReceipt> latestTypedTurn() async => TypedTurnReceipt.fromJson(
+    await _json('/api/pi-turn/latest'),
+  );
+
+  Future<TypedTurnReceipt> recoverTypedTurn(TranscriptSnapshot transcript) async {
+    final receipt = await latestTypedTurn();
+    if (!receipt.unresolved || receipt.turnId == null) {
+      _pendingTurnId = null;
+      _pendingTurnMessage = null;
+      _pendingTurnStatus = null;
+      return receipt;
+    }
+
+    final userEntryId = '${receipt.turnId}-user';
+    final userEntry = transcript.entries
+        .where((entry) => entry.id == userEntryId && entry.role == 'user')
+        .firstOrNull;
+    _pendingTurnId = receipt.turnId;
+    _pendingTurnMessage = userEntry?.text;
+    _pendingTurnStatus = receipt.status;
+    return receipt;
+  }
   Future<List<PiSessionSummary>> sessions() async {
     final body = await _json('/api/pi-sessions');
     return (body['sessions'] as List? ?? const [])
@@ -141,6 +164,9 @@ class VoiceApi {
 
   Future<void> newSession() async {
     await _json('/api/pi-sessions/new', method: 'POST');
+    _pendingTurnId = null;
+    _pendingTurnMessage = null;
+    _pendingTurnStatus = null;
   }
 
   Future<void> resumeSession(String id) async {
@@ -148,13 +174,19 @@ class VoiceApi {
       '/api/pi-sessions/${Uri.encodeComponent(id)}/resume',
       method: 'POST',
     );
+    _pendingTurnId = null;
+    _pendingTurnMessage = null;
+    _pendingTurnStatus = null;
   }
 
   Future<VisualResponse> sendMessage(String message) async {
     var turnId = _pendingTurnId;
-    if (turnId != null && _pendingTurnMessage != message) {
-      throw const ApiException(
-        'A previous typed turn is unresolved. Retry it before sending another message.',
+    if (turnId != null &&
+        (_pendingTurnMessage == null || _pendingTurnMessage != message)) {
+      throw ApiException(
+        _pendingTurnStatus == 'uncertain'
+            ? 'A previous typed turn has an uncertain outcome. Inspect the transcript before sending another message.'
+            : 'A previous typed turn is unresolved. Retry it before sending another message.',
       );
     }
     if (turnId == null) {
@@ -174,6 +206,7 @@ class VoiceApi {
     }
     _pendingTurnId = null;
     _pendingTurnMessage = null;
+    _pendingTurnStatus = null;
     return response;
   }
 

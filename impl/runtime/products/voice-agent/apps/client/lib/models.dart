@@ -169,6 +169,20 @@ class TranscriptSnapshot {
   );
 }
 
+class TypedTurnReceipt {
+  const TypedTurnReceipt({required this.turnId, required this.status});
+
+  final String? turnId;
+  final String status;
+
+  bool get unresolved => status == 'accepted' || status == 'uncertain';
+
+  factory TypedTurnReceipt.fromJson(JsonMap json) => TypedTurnReceipt(
+    turnId: json['turnId'] as String?,
+    status: json['status'] as String? ?? 'none',
+  );
+}
+
 class PiSessionSummary {
   const PiSessionSummary({
     required this.id,

@@ -665,7 +665,10 @@ class _FakeVoiceApi extends VoiceApi {
   );
 
   @override
-  Future<AgentTask> createTask(String instruction) async {
+  Future<AgentTask> createTask(
+    String instruction, {
+    required String idempotencyKey,
+  }) async {
     createdTasks.add(instruction);
     final task = AgentTask(
       id: 'created-1',

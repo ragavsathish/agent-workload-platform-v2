@@ -161,11 +161,15 @@ class VoiceApi {
         .toList(growable: false);
   }
 
-  Future<AgentTask> createTask(String instruction) async => AgentTask.fromJson(
+  Future<AgentTask> createTask(
+    String instruction, {
+    required String idempotencyKey,
+  }) async => AgentTask.fromJson(
     await _json(
       '/api/tasks',
       method: 'POST',
       body: {'instruction': instruction},
+      requestHeaders: {'Idempotency-Key': idempotencyKey},
     ),
   );
 

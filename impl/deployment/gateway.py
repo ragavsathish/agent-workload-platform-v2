@@ -263,8 +263,17 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 raise ValueError("instruction and workspace required")
             key = self.headers.get("Idempotency-Key")
             request_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{identity}/{key}")) if key else str(uuid.uuid4())
-            result = client.call("submit", {"request-id": request_id,
-                                            "instruction": instruction, "workspace": workspace})
+            try:
+                result = client.call("submit", {"request-id": request_id,
+                                                "instruction": instruction, "workspace": workspace})
+            except urllib.error.HTTPError as error:
+                status = error.code
+                error.close()
+                if status == 409:
+                    self._send(409, {"detail": "task request identity conflicts with prior input"})
+                else:
+                    self._send(503, {"detail": "task authority unavailable"})
+                return
             if "task-id" not in result:
                 self._send(409, {"detail": "task admission refused"})
             else:

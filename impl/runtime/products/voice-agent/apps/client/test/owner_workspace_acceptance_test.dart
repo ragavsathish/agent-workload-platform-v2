@@ -304,9 +304,11 @@ void main() {
     '@owner-client-005 creates durable work and reads bounded progress',
     () async {
       final paths = <String>[];
+      final requests = <http.Request>[];
       final api = VoiceApi(
         client: MockClient((request) async {
           paths.add(request.url.path);
+          requests.add(request);
           if (request.method == 'POST') {
             return http.Response(
               jsonEncode({
@@ -328,11 +330,15 @@ void main() {
       );
       addTearDown(api.close);
 
-      final task = await api.createTask('inspect docs');
+      final task = await api.createTask(
+        'inspect docs',
+        idempotencyKey: 'admission-command-1',
+      );
       final progress = await api.taskProgress(task.id);
 
       expect(task.id, 'task-1');
       expect(progress.single.spoken, 'Read README.md.');
+      expect(requests.first.headers['idempotency-key'], 'admission-command-1');
       expect(paths, ['/api/tasks', '/api/tasks/task-1/progress']);
     },
   );

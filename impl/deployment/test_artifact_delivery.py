@@ -98,6 +98,29 @@ class ArtifactDeliveryAcceptance(unittest.TestCase):
         self.assertEqual(self.grain.call("capture-complete", {"task-id": task_id, "response": {"text": "Done"}})["status"], "completed")
         return task_id
 
+    def test_admission_idempotency_key_recovers_and_separates_requests(self):
+        # @task-admission-007 @task-admission-008
+        body = {"identity": OWNER, "instruction": "Review the release", "workspace": "scratch"}
+        key = "task-admission-retry-001"
+        with self.request("", data=body, key=key) as response:
+            accepted = json.load(response)
+        with self.request("", data=body, key=key) as response:
+            recovered = json.load(response)
+
+        self.assertEqual(recovered["task_id"], accepted["task_id"])
+        self.assertEqual(len(self.grain.tasks()), 1)
+
+        with self.assertRaises(urllib.error.HTTPError) as conflict:
+            self.request("", data={**body, "instruction": "Different work"}, key=key)
+        self.assertEqual(conflict.exception.code, 409)
+        conflict.exception.close()
+        self.assertEqual(len(self.grain.tasks()), 1)
+
+        with self.request("", data=body, key="task-admission-deliberate-new-002") as response:
+            separate = json.load(response)
+        self.assertNotEqual(separate["task_id"], accepted["task_id"])
+        self.assertEqual(len(self.grain.tasks()), 2)
+
     def test_artifact_001_002_005_006_007_009_public_route_and_restart(self):
         project_id = self.submit_and_finish("project", "after\n", "readme.txt")
         scratch_id = self.submit_and_finish("scratch", "hello", "note.txt")

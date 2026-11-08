@@ -175,6 +175,15 @@ for id in $(rg -o '@owner-client-[0-9]+' docs/plan/24-owner-client/spec.feature 
   fi
 done
 
+for id in $(rg -o '@task-admission-00[78]' docs/plan/26-stable-task-admission/spec.feature | tr -d '@'); do
+  if ! rg -q "$id" \
+      impl/runtime/products/voice-agent/apps/client/test/owner_task_admission_acceptance_test.dart \
+      impl/deployment/test_artifact_delivery.py; then
+    echo "Acceptance scenario $id has no owner-client and gateway check" >&2
+    exit 1
+  fi
+done
+
 for id in $(rg -o '@routing-[0-9]+' docs/plan/25-task-routing-integration/spec.feature | tr -d '@'); do
   test_id="${id//-/_}"
   if ! rg -q "$id|$test_id" \

@@ -113,6 +113,7 @@ class _PiWorkspaceViewState extends State<PiWorkspaceView> {
   String? _error;
   String? _playbackNotice;
   String? _taskBusy;
+  final Map<String, String> _pendingTaskAdmissionKeys = {};
   String? _listeningTaskId;
   String? _latestTaskProgress;
   int _progressCursor = 0;
@@ -687,6 +688,14 @@ class _PiWorkspaceViewState extends State<PiWorkspaceView> {
     return 'routing-${DateTime.now().microsecondsSinceEpoch}-$suffix';
   }
 
+  String _newTaskAdmissionKey() {
+    final suffix = List.generate(
+      16,
+      (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'),
+    ).join();
+    return 'task-admission-${DateTime.now().microsecondsSinceEpoch}-$suffix';
+  }
+
   Future<void> _toggleTaskRouting(AgentTask task) async {
     final detaching = _attachedTaskId == task.id;
     final operation = detaching ? 'detach' : 'attach:${task.id}';
@@ -739,12 +748,21 @@ class _PiWorkspaceViewState extends State<PiWorkspaceView> {
       builder: (_) => const _NewTaskDialog(),
     );
     if (instruction == null || instruction.isEmpty || !mounted) return;
+    final canonicalInstruction = instruction.trim();
+    final idempotencyKey = _pendingTaskAdmissionKeys.putIfAbsent(
+      canonicalInstruction,
+      _newTaskAdmissionKey,
+    );
     setState(() {
       _taskBusy = 'new';
       _error = null;
     });
     try {
-      await widget.api.createTask(instruction);
+      await widget.api.createTask(
+        canonicalInstruction,
+        idempotencyKey: idempotencyKey,
+      );
+      _pendingTaskAdmissionKeys.remove(canonicalInstruction);
       await _pollTasks();
       if (mounted) setState(() => _section = WorkspaceSection.tasks);
     } on Object catch (error) {
@@ -2094,7 +2112,9 @@ class _TaskCard extends StatelessWidget {
                       size: 16,
                     ),
                     label: Text(
-                      attached ? 'Detach from conversation' : 'Attach to conversation',
+                      attached
+                          ? 'Detach from conversation'
+                          : 'Attach to conversation',
                     ),
                   ),
                 OutlinedButton.icon(

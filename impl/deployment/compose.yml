@@ -1,14 +1,41 @@
-name: awp-v2-public-voice
+name: ${AWP_PUBLIC_PROJECT:?set AWP_PUBLIC_PROJECT}
 services:
+  gitea:
+    profiles: [candidate-dependency]
+    image: docker.gitea.com/gitea:28.1.0-rootless@sha256:b1a90409ae9afcd5a5725404c3639da7245248848b99e35332968891290b953e
+    restart: unless-stopped
+    environment:
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__database__PATH: /var/lib/gitea/data/gitea.db
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__server__DISABLE_SSH: "true"
+      GITEA__server__HTTP_ADDR: 0.0.0.0
+      GITEA__server__ROOT_URL: http://127.0.0.1:${AWP_GITEA_PORT:?set AWP_GITEA_PORT}/
+      GITEA__service__DISABLE_REGISTRATION: "true"
+      GITEA__service__REQUIRE_SIGNIN_VIEW: "false"
+    ports: ["127.0.0.1:${AWP_GITEA_PORT:?set AWP_GITEA_PORT}:3000"]
+    volumes:
+      - gitea-data:/var/lib/gitea
+      - gitea-config:/etc/gitea
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
   tailscale:
-    image: docker.io/tailscale/tailscale@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065
-    hostname: awp-v2-voice
+    image: docker.io/tailscale/tailscale@sha256:ed6480b33c6eb67c9cbd203ed42b9fb57e361986725b6856def71b7a3d9e276c
+    hostname: ${AWP_PUBLIC_NODE:?set AWP_PUBLIC_NODE}
     restart: unless-stopped
     environment:
       TS_USERSPACE: "false"
       TS_STATE_DIR: /var/lib/tailscale
       TS_SOCKET: /tmp/tailscaled.sock
-      TS_HOSTNAME: awp-v2-voice
+      TS_HOSTNAME: ${AWP_PUBLIC_NODE:?set AWP_PUBLIC_NODE}
       TS_ACCEPT_DNS: "false"
       TS_AUTH_ONCE: "true"
     volumes:
@@ -46,7 +73,7 @@ services:
     network_mode: service:tailscale
     env_file: ["${AWP_PUBLIC_EDGE_ENV:?set AWP_PUBLIC_EDGE_ENV}"]
     environment:
-      INFERENCE_BROKER_BASE_URL: http://host.docker.internal:${AWP_BROKER_PORT:-9443}/v1
+      INFERENCE_BROKER_BASE_URL: http://host.docker.internal:${AWP_BROKER_PORT:?set AWP_BROKER_PORT}/v1
       EDGE_ALLOW_LOCAL_INGRESS: "false"
       VOICE_LLM_BACKEND: pi
     command: ["-t", "webrtc", "--host", "127.0.0.1", "--port", "7860"]
@@ -58,5 +85,7 @@ services:
     volumes:
       - voice-diagnostics:/var/lib/voice-diagnostics
 volumes:
+  gitea-data:
+  gitea-config:
   tailscale-state:
   voice-diagnostics:

@@ -1,5 +1,22 @@
 # Slice 06 deployment runbook
 
+For the isolated slice 22 candidate, use
+[public-candidate-preparation.md](public-candidate-preparation.md) and
+`python3 impl/deployment/public_candidate.py preflight --config /private/candidate.json --report /private/preflight.json`
+before starting the native stack. The candidate config points to separate
+mode-0600 service and edge env files, a unique Compose project and Tailscale
+node, candidate-only state, and distinct native ports. Its local Gitea
+dependency uses the `candidate-dependency` Compose profile on a separate
+loopback port. The preflight checks rendered Compose isolation, the pinned
+Tailscale image version, candidate Gitea user and repository access, occupied
+ports and projects, and existing service health. A passing preflight means
+the local candidate can start; public qualification still needs actual
+candidate-node authentication, verified owner and origin, and separate-device
+owner and foreign probes. Start a foreground native rehearsal with
+`python3 impl/deployment/public_candidate.py run-native --config /private/candidate.json --report /private/native.json`;
+interrupt it to stop the candidate and record port release and existing-service
+continuity.
+
 Cites the [slice 06 plan](../../docs/plan/06-public-deployment/plan.md), [pinned host contract](../../raw/v1/host-requirements.md), and [implementation topology](../public-deployment-notes.md).
 
 This is a single-owner macOS deployment. The native supervisor owns the Grain bridge, Pi voice service, broker, task gateway, and independent task scheduler. The public Compose namespace owns Tailscale, the identity proxy, and Pipecat edge. It does not publish a host or LAN port. The Grain event store and session directories live under a private state directory outside the checkout.
@@ -9,7 +26,7 @@ This is a single-owner macOS deployment. The native supervisor owns the Grain br
 1. Install the v1 [host prerequisites](../../raw/v1/host-requirements.md), including Docker Desktop, Clojure, Node/pnpm, uv, Pi credentials, models, and Gondolin assets. `pnpm --dir impl/runtime install --frozen-lockfile` then `pnpm --dir impl/runtime run build`; run `uv sync --frozen --no-dev` in the broker and edge directories.
 2. Copy [service.env.example](service.env.example) to an outside-checkout private file, fill real paths, tokens, owner, and workspace mapping, then `chmod 600` it. The native supervisor reads this file and passes it to its children. Keep its parent directory private. Copy [edge.env.example](edge.env.example) to a different 0600 file; give it only edge capabilities. Do not reuse the Grain token in the edge file.
 3. Start the supervisor with `python3 impl/deployment/stack.py run --env /private/service.env --state /private/awp-v2-state`. For boot persistence, run `python3 impl/deployment/stack.py install --env /private/service.env --state /private/awp-v2-state`, then `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.awp.v2.owner-stack.plist`. The checkout path in the installed service must remain valid. Check `python3 impl/deployment/stack.py check-ready --env /private/service.env --state /private/awp-v2-state` before exposing public entry.
-4. Set `AWP_PUBLIC_EDGE_ENV=/private/edge.env` and run `docker compose -f impl/deployment/compose.yml up -d --build`. In the Tailscale container, authenticate with `docker compose -f impl/deployment/compose.yml exec tailscale tailscale --socket=/tmp/tailscaled.sock up`. Verify its logged-in identity and MagicDNS name. Configure a tailnet policy allowing the owner device alone to reach this node on TCP 443, based on [the pinned example](../../raw/v1/tailnet-policy.hujson.example). Then run `docker compose -f impl/deployment/compose.yml exec tailscale tailscale --socket=/tmp/tailscaled.sock serve --bg --https=443 http://127.0.0.1:8080`. Set `PIPECAT_ALLOWED_ORIGINS` in edge.env to the exact resulting HTTPS origin and `EDGE_ALLOWED_USERS` to the exact owner login; recreate edge after changing that file.
+4. Set `AWP_PUBLIC_PROJECT` to a unique project, `AWP_PUBLIC_NODE` to a unique candidate node, `AWP_PUBLIC_EDGE_ENV=/private/edge.env`, `AWP_BROKER_PORT` and `AWP_GATEWAY_PORT` to the candidate native ports, and `AWP_GITEA_PORT` to its unused loopback Gitea port. Render and inspect `docker compose -f impl/deployment/compose.yml config` before running `docker compose -f impl/deployment/compose.yml up -d --build`. In the Tailscale container, authenticate with `docker compose -f impl/deployment/compose.yml exec tailscale tailscale --socket=/tmp/tailscaled.sock up`. Verify its logged-in identity and MagicDNS name. Configure a tailnet policy allowing the owner device alone to reach this node on TCP 443, based on [the pinned example](../../raw/v1/tailnet-policy.hujson.example). Then run `docker compose -f impl/deployment/compose.yml exec tailscale tailscale --socket=/tmp/tailscaled.sock serve --bg --https=443 http://127.0.0.1:8080`. Set `PIPECAT_ALLOWED_ORIGINS` in edge.env to the exact resulting HTTPS origin and `EDGE_ALLOWED_USERS` to the exact owner login; recreate edge after changing that file.
 5. Check the public owner route from another tailnet device. The identity proxy routes only authenticated owner traffic. A 200 response to `/api/features` is a routing check; it is not a voice qualification. The broker and gateway stay on host loopback; no task authority or Grain port has a public route.
 
 ## Task scheduling and recovery

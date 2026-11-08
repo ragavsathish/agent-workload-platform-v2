@@ -90,6 +90,14 @@ for id in $(rg -o '@workbench-[0-9]+' docs/plan/21-private-review-workbench/spec
   fi
 done
 
+for id in $(rg -o '@candidate-[0-9]+' docs/plan/22-public-v2-candidate/spec.feature | tr -d '@'); do
+  test_id="${id//-/_}"
+  if ! rg -q "$test_id" impl/deployment/test_public_candidate.py; then
+    echo "Acceptance scenario $id has no named check" >&2
+    exit 1
+  fi
+done
+
 for id in $(rg -o '@relation-[0-9]+' docs/plan/19-grounded-relations/spec.feature | tr -d '@'); do
   if ! rg -q "$id" impl/test/awp_v2/grounded_relations_acceptance_test.clj; then
     echo "Acceptance scenario $id has no named check" >&2

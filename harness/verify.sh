@@ -49,9 +49,11 @@ python3 -m unittest discover -s "$ROOT/impl/qualification" -p test_local_release
 (cd "$ROOT/impl/qualification" && "$ROOT/impl/runtime/products/voice-agent/apps/edge/.venv/bin/python" -m unittest test_voice_media_unit.py)
 python3 -m py_compile "$ROOT/impl/deployment/deployment.py" \
   "$ROOT/impl/deployment/gateway.py" "$ROOT/impl/deployment/stack.py" \
+  "$ROOT/impl/deployment/public_candidate.py" \
   "$ROOT/impl/deployment/qualify_public.py" \
   "$ROOT/impl/deployment/confirm_public_report.py"
 python3 -m unittest discover -s "$ROOT/impl/deployment" -p test_deployment.py -v
+python3 -m unittest discover -s "$ROOT/impl/deployment" -p test_public_candidate.py -v
 python3 -m unittest discover -s "$ROOT/impl/deployment" -p test_artifact_delivery.py -v
 python3 -m unittest discover -s "$ROOT/impl/deployment" -p test_task_worker_delivery.py -v
 python3 -m unittest discover -s "$ROOT/impl/knowledge-migration" -p test_snapshot.py -v
@@ -59,7 +61,8 @@ python3 -m unittest discover -s "$ROOT/impl/knowledge-migration" -p test_continu
 python3 -m py_compile "$ROOT/impl/private-review/workbench.py" "$ROOT/impl/private-review/server.py"
 python3 -m unittest discover -s "$ROOT/impl/private-review" -p test_workbench.py -v
 if command -v docker >/dev/null 2>&1; then
-  AWP_PUBLIC_EDGE_ENV="$ROOT/impl/deployment/edge.env.example" \
+  AWP_PUBLIC_PROJECT=awp-v2-verify AWP_PUBLIC_NODE=awp-v2-verify-node \
+  AWP_BROKER_PORT=9743 AWP_GITEA_PORT=9750 AWP_PUBLIC_EDGE_ENV="$ROOT/impl/deployment/edge.env.example" \
     docker compose -f "$ROOT/impl/deployment/compose.yml" config --quiet
 fi
 "$ROOT/harness/probe.sh"

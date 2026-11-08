@@ -1,0 +1,155 @@
+-- allium: 3
+-- Sources: docs/plan/21-private-review-workbench/spec.feature,
+-- docs/wiki/private-review-workbench.md, raw/v1/journal-annotation-finalize.mjs.
+
+entity CandidateCase {
+    case_id: String
+    owner: String
+    source_digest: String
+    expected_digest: String
+    annotation: pending | reviewed | disputed | adjudicated | excluded
+    privacy: pending | passed | failed
+    last_reviewer: String
+    family_id: String
+    partition: unassigned | development | challenge | locked_holdout | production_shadow
+    revision: Integer
+}
+
+entity MetadataRecord {
+    snapshot_id: String
+    legacy_id: String
+    owner: String
+    disposition: quarantined | linked | excluded_metadata
+    source_id: String
+    reason_digest: String
+    evidence_digest: String
+    revision: Integer
+}
+
+entity ReviewAction {
+    action_id: String
+    owner: String
+    target_id: String
+    revision: Integer
+}
+
+entity VerifiedSourceLink {
+    snapshot_id: String
+    legacy_id: String
+    source_id: String
+    evidence_digest: String
+}
+
+rule AssignCaseFamily {
+    when: CaseFamilyAssigned(action_id, owner, case_id, expected_revision, family_id, partition)
+    let item = CandidateCase{case_id: case_id}
+    requires: exists item
+    requires: item.owner = owner
+    requires: item.revision = expected_revision
+    requires: not exists ReviewAction{action_id: action_id}
+    ensures: ReviewAction.created(action_id: action_id, owner: owner, target_id: case_id, revision: expected_revision)
+    ensures: item.family_id = family_id
+    ensures: item.partition = partition
+    ensures: item.revision = expected_revision + 1
+}
+
+rule RecordIndependentReview {
+    when: IndependentCaseReviewed(action_id, owner, case_id, expected_revision, reviewer, annotation, expected_digest)
+    let item = CandidateCase{case_id: case_id}
+    requires: exists item
+    requires: item.owner = owner
+    requires: item.revision = expected_revision
+    requires: item.annotation = pending
+    requires: expected_digest != ""
+    requires: not exists ReviewAction{action_id: action_id}
+    ensures: ReviewAction.created(action_id: action_id, owner: owner, target_id: case_id, revision: expected_revision)
+    ensures: item.annotation = annotation
+    ensures: item.expected_digest = expected_digest
+    ensures: item.last_reviewer = reviewer
+    ensures: item.revision = expected_revision + 1
+}
+
+rule AdjudicateCase {
+    when: CaseAdjudicated(action_id, owner, case_id, expected_revision, adjudicator, expected_digest)
+    let item = CandidateCase{case_id: case_id}
+    requires: exists item
+    requires: item.owner = owner
+    requires: item.revision = expected_revision
+    requires: item.annotation = disputed
+    requires: item.last_reviewer != adjudicator
+    requires: expected_digest != ""
+    requires: not exists ReviewAction{action_id: action_id}
+    ensures: ReviewAction.created(action_id: action_id, owner: owner, target_id: case_id, revision: expected_revision)
+    ensures: item.annotation = adjudicated
+    ensures: item.expected_digest = expected_digest
+    ensures: item.last_reviewer = adjudicator
+    ensures: item.revision = expected_revision + 1
+}
+
+rule RecordPrivacyReview {
+    when: CasePrivacyReviewed(action_id, owner, case_id, expected_revision, privacy)
+    let item = CandidateCase{case_id: case_id}
+    requires: exists item
+    requires: item.owner = owner
+    requires: item.revision = expected_revision
+    requires: item.privacy = pending
+    requires: not exists ReviewAction{action_id: action_id}
+    ensures: ReviewAction.created(action_id: action_id, owner: owner, target_id: case_id, revision: expected_revision)
+    ensures: item.privacy = privacy
+    ensures: item.revision = expected_revision + 1
+}
+
+rule ResolveMetadata {
+    when: MetadataDispositionRequested(action_id, owner, snapshot_id, legacy_id, expected_revision, disposition, source_id, reason_digest, evidence_digest)
+    let item = MetadataRecord{snapshot_id: snapshot_id, legacy_id: legacy_id}
+    requires: exists item
+    requires: item.owner = owner
+    requires: item.revision = expected_revision
+    requires: not exists ReviewAction{action_id: action_id}
+    requires: disposition = quarantined or reason_digest != ""
+    requires: disposition = quarantined or evidence_digest != ""
+    requires: disposition != linked or exists VerifiedSourceLink{snapshot_id: snapshot_id, legacy_id: legacy_id, source_id: source_id, evidence_digest: evidence_digest}
+    ensures: ReviewAction.created(action_id: action_id, owner: owner, target_id: legacy_id, revision: expected_revision)
+    ensures: item.disposition = disposition
+    ensures: item.source_id = source_id
+    ensures: item.reason_digest = reason_digest
+    ensures: item.evidence_digest = evidence_digest
+    ensures: item.revision = expected_revision + 1
+}
+
+invariant NoImplicitQualityApproval {
+    for item in CandidateCases:
+        item.annotation = pending or item.annotation = reviewed or item.annotation = disputed or item.annotation = adjudicated or item.annotation = excluded
+}
+
+invariant EveryMetadataRecordAccounted {
+    for item in MetadataRecords:
+        item.disposition = quarantined or item.disposition = linked or item.disposition = excluded_metadata
+}
+
+surface PrivateReview {
+    facing candidate: CandidateCase
+    exposes:
+        candidate.case_id
+        candidate.source_digest
+        candidate.annotation
+        candidate.privacy
+        candidate.revision
+    provides:
+        CaseFamilyAssigned(action_id, owner, case_id, expected_revision, family_id, partition)
+        IndependentCaseReviewed(action_id, owner, case_id, expected_revision, reviewer, annotation, expected_digest)
+        CaseAdjudicated(action_id, owner, case_id, expected_revision, adjudicator, expected_digest)
+        CasePrivacyReviewed(action_id, owner, case_id, expected_revision, privacy)
+}
+
+surface PrivateDisposition {
+    facing record: MetadataRecord
+    exposes:
+        record.snapshot_id
+        record.legacy_id
+        record.disposition
+        record.source_id
+        record.revision
+    provides:
+        MetadataDispositionRequested(action_id, owner, snapshot_id, legacy_id, expected_revision, disposition, source_id, reason_digest, evidence_digest)
+}

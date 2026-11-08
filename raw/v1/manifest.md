@@ -165,3 +165,23 @@ pending and privacy review pending, and a 40-case journal draft with all
 annotations pending, all assigned to development, and privacy review pending.
 Neither is a reviewed qualification corpus. No private case or private-file
 digest was copied into this repository.
+
+## Slice 21 private review workbench evidence
+
+The following safe source files are byte copies from the pinned v1 commit.
+They describe the existing journal review presentation, explicit correction
+receipt, annotation draft, and finalization gate. They do not contain private
+owner rows. The private drafts were inspected for structure only: the 80
+classifier rows are pending, have no assigned split or semantic family, and
+have no expected answer; the 40 journal rows are pending with development
+split, family identifiers, and no approved expected answer. Both draft-level
+privacy reviews remain pending. The slice 18 frozen shadow report separately
+accounts for twelve unlinked metadata resources. Their individual contents,
+identifiers, and private-file digests are deliberately absent here.
+
+| Snapshot | Original path | SHA-256 |
+| --- | --- | --- |
+| [Journal review app guide](journal-review-mcp-readme.md) | `products/voice-agent/apps/journal-review-mcp/README.md` | `5d4ff6ad58c1f0f856fdcea1442792f70941778895192e8bf87e7fd6cc2feec9` |
+| [Journal review server](journal-review-mcp-server.ts) | `products/voice-agent/apps/journal-review-mcp/src/server.ts` | `735c09e0610d2c94548e0e770f7e88d06ec2b37d13232e0701cebe3387ff1160` |
+| [Annotation finalizer](journal-annotation-finalize.mjs) | `products/voice-agent/apps/pi-agent/digital-twin/eval/journal-annotation-finalize.mjs` | `89b4fc7e74dd19bbaea525b359c5b46a614b5bea5f610d952c166951c54f9578` |
+| [Owner-turn draft maker](codex-owner-turn-review.mjs) | `products/voice-agent/apps/pi-agent/digital-twin/eval/codex-owner-turn-review.mjs` | `f59dc608f6f017dc98d157d9888b0d6f878009c37465d34904262ae8e46e5b46` |

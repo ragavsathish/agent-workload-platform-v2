@@ -1,0 +1,656 @@
+diff --git a/products/voice-agent/HOST_REQUIREMENTS.md b/products/voice-agent/HOST_REQUIREMENTS.md
+index fba7b7a..3983a46 100644
+--- a/products/voice-agent/HOST_REQUIREMENTS.md
++++ b/products/voice-agent/HOST_REQUIREMENTS.md
+@@ -53,8 +53,23 @@ never load executable code or VM assets from
+ `~/Documents`, so they do not need Full Disk Access or Documents-folder
+ permission.
+ 
+-`make up` derives root-only Compose secret files under ignored `deploy/secrets/`; no secret is baked
+-into an image. It installs eight LaunchAgents in `~/Library/LaunchAgents`:
++`make up LEVEL=voice|durable|full` derives root-only Compose secret files under ignored
++`deploy/secrets/`; no secret is baked into an image. The first `make start LEVEL=...` installs the
++host runtime and then selects which LaunchAgents remain loaded:
++
++- `voice`: inference broker and Pi Voice Service;
++- `durable`: voice services plus Pi Durable Owner, with task execution on the host;
++- `full`: all host services, including Gondolin task execution and image building.
++
++All levels share the core Compose services required by the voice edge and gateway. The `full`
++Compose profile additionally runs Gitea, its ingress, and the trace-render worker. During initial
++host installation, `make start` temporarily starts Gitea because repository synchronization uses
++it; lower levels stop the profile services after installation. The persistent Pi Voice sandbox
++still uses Gondolin and clones its workspace from Gitea when it starts.
++Thus durable mode avoids Gondolin for durable tasks, while the separate Pi Voice
++sandbox continues to use its existing Gondolin runtime.
++
++The host services installed for `full` are:
+ 
+ - inference broker: local Parakeet v3 MLX, Ollama, and Kokoro capability on `127.0.0.1:9443`;
+ - music generation: ACE-Step audio and language models on `127.0.0.1:8001`;
+diff --git a/products/voice-agent/Makefile b/products/voice-agent/Makefile
+index 618a99d..725f243 100644
+--- a/products/voice-agent/Makefile
++++ b/products/voice-agent/Makefile
+@@ -29,9 +29,15 @@ WASM_ACTIONS := setup build check install clean
+ .PHONY: playwright-responsive-c2-mock
+ .PHONY: playwright-flutter-responsive-c2-mock
+ 
+-COMPOSE = docker compose --env-file deploy/.env -f deploy/compose.yml
++LEVEL ?= full
++ifeq ($(filter $(LEVEL),voice durable full),)
++$(error LEVEL must be one of: voice, durable, full)
++endif
++COMPOSE_PROFILE = $(if $(filter full,$(LEVEL)),--profile full,)
++COMPOSE = docker compose --env-file deploy/.env -f deploy/compose.yml $(COMPOSE_PROFILE)
++FULL_COMPOSE = docker compose --env-file deploy/.env -f deploy/compose.yml --profile full
+ MLFLOW_COMPOSE = $(COMPOSE) -f deploy/compose.mlflow.yml
+-ANSIBLE = ANSIBLE_CONFIG=automation/ansible.cfg uvx --from ansible-core --with requests ansible-playbook
++ANSIBLE = VOICE_AGENT_LEVEL=$(LEVEL) ANSIBLE_CONFIG=automation/ansible.cfg uvx --from ansible-core --with requests ansible-playbook
+ ANSIBLE_GALAXY = uvx --from ansible-core ansible-galaxy
+ DVC_ROOT = apps/pi-agent/digital-twin
+ DVC = AWS_ACCESS_KEY_ID="$${ARTIFACT_ACCESS_KEY:-local-test}" AWS_SECRET_ACCESS_KEY="$${ARTIFACT_SECRET_KEY:-local-test}" AWS_DEFAULT_REGION="$${AWS_DEFAULT_REGION:-us-east-1}" AWS_S3_ADDRESSING_STYLE=path uvx --from dvc==3.67.1 --with dvc-s3==3.3.0 dvc --cd $(DVC_ROOT)
+@@ -46,9 +52,12 @@ help:
+ 		'  make check          Run all static checks and tests' \
+ 		'  make test-pi-durable-mcp' \
+ 		'                      Test Pi Durable MCP, host, Gondolin, and task follow-up' \
+-		'  make start|up|down  Operate the full deployment' \
+-		'  make native-start|native-stop|native-restart|native-status' \
+-		'                      Manage all eight macOS services' \
++		'  make start LEVEL=voice|durable|full' \
++		'                      Start the selected deployment level (default: full)' \
++		'  make native-start LEVEL=voice|durable|full' \
++		'                      Select the matching macOS LaunchAgents' \
++		'  make up LEVEL=voice|durable|full' \
++		'                      Deploy the selected level and follow logs' \
+ 		'  make digital-twin-artifact-verify' \
+ 		'                      Verify DVC artifacts through local S3Mock' \
+ 		'  make digital-twin-mlflow-verify' \
+@@ -96,9 +105,11 @@ up:
+ 
+ start: deployment-prepare
+ 	$(COMPOSE) build
+-	$(COMPOSE) up -d --wait --force-recreate s3mock gitea
++	$(COMPOSE) up -d --wait --force-recreate s3mock gitea-ingress
+ 	$(MAKE) install-host-services
+ 	$(COMPOSE) up -d --wait --force-recreate
++	$(MAKE) native-start LEVEL=$(LEVEL)
++	@if [ "$(LEVEL)" != full ]; then $(FULL_COMPOSE) stop gitea gitea-ingress trace-render-worker; fi
+ 	$(MAKE) automation-verify
+ 
+ deployment-prepare: config-check
+@@ -138,15 +149,15 @@ logs:
+ 	@interrupted=0; \
+ 	tail -n 100 -F "$$HOME/Library/Logs/PipecatEdge/"*.log & tail_pid=$$!; \
+ 	trap 'interrupted=1' INT TERM; \
+-	$(COMPOSE) logs -f --tail=100 agent-gateway voice-edge tailscale traefik gitea; status=$$?; \
++	$(COMPOSE) logs -f --tail=100 agent-gateway voice-edge tailscale traefik; status=$$?; \
+ 	kill "$$tail_pid" 2>/dev/null || true; \
+ 	wait "$$tail_pid" 2>/dev/null || true; \
+ 	if [[ "$$interrupted" == 1 || "$$status" == 130 ]]; then exit 0; fi; \
+ 	exit "$$status"
+ 
+ down:
+-	$(MAKE) native-stop
+-	$(COMPOSE) down
++	$(MAKE) native-stop LEVEL=$(LEVEL)
++	$(FULL_COMPOSE) down
+ 
+ native-start:
+ 	$(ANSIBLE) automation/playbooks/native_services.yml -e native_action=start
+@@ -163,6 +174,7 @@ native-status:
+ recreate:
+ 	$(COMPOSE) up -d --wait --force-recreate
+ 	$(MAKE) native-start
++	@if [ "$(LEVEL)" != full ]; then $(FULL_COMPOSE) stop gitea gitea-ingress trace-render-worker; fi
+ 	$(MAKE) automation-verify
+ 
+ verify: automation-verify
+@@ -219,7 +231,7 @@ login:
+ 	uv run --project apps/gateway python tools/ops/login.py
+ 
+ status:
+-	$(COMPOSE) ps
++	$(FULL_COMPOSE) ps
+ 	$(COMPOSE) exec -T tailscale tailscale --socket=/tmp/tailscaled.sock status || true
+ 	$(MAKE) native-status
+ 
+diff --git a/products/voice-agent/README.md b/products/voice-agent/README.md
+index e275f77..ae3b512 100644
+--- a/products/voice-agent/README.md
++++ b/products/voice-agent/README.md
+@@ -101,13 +101,28 @@ tools still execute through Gondolin rather than in the voice stack.
+ 
+ ## Start
+ 
++Choose a runtime level with `LEVEL=voice`, `LEVEL=durable`, or `LEVEL=full`;
++the default is `full`. Voice runs the broker and Pi Voice LaunchAgents with the
++core Compose services. Durable adds Pi Durable Owner and selects host task
++execution. Full adds the remaining LaunchAgents, Gondolin task execution, Gitea
++and trace rendering. Switching levels stops host agents and optional containers
++outside the selected level. Initial host-service installation still prepares
++the complete runtime; the selector controls what stays running.
++
++Voice and durable use the same core Compose services; their difference is the
++host LaunchAgent set and Pi Durable execution mode. Durable avoids Gondolin for
++durable tasks. The persistent Pi Voice Service still uses its own Gondolin
++sandbox, and its workspace is cloned from Gitea during service startup. The
++installer starts Gitea temporarily for that setup, then voice and durable stop
++the Gitea and trace-render Compose profile.
++
+ ```bash
+ cd products/voice-agent
+ make setup
+ # Configure deploy/.env and the service files under deploy/host-env.
+ make pull-model
+ make host-preflight
+-make start
++make start LEVEL=voice
+ make login
+ make warm-models
+ ```
+@@ -157,12 +172,12 @@ name when the Mac itself is not connected as a Tailscale client.
+ 
+ ```bash
+ make status       # Compose services, tailnet state, native service state
+-make start        # deploy, verify, and return after services become healthy
+-make up           # deploy, verify, and follow service stdout
+-make native-status # inspect all eight launchd services
+-make native-start  # start the installed native services; Compose dependencies must be running
+-make native-stop   # unload the native services in reverse order
+-make native-restart # restart the native services and wait for model readiness
++make start LEVEL=voice    # choose voice, durable, or full
++make up LEVEL=durable     # deploy a level and follow service stdout
++make native-status        # inspect all installed LaunchAgents
++make native-start LEVEL=durable # activate only that level's host services
++make native-stop          # unload every installed host service
++make native-restart LEVEL=full # restart the selected host services
+ make logs         # follow container and native-service stdout
+ make verify       # isolation, capabilities, ingress, broker, and gateway checks
+ make grafana-password # print the local Grafana credential after make up
+@@ -182,8 +197,12 @@ make down         # stop native and Compose services; preserve data volumes
+ make check        # tests, lint, type checks, build, Compose and plist validation
+ ```
+ 
+-`make start` installs and starts the native services after S3Mock and Gitea are healthy.
+-Use `make native-start` after installation when those container dependencies are already running.
++`make start LEVEL=...` prepares the deployment, installs host services after S3Mock and Gitea are
++available, then leaves only the selected level running. Durable selects
++`WORKER_PI_EXECUTION_MODE=host`; full selects Gondolin task execution. Gitea is
++available only at full level after startup. `make native-start LEVEL=...` switches an already
++installed host-service set without rebuilding it; use `make start LEVEL=...` to switch the whole
++deployment.
+ `make native-stop` unloads the services, so launchd will not immediately restart jobs configured
+ with `KeepAlive`. `make down` stops native services before stopping Compose. `make native-status`
+ reads launchd state without changing it; `make verify` checks service readiness.
+diff --git a/products/voice-agent/automation/inventories/local/group_vars/all.yml b/products/voice-agent/automation/inventories/local/group_vars/all.yml
+index 1fc3a08..aebca0e 100644
+--- a/products/voice-agent/automation/inventories/local/group_vars/all.yml
++++ b/products/voice-agent/automation/inventories/local/group_vars/all.yml
+@@ -7,7 +7,7 @@ compose_files:
+ compose_env_files:
+   - "{{ voice_agent_root }}/deploy/.env"
+ 
+-compose_services:
++compose_services_all:
+   - name: gitea
+     read_only: true
+     log_driver: local
+@@ -65,6 +65,13 @@ compose_services:
+     log_driver: local
+     published_ports: []
+ 
++deployment_level: "{{ lookup('ansible.builtin.env', 'VOICE_AGENT_LEVEL') | default('full', true) }}"
++compose_profiles: "{{ ['full'] if deployment_level == 'full' else [] }}"
++compose_services: >-
++  {{ compose_services_all
++     if deployment_level == 'full'
++     else compose_services_all | rejectattr('name', 'in', ['gitea', 'gitea-ingress', 'trace-render-worker']) | list }}
++
+ capability_protected_endpoints:
+   - { name: Grafana MCP, url: "http://127.0.0.1:8000/mcp", status: 401 }
+   - { name: Grafana, url: "http://127.0.0.1:3300/api/user", status: 401 }
+@@ -72,7 +79,7 @@ capability_protected_endpoints:
+   - { name: Pi voice, url: "http://127.0.0.1:9446/health", status: 401 }
+   - { name: agent gateway, url: "http://127.0.0.1:9444/health", status: 401 }
+ 
+-launch_agents:
++launch_agents_all:
+   - com.sathish.pipecat-broker
+   - com.sathish.pipecat-music-generation
+   - com.sathish.pipecat-digital-twin-classifier
+@@ -81,6 +88,19 @@ launch_agents:
+   - com.sathish.pipecat-pi-voice
+   - com.sathish.pipecat-pi-durable-owner
+   - com.sathish.pipecat-stack-alert-monitor
++  - com.sathish.pipecat-image-builder
++
++launch_agents_by_level:
++  voice:
++    - com.sathish.pipecat-broker
++    - com.sathish.pipecat-pi-voice
++  durable:
++    - com.sathish.pipecat-broker
++    - com.sathish.pipecat-pi-voice
++    - com.sathish.pipecat-pi-durable-owner
++  full: "{{ launch_agents_all }}"
++selected_launch_agents: "{{ launch_agents_by_level[deployment_level] }}"
++launch_agents: "{{ launch_agents_all }}"
+ 
+ compose_one_shot_services:
+   - s3mock-init
+diff --git a/products/voice-agent/automation/playbooks/blackbox_voice.yml b/products/voice-agent/automation/playbooks/blackbox_voice.yml
+index 8321cbf..fc6ad5a 100644
+--- a/products/voice-agent/automation/playbooks/blackbox_voice.yml
++++ b/products/voice-agent/automation/playbooks/blackbox_voice.yml
+@@ -75,6 +75,7 @@
+         files: "{{ blackbox_compose_files }}"
+         env_files:
+           - .env
++        profiles: "{{ compose_profiles }}"
+         services:
+           - tailscale
+           - s3mock
+diff --git a/products/voice-agent/automation/playbooks/deploy_edge.yml b/products/voice-agent/automation/playbooks/deploy_edge.yml
+index b680958..1afc71d 100644
+--- a/products/voice-agent/automation/playbooks/deploy_edge.yml
++++ b/products/voice-agent/automation/playbooks/deploy_edge.yml
+@@ -10,6 +10,7 @@
+         files: "{{ compose_files }}"
+         env_files: "{{ compose_env_files }}"
+         project_name: "{{ compose_project_name }}"
++        profiles: "{{ compose_profiles }}"
+         services: [voice-edge]
+         build: always
+         recreate: always
+diff --git a/products/voice-agent/automation/playbooks/deploy_gateway.yml b/products/voice-agent/automation/playbooks/deploy_gateway.yml
+index ea7fada..be192db 100644
+--- a/products/voice-agent/automation/playbooks/deploy_gateway.yml
++++ b/products/voice-agent/automation/playbooks/deploy_gateway.yml
+@@ -10,6 +10,7 @@
+         files: "{{ compose_files }}"
+         env_files: "{{ compose_env_files }}"
+         project_name: "{{ compose_project_name }}"
++        profiles: "{{ compose_profiles }}"
+         services: [agent-gateway]
+         build: always
+         recreate: always
+diff --git a/products/voice-agent/automation/playbooks/lifecycle.yml b/products/voice-agent/automation/playbooks/lifecycle.yml
+index 1e5dc6d..f8456cb 100644
+--- a/products/voice-agent/automation/playbooks/lifecycle.yml
++++ b/products/voice-agent/automation/playbooks/lifecycle.yml
+@@ -17,6 +17,7 @@
+         files: "{{ compose_files }}"
+         env_files: "{{ compose_env_files }}"
+         project_name: "{{ compose_project_name }}"
++        profiles: "{{ compose_profiles }}"
+         state: present
+         wait: true
+ 
+diff --git a/products/voice-agent/automation/playbooks/native_services.yml b/products/voice-agent/automation/playbooks/native_services.yml
+index 00c83ad..d72a3ed 100644
+--- a/products/voice-agent/automation/playbooks/native_services.yml
++++ b/products/voice-agent/automation/playbooks/native_services.yml
+@@ -1,49 +1,80 @@
+ ---
+-- name: Manage voice-agent native services
++- name: Select voice-agent host services
+   hosts: localhost
+   gather_facts: true
+   any_errors_fatal: true
+   tasks:
+-    - name: Require a supported native-service action
++    - name: Require a supported deployment level and action
+       ansible.builtin.assert:
+         that:
++          - deployment_level in ['voice', 'durable', 'full']
+           - native_action | default('status') in ['start', 'stop', 'restart', 'status']
+-        fail_msg: Set native_action to start, stop, restart, or status.
++        fail_msg: Set deployment_level to voice, durable, or full and native_action to start, stop, restart, or status.
+         quiet: true
+ 
+-    - name: Inspect native services before stopping
++    - name: Inspect host services before changing selection
+       community.general.launchd:
+         name: "{{ item }}"
+         state: started
+       check_mode: true
+       failed_when: false
+-      loop: "{{ launch_agents }}"
++      loop: "{{ launch_agents_all }}"
+       loop_control:
+         label: "{{ item }}"
+-      register: native_service_before
+-      when: native_action | default('status') == 'stop'
++      register: native_services_before
++      when: native_action | default('status') in ['start', 'stop', 'restart']
+ 
+-    - name: Stop native services in reverse order
++    - name: Stop host services outside the selected level
+       community.general.launchd:
+         name: "{{ item.item }}"
+         state: unloaded
+-      loop: "{{ native_service_before.results | reverse | list }}"
++      loop: "{{ native_services_before.results | default([]) | reverse | list }}"
++      loop_control:
++        label: "{{ item.item }}"
++      when:
++        - native_action | default('status') in ['start', 'restart']
++        - item.item not in selected_launch_agents
++        - item.status.current_state | default('unloaded') != 'unloaded'
++
++    - name: Stop every host service
++      community.general.launchd:
++        name: "{{ item.item }}"
++        state: unloaded
++      loop: "{{ native_services_before.results | default([]) | reverse | list }}"
+       loop_control:
+         label: "{{ item.item }}"
+       when:
+         - native_action | default('status') == 'stop'
+         - item.status.current_state | default('unloaded') != 'unloaded'
+ 
+-    - name: Start or restart native services
++    - name: Set Pi Durable execution mode for the selected level
++      ansible.builtin.lineinfile:
++        path: "{{ ansible_facts.user_dir }}/Library/Application Support/PipecatEdge/apps/worker/worker.env"
++        regexp: '^WORKER_PI_EXECUTION_MODE='
++        line: "WORKER_PI_EXECUTION_MODE={{ 'gondolin' if deployment_level == 'full' else 'host' }}"
++        mode: "0600"
++      register: native_worker_execution_mode
++      when: native_action | default('status') in ['start', 'restart']
++
++    - name: Start selected host services
+       community.general.launchd:
+         name: "{{ item }}"
+         state: "{{ 'restarted' if native_action == 'restart' else 'started' }}"
+-      loop: "{{ launch_agents }}"
++      loop: "{{ selected_launch_agents }}"
+       loop_control:
+         label: "{{ item }}"
+       when: native_action | default('status') in ['start', 'restart']
+ 
+-    - name: Wait for protected native endpoints
++    - name: Restart Pi Durable after an execution-mode change
++      community.general.launchd:
++        name: com.sathish.pipecat-pi-durable-owner
++        state: restarted
++      when:
++        - native_action | default('status') == 'start'
++        - "'com.sathish.pipecat-pi-durable-owner' in selected_launch_agents"
++        - native_worker_execution_mode.changed | default(false)
++
++    - name: Wait for inference broker and Pi Voice endpoints
+       ansible.builtin.uri:
+         url: "{{ item }}"
+         status_code: 401
+@@ -57,7 +88,7 @@
+       delay: 2
+       when: native_action | default('status') in ['start', 'restart']
+ 
+-    - name: Wait for ACE-Step models
++    - name: Wait for ACE-Step models at the full level
+       ansible.builtin.uri:
+         url: http://127.0.0.1:8001/health
+         status_code: 200
+@@ -68,36 +99,44 @@
+         and native_music_health.json.data.llm_initialized | default(false)
+       retries: 240
+       delay: 5
+-      when: native_action | default('status') in ['start', 'restart']
++      when:
++        - native_action | default('status') in ['start', 'restart']
++        - deployment_level == 'full'
+ 
+-    - name: Inspect all native services without changing them
++    - name: Inspect host services without changing them
+       community.general.launchd:
+         name: "{{ item }}"
+         state: started
+       check_mode: true
+       failed_when: false
+-      loop: "{{ launch_agents }}"
++      loop: "{{ launch_agents_all }}"
+       loop_control:
+         label: "{{ item }}"
+-      register: native_service_status
++      register: native_services_status
+ 
+-    - name: Show native-service status
++    - name: Show host-service status
+       ansible.builtin.debug:
+         msg: >-
+           {{ item.item }}: {{ item.status.current_state | default('unavailable') }}
+-      loop: "{{ native_service_status.results }}"
++          ({{ 'selected' if item.item in selected_launch_agents else 'inactive at ' ~ deployment_level }})
++      loop: "{{ native_services_status.results }}"
+       loop_control:
+         label: "{{ item.item }}"
+ 
+-    - name: Require requested services to converge
++    - name: Require the selected service set to converge
+       ansible.builtin.assert:
+         that:
+-          - item.status.current_state == ('unloaded' if native_action == 'stop' else 'started')
+-        fail_msg: "Native service {{ item.item }} did not reach the requested state."
++          - item.status.current_state == expected_state
++        fail_msg: "Host service {{ item.item }} is {{ item.status.current_state | default('unavailable') }}; expected {{ expected_state }}."
+         quiet: true
+-      loop: "{{ native_service_status.results }}"
++      vars:
++        expected_state: >-
++          {{ 'started'
++             if native_action in ['start', 'restart'] and item.item in selected_launch_agents
++             else 'unloaded' }}
++      loop: "{{ native_services_status.results }}"
+       loop_control:
+         label: "{{ item.item }}"
+       when:
+-        - native_action | default('status') != 'status'
++        - native_action | default('status') in ['start', 'stop', 'restart']
+         - not ansible_check_mode
+diff --git a/products/voice-agent/automation/playbooks/playwright_e2e.yml b/products/voice-agent/automation/playbooks/playwright_e2e.yml
+index 5706086..9a8cc18 100644
+--- a/products/voice-agent/automation/playbooks/playwright_e2e.yml
++++ b/products/voice-agent/automation/playbooks/playwright_e2e.yml
+@@ -169,8 +169,7 @@
+               - compose.playwright.yml
+             env_files:
+               - .env
+-            profiles:
+-              - e2e
++            profiles: "{{ compose_profiles + ['e2e'] }}"
+             services:
+               - e2e-tailnet-bridge
+             dependencies: false
+@@ -189,8 +188,7 @@
+               - compose.playwright.yml
+             env_files:
+               - .env
+-            profiles:
+-              - e2e
++            profiles: "{{ compose_profiles + ['e2e'] }}"
+             service: playwright-e2e
+             cleanup: true
+             no_deps: true
+diff --git a/products/voice-agent/automation/roles/host_services/tasks/main.yml b/products/voice-agent/automation/roles/host_services/tasks/main.yml
+index 87068a9..9a6e964 100644
+--- a/products/voice-agent/automation/roles/host_services/tasks/main.yml
++++ b/products/voice-agent/automation/roles/host_services/tasks/main.yml
+@@ -533,6 +533,15 @@
+   no_log: true
+   notify: Restart host services
+ 
++- name: Select Pi Durable execution mode for the deployment level
++  ansible.builtin.lineinfile:
++    path: "{{ host_services_runtime_dir }}/apps/worker/worker.env"
++    regexp: '^WORKER_PI_EXECUTION_MODE='
++    line: "WORKER_PI_EXECUTION_MODE={{ 'gondolin' if deployment_level == 'full' else 'host' }}"
++    mode: "0600"
++  when: deployment_level in ['voice', 'durable', 'full']
++  notify: Restart host services
++
+ - name: Synchronize Python runtime environments
+   ansible.builtin.command:
+     argv: >-
+diff --git a/products/voice-agent/automation/roles/verify_infrastructure/tasks/main.yml b/products/voice-agent/automation/roles/verify_infrastructure/tasks/main.yml
+index ce46297..213f01d 100644
+--- a/products/voice-agent/automation/roles/verify_infrastructure/tasks/main.yml
++++ b/products/voice-agent/automation/roles/verify_infrastructure/tasks/main.yml
+@@ -69,6 +69,7 @@
+     verify_infrastructure_music_health.status != 200
+     or not (verify_infrastructure_music_health.json.data.models_initialized | default(false))
+     or not (verify_infrastructure_music_health.json.data.llm_initialized | default(false))
++  when: deployment_level == 'full'
+   tags: [http, application_probe]
+ 
+ - name: Read the voice-edge feature contract inside its network namespace
+@@ -178,7 +179,7 @@
+     that:
+       - "'https://' in verify_infrastructure_tailscale_serve.stdout"
+       - "'http://127.0.0.1:8080' in verify_infrastructure_tailscale_serve.stdout"
+-      - "'/git proxy unix:/run/gitea-ingress/gitea.sock' in verify_infrastructure_tailscale_serve.stdout"
++      - "deployment_level != 'full' or '/git proxy unix:/run/gitea-ingress/gitea.sock' in verify_infrastructure_tailscale_serve.stdout"
+       - "':8443' not in verify_infrastructure_tailscale_serve.stdout"
+     quiet: true
+   when: verify_infrastructure_tailscale_running
+@@ -191,7 +192,7 @@
+       - print
+       - "gui/{{ ansible_facts.user_uid }}/{{ item }}"
+   changed_when: false
+-  loop: "{{ launch_agents }}"
++  loop: "{{ selected_launch_agents }}"
+   register: verify_infrastructure_launch_agent_facts
+   loop_control:
+     label: "{{ item }}"
+@@ -216,6 +217,7 @@
+     status_code: 200
+     use_netrc: false
+   register: verify_infrastructure_native_metrics
++  when: deployment_level == 'full'
+   tags: [observability]
+ 
+ - name: Read Gondolin metrics
+@@ -225,6 +227,7 @@
+     status_code: 200
+     use_netrc: false
+   register: verify_infrastructure_gondolin_metrics
++  when: deployment_level == 'full'
+   tags: [observability]
+ 
+ - name: Verify native metric identities
+@@ -234,6 +237,7 @@
+       - "'gondolin_vm_count ' in verify_infrastructure_gondolin_metrics.content"
+     quiet: true
+   tags: [observability]
++  when: deployment_level == 'full'
+ 
+ - name: Verify the Grafana MCP application contract
+   ansible.builtin.command:
+@@ -242,6 +246,7 @@
+       - "{{ voice_agent_root }}/tests/e2e/grafana-mcp.py"
+   changed_when: false
+   register: verify_infrastructure_grafana_mcp_contract
++  when: deployment_level == 'full'
+   tags: [observability, application_probe]
+ 
+ - name: Verify Oxigraph answers SPARQL
+@@ -274,6 +279,7 @@
+       - HEAD
+   changed_when: false
+   tags: [gitea]
++  when: deployment_level == 'full'
+ 
+ - name: Verify Gitea token identities
+   ansible.builtin.uri:
+@@ -294,6 +300,7 @@
+   register: verify_infrastructure_gitea_identities
+   no_log: true
+   tags: [gitea, security]
++  when: deployment_level == 'full'
+ 
+ - name: Assert Gitea token identities
+   ansible.builtin.assert:
+@@ -306,6 +313,7 @@
+     label: "{{ item.item.login }}"
+   no_log: true
+   tags: [gitea, security]
++  when: deployment_level == 'full'
+ 
+ - name: Verify the voice-agent Gitea token cannot create issues
+   ansible.builtin.uri:
+@@ -319,6 +327,7 @@
+     use_netrc: false
+   no_log: true
+   tags: [gitea, security]
++  when: deployment_level == 'full'
+ 
+ - name: Query Prometheus for host metric ingestion
+   ansible.builtin.uri:
+@@ -334,6 +343,7 @@
+   loop_control:
+     label: "{{ item.name }}"
+   register: verify_infrastructure_prometheus_queries
++  when: deployment_level == 'full'
+   tags: [observability]
+ 
+ - name: Assert Prometheus has ingested every metric source
+@@ -346,6 +356,7 @@
+   loop_control:
+     label: "{{ item.item.name }}"
+   tags: [observability]
++  when: deployment_level == 'full'
+ 
+ - name: Verify the Grafana MCP probe returned a trace
+   ansible.builtin.assert:
+@@ -353,3 +364,4 @@
+       - (verify_infrastructure_grafana_mcp_contract.stdout | from_json).traceId | length > 0
+     quiet: true
+   tags: [observability, application_probe]
++  when: deployment_level == 'full'
+diff --git a/products/voice-agent/automation/tasks/lifecycle_cycle.yml b/products/voice-agent/automation/tasks/lifecycle_cycle.yml
+index 0a6e12c..0fd98e4 100644
+--- a/products/voice-agent/automation/tasks/lifecycle_cycle.yml
++++ b/products/voice-agent/automation/tasks/lifecycle_cycle.yml
+@@ -5,6 +5,7 @@
+     files: "{{ compose_files }}"
+     env_files: "{{ compose_env_files }}"
+     project_name: "{{ compose_project_name }}"
++    profiles: "{{ compose_profiles }}"
+     state: present
+     recreate: always
+     wait: true
+@@ -19,4 +20,5 @@
+     files: "{{ compose_files }}"
+     env_files: "{{ compose_env_files }}"
+     project_name: "{{ compose_project_name }}"
++    profiles: "{{ compose_profiles }}"
+     state: stopped
+diff --git a/products/voice-agent/deploy/compose.yml b/products/voice-agent/deploy/compose.yml
+index 398087c..6ec4bc6 100644
+--- a/products/voice-agent/deploy/compose.yml
++++ b/products/voice-agent/deploy/compose.yml
+@@ -2,6 +2,7 @@ name: pipecat-mlx-voice
+ 
+ services:
+   gitea:
++    profiles: [full]
+     image: docker.gitea.com/gitea:28.1.0-rootless@sha256:b1a90409ae9afcd5a5725404c3639da7245248848b99e35332968891290b953e
+     restart: unless-stopped
+     environment:
+@@ -45,6 +46,7 @@ services:
+         max-file: "3"
+ 
+   gitea-ingress:
++    profiles: [full]
+     image: docker.io/library/caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb
+     restart: unless-stopped
+     depends_on:
+@@ -111,6 +113,7 @@ services:
+       retries: 30
+ 
+   trace-render-worker:
++    profiles: [full]
+     image: local/playwright-trace-render-worker:compose
+     pull_policy: never
+     build:

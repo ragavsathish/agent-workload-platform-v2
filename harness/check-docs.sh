@@ -151,4 +151,12 @@ for id in $(rg -o '@durable-song-[0-9]+' docs/plan/16-durable-song-owner/spec.fe
   fi
 done
 
+for id in $(rg -o '@deployment-[0-9]+' docs/plan/23-deployment-levels/spec.feature | tr -d '@'); do
+  test_id="${id//-/_}"
+  if ! rg -q "$id|$test_id" impl/test/awp_v2/deployment_acceptance_test.clj impl/deployment/test_deployment_levels.py; then
+    echo "Acceptance scenario $id has no named check" >&2
+    exit 1
+  fi
+done
+
 echo "documentation gate OK"

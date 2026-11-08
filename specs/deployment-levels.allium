@@ -1,0 +1,106 @@
+-- allium: 3
+-- Cites docs/plan/23-deployment-levels/spec.feature,
+-- docs/wiki/deployment-levels.md, and raw/v1/deployment-levels-worktree.md.
+
+entity DeploymentSelection {
+    selection_id: String
+    operator: String
+    level: voice | durable | full
+}
+
+entity DeploymentState {
+    deployment_id: String
+    requested_level: voice | durable | full
+    active_level: voice | durable | full
+    readiness: starting | ready | degraded | not_ready
+    required_capability_count: Integer
+    available_capability_count: Integer
+}
+
+rule SelectDeploymentLevel {
+    when: LevelSelected(selection_id, operator, level)
+    requires: operator != ""
+    requires: level = voice or level = durable or level = full
+    requires: not exists DeploymentSelection{selection_id: selection_id}
+    ensures: DeploymentSelection.created(selection_id: selection_id, operator: operator, level: level)
+    ensures: DeploymentRequested(level: level)
+}
+
+rule ReuseSelection {
+    when: LevelSelected(selection_id, operator, level)
+    let prior = DeploymentSelection{selection_id: selection_id}
+    requires: exists prior
+    requires: prior.operator = operator
+    requires: prior.level = level
+    ensures: SelectionReused(selection_id: selection_id)
+}
+
+rule RefuseConflictingSelection {
+    when: LevelSelected(selection_id, operator, level)
+    let prior = DeploymentSelection{selection_id: selection_id}
+    requires: exists prior
+    requires: prior.operator != operator or prior.level != level
+    ensures: SelectionRefused(reason: conflict)
+}
+
+rule ObserveReadyCapabilities {
+    when: DeploymentCapabilitiesObserved(deployment_id, active_level, required_count, available_count)
+    requires: required_count = available_count
+    ensures: DeploymentReady(deployment_id: deployment_id, active_level: active_level)
+}
+
+rule ObserveDegradedCapabilities {
+    when: DeploymentCapabilitiesObserved(deployment_id, active_level, required_count, available_count)
+    requires: available_count < required_count
+    ensures: DeploymentDegraded(deployment_id: deployment_id, active_level: active_level)
+}
+
+rule RefuseDurableTaskAtVoiceLevel {
+    when: DurableTaskSubmitted(deployment_id, request_id)
+    requires: DeploymentState{deployment_id: deployment_id, active_level: voice}
+    ensures: TaskAdmissionRefused(request_id: request_id, reason: unavailable)
+}
+
+rule QueryDeploymentStatus {
+    when: DeploymentStatusQueried(operator, deployment_id)
+    requires: operator != ""
+    ensures: DeploymentStatusReturned(operator: operator, deployment_id: deployment_id)
+}
+
+invariant ReadyReflectsHealth {
+    for state in DeploymentStates:
+        state.readiness = ready implies state.available_capability_count = state.required_capability_count
+}
+
+invariant RequestedAndActiveAreDistinctFacts {
+    for state in DeploymentStates:
+        state.requested_level != state.active_level implies state.readiness != ready
+}
+
+invariant SelectionIdentityIsUnique {
+    for a in DeploymentSelections:
+        for b in DeploymentSelections:
+            a.selection_id = b.selection_id implies a = b
+}
+
+surface DeploymentControl {
+    facing state: DeploymentState
+
+    exposes:
+        state.requested_level
+        state.active_level
+        state.readiness
+
+    provides:
+        LevelSelected(selection_id, operator, level)
+        DeploymentCapabilitiesObserved(deployment_id, active_level, required_count, available_count)
+        DurableTaskSubmitted(deployment_id, request_id)
+        DeploymentStatusQueried(operator, deployment_id)
+
+    @guarantee NoFalseReady
+        -- A requested level is not reported ready until its required services
+        -- have been observed healthy.
+
+    @guarantee ReplaySafeSelection
+        -- Repeating the same selection does not repeat service effects.
+}

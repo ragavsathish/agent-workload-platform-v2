@@ -21,6 +21,21 @@ Cites the [slice 06 plan](../../docs/plan/06-public-deployment/plan.md), [pinned
 
 This is a single-owner macOS deployment. The native supervisor owns the Grain bridge, Pi voice service, broker, task gateway, and independent task scheduler. The public Compose namespace owns Tailscale, the identity proxy, and Pipecat edge. It does not publish a host or LAN port. The Grain event store and session directories live under a private state directory outside the checkout.
 
+## Deployment level
+
+Set `AWP_DEPLOYMENT_LEVEL` in the private service environment to `voice`,
+`durable`, or `full`; omission defaults to `full`. `voice` leaves out the task
+scheduler and refuses durable task submissions before Grain accepts them.
+`durable` runs the scheduler with host execution. `full` runs it with the
+isolated executor. The persistent Pi Voice environment remains isolated at
+every level. Changing the setting requires restarting the supervisor; its
+shutdown interrupts running scheduled work into the existing explicit recovery
+path. Grain stores requested level and observed readiness under the persistent
+deployment state directory. `stack.py status --env ... --state ...` reports
+the requested level and supervised processes. `check-ready` records health
+observations in Grain and fails if a required service is unavailable. Invalid
+levels fail before the supervisor starts any services.
+
 ## Prepare
 
 1. Install the v1 [host prerequisites](../../raw/v1/host-requirements.md), including Docker Desktop, Clojure, Node/pnpm, uv, Pi credentials, models, and Gondolin assets. `pnpm --dir impl/runtime install --frozen-lockfile` then `pnpm --dir impl/runtime run build`; run `uv sync --frozen --no-dev` in the broker and edge directories.

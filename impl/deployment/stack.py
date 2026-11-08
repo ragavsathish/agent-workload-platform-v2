@@ -46,7 +46,20 @@ def require(env: dict[str, str], *names: str) -> None:
         raise ValueError("missing service configuration: " + ", ".join(missing))
 
 
+def execution_mode_for_level(level: str) -> str:
+    if level == "durable":
+        return "host"
+    if level == "full":
+        return "gondolin"
+    if level == "voice":
+        raise ValueError("durable task execution is unavailable at voice level")
+    raise ValueError("AWP_DEPLOYMENT_LEVEL must be voice, durable, or full")
+
+
 def native_specs(env: dict[str, str]) -> tuple[ServiceSpec, ...]:
+    level = env.get("AWP_DEPLOYMENT_LEVEL", "full")
+    if level not in {"voice", "durable", "full"}:
+        raise ValueError("AWP_DEPLOYMENT_LEVEL must be voice, durable, or full")
     require(env, "AWP_TASKING_STORAGE_DIR", "AWP_SESSION_STORAGE_DIR",
             "AWP_GRAIN_SESSION_TOKEN", "AWP_OWNER_IDENTITY",
             "AWP_ELIGIBLE_WORKSPACES", "AWP_WORKSPACE_MAP_JSON",
@@ -61,7 +74,7 @@ def native_specs(env: dict[str, str]) -> tuple[ServiceSpec, ...]:
         song_owner = (ServiceSpec("song-lyric-owner",
                                   ("node", str(TASK / "dist/song-lyric-owner-server.js")),
                                   RUNTIME, f"{owner_url}/health"),)
-    return song_owner + (
+    core = (
         ServiceSpec("grain", ("clojure", "-J--add-opens=java.base/java.nio=ALL-UNNAMED",
                               "-J--add-exports=java.base/sun.nio.ch=ALL-UNNAMED",
                               "-M", "-m", "awp-v2.live.main"), IMPL,
@@ -77,13 +90,19 @@ def native_specs(env: dict[str, str]) -> tuple[ServiceSpec, ...]:
                                "voice_agent.speech.presentation.http"), BROKER,
                     f"http://127.0.0.1:{env.get('INFERENCE_BROKER_PORT', '9443')}/health",
                     {"Authorization": f"Bearer {env['INFERENCE_BROKER_TOKEN']}"}),
-        ServiceSpec("scheduler", (sys.executable, str(Path(__file__).resolve()),
-                                  "schedule", "--env", env["AWP_DEPLOY_ENV"],
-                                  "--state", env["AWP_DEPLOY_STATE"]), IMPL),
     )
+    if level == "voice":
+        return tuple(spec for spec in core if spec.name != "song-lyric-owner")
+    return song_owner + core + (ServiceSpec("scheduler", (sys.executable, str(Path(__file__).resolve()),
+                                                           "schedule", "--env", env["AWP_DEPLOY_ENV"],
+                                                           "--state", env["AWP_DEPLOY_STATE"]), IMPL),)
 
 
 def schedule(env: dict[str, str], state: Path) -> None:
+    level = env.get("AWP_DEPLOYMENT_LEVEL", "full")
+    if level not in {"durable", "full"}:
+        raise ValueError("durable task scheduler is unavailable at voice level")
+    env = {**env, "WORKER_PI_EXECUTION_MODE": execution_mode_for_level(level)}
     client = GrainTaskClient(env.get("AWP_GRAIN_SESSION_URL", "http://127.0.0.1:9447"),
                              env["AWP_GRAIN_SESSION_TOKEN"])
     worker = ("node", str(TASK / "dist/scheduled-worker.js"))
@@ -137,11 +156,32 @@ def main() -> None:
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     state.chmod(0o700)
     if args.command == "status":
-        print(json.dumps(service_status(state), indent=2))
+        import urllib.request
+        values = load_env(args.env.resolve()) if args.env else {}
+        services = service_status(state)
+        result = {"requested_level": values.get("AWP_DEPLOYMENT_LEVEL", "full"),
+                  "active_services": services,
+                  "readiness": "ready" if services and all(item["running"] for item in services.values()) else "not_ready"}
+        if args.env:
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{values.get('AWP_GRAIN_SESSION_PORT', '9447')}/internal/deployment/status",
+                data=b"{}", method="POST",
+                headers={"Authorization": f"Bearer {values.get('AWP_GRAIN_SESSION_TOKEN', '')}",
+                         "X-AWP-Owner": values.get("AWP_OWNER_IDENTITY", ""),
+                         "Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(request, timeout=3) as response:
+                    result["grain_deployment"] = json.load(response)
+            except Exception:
+                result["grain_deployment"] = {"readiness": "unavailable"}
+        print(json.dumps(result, indent=2))
         return
     if args.command == "check-ready":
         import urllib.request
         values = load_env(args.env.resolve()) if args.env else {}
+        level = values.get("AWP_DEPLOYMENT_LEVEL", "full")
+        if level not in {"voice", "durable", "full"}:
+            raise ValueError("AWP_DEPLOYMENT_LEVEL must be voice, durable, or full")
         checks = {
             "grain": (f"http://127.0.0.1:{values.get('AWP_GRAIN_SESSION_PORT', '9447')}/internal/task/list",
                       values.get("AWP_GRAIN_SESSION_TOKEN", "")),
@@ -151,7 +191,7 @@ def main() -> None:
                        values.get("INFERENCE_BROKER_TOKEN", "")),
             "gateway": (f"http://127.0.0.1:{values.get('AGENT_GATEWAY_PORT', '9444')}/health", ""),
         }
-        if values.get("AWP_PI_DURABLE_OWNER_URL"):
+        if level != "voice" and values.get("AWP_PI_DURABLE_OWNER_URL"):
             checks["song-lyric-owner"] = (values["AWP_PI_DURABLE_OWNER_URL"].rstrip("/") + "/health", "")
         result = {}
         for name, (url, token) in checks.items():
@@ -162,6 +202,22 @@ def main() -> None:
                     result[name] = response.status == 200
             except Exception:
                 result[name] = False
+        if level != "voice":
+            result["scheduler"] = bool(service_status(state).get("scheduler", {}).get("running"))
+        if result.get("grain"):
+            payload = json.dumps({"active-level": level, "services": result,
+                                  "readiness": "ready" if all(result.values()) else "degraded"}).encode()
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{values.get('AWP_GRAIN_SESSION_PORT', '9447')}/internal/deployment/observe",
+                data=payload, method="POST",
+                headers={"Authorization": f"Bearer {values.get('AWP_GRAIN_SESSION_TOKEN', '')}",
+                         "X-AWP-Owner": values.get("AWP_OWNER_IDENTITY", ""),
+                         "Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(request, timeout=3):
+                    pass
+            except Exception:
+                result["deployment-state"] = False
         print(json.dumps(result, indent=2))
         if not all(result.values()):
             raise SystemExit(1)
@@ -188,11 +244,17 @@ def main() -> None:
         parser.error("--env is required")
     env_file = args.env.resolve()
     values = load_env(env_file)
+    level = values.get("AWP_DEPLOYMENT_LEVEL", "full")
+    if level not in {"voice", "durable", "full"}:
+        raise ValueError("AWP_DEPLOYMENT_LEVEL must be voice, durable, or full")
     values.update({"AWP_DEPLOY_ENV": str(env_file), "AWP_DEPLOY_STATE": str(state)})
     if args.command == "install":
         print(install_launchagent(env_file, state, "com.awp.v2.owner-stack"))
         return
     environment = {**os.environ, **values}
+    environment["AWP_DEPLOYMENT_LEVEL"] = level
+    if level != "voice":
+        environment["WORKER_PI_EXECUTION_MODE"] = execution_mode_for_level(level)
     telemetry = RUNTIME / "products/voice-agent/packages/telemetry/src"
     environment["PYTHONPATH"] = os.pathsep.join([str(BROKER / "src"), str(telemetry),
         environment.get("PYTHONPATH", "")])

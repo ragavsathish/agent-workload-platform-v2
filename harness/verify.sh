@@ -53,6 +53,7 @@ python3 -m py_compile "$ROOT/impl/deployment/deployment.py" \
   "$ROOT/impl/deployment/qualify_public.py" \
   "$ROOT/impl/deployment/confirm_public_report.py"
 python3 -m unittest discover -s "$ROOT/impl/deployment" -p test_deployment.py -v
+python3 -m unittest discover -s "$ROOT/impl/deployment" -p test_deployment_levels.py -v
 python3 -m unittest discover -s "$ROOT/impl/deployment" -p test_public_candidate.py -v
 python3 -m unittest discover -s "$ROOT/impl/deployment" -p test_artifact_delivery.py -v
 python3 -m unittest discover -s "$ROOT/impl/deployment" -p test_task_worker_delivery.py -v

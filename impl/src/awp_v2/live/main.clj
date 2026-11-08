@@ -1,6 +1,7 @@
 (ns awp-v2.live.main
   (:require [awp-v2.live.http :as http]
             [awp-v2.incident.api :as incident]
+            [awp-v2.deployment.api :as deployment]
             [awp-v2.incident.adapter :as incident-adapter]
             [awp-v2.knowledge.api :as knowledge]
             [awp-v2.knowledge.gateway-adapter :as knowledge-gateway]
@@ -26,6 +27,7 @@
   (let [workspaces (->> (str/split (or (System/getenv "AWP_ELIGIBLE_WORKSPACES") "") #",")
                         (map str/trim) (remove str/blank?) set)
         task-system (tasking/open-system {:storage-dir (required "AWP_TASKING_STORAGE_DIR")
+                                          :deployment-level (or (System/getenv "AWP_DEPLOYMENT_LEVEL") "full")
                                           :eligible-workspaces workspaces
                                           :task-workspace-dir (or (System/getenv "AWP_TASK_WORKSPACE_DIR")
                                                                   (str (required "AWP_TASKING_STORAGE_DIR") "/workspaces"))
@@ -47,6 +49,17 @@
                            :rules (when incident-source
                                     (incident-adapter/load-rules (required "AWP_INCIDENT_RULES_FILE")))
                            :metric-fetch! (:metric-fetch! incident-source)})
+        deployment-system (deployment/open-system
+                            {:storage-dir (or (System/getenv "AWP_DEPLOYMENT_STORAGE_DIR")
+                                              (str (required "AWP_SESSION_STORAGE_DIR") "-deployment"))
+                             :owner (or (System/getenv "AWP_OWNER_IDENTITY") "local-owner")})
+        deployment-level (or (System/getenv "AWP_DEPLOYMENT_LEVEL") "full")
+        _ (when-not (contains? #{"voice" "durable" "full"} deployment-level)
+            (throw (ex-info "AWP_DEPLOYMENT_LEVEL must be voice, durable, or full" {})))
+        _ (deployment/select! deployment-system
+                              (or (System/getenv "AWP_DEPLOYMENT_SELECTION_ID")
+                                  (str "configured:" deployment-level)) deployment-level)
+        _ (deployment/observe! deployment-system deployment-level {} "starting")
         owned-task? (fn [owner task-id]
                       (try
                         (let [task (lifecycle/task-state task-system (parse-uuid task-id))]
@@ -100,6 +113,7 @@
         server (http/start! {:system system
                              :task-system task-system
                              :incident-system incident-system
+                             :deployment-system deployment-system
                              :knowledge-system knowledge-system
                              :song-system song-system
                              :token (required "AWP_GRAIN_SESSION_TOKEN")
@@ -116,6 +130,7 @@
                  (http/stop! server)
                  (session/close-system! system)
                  (incident/close-system! incident-system)
+                 (deployment/close-system! deployment-system)
                  (knowledge/close-system! knowledge-system)
                  (song/close-system! song-system)
                  (tasking/close-system! task-system))))

@@ -18,7 +18,7 @@
   (:import [java.nio.file Files]
            [java.time OffsetDateTime]))
 
-(defn open-system [{:keys [eligible-workspaces storage-dir tenant-id workspace-roots task-workspace-dir]}]
+(defn open-system [{:keys [eligible-workspaces storage-dir tenant-id workspace-roots task-workspace-dir deployment-level]}]
   (validator/verify-or-throw!)
   (let [owned? (nil? storage-dir)
         dir (if storage-dir
@@ -37,7 +37,8 @@
                     (java.util.UUID/nameUUIDFromBytes
                       (.getBytes (.getCanonicalPath dir) "UTF-8")))
      :eligible-workspaces eligible-workspaces
-     :workspace-roots workspace-roots}))
+     :workspace-roots workspace-roots
+     :deployment-level (or deployment-level "full")}))
 
 (defn close-system! [{:keys [event-store cache cache-dir owned-dir? closed?]}]
   (when (compare-and-set! closed? false true)
@@ -52,6 +53,8 @@
   (assoc system :actor-id actor-id))
 
 (defn submit! [system actor-id request]
+  (if (= "voice" (:deployment-level system))
+    {::anom/category ::anom/unavailable ::anom/message "durable task execution unavailable at voice level"}
   (loop [attempt 0]
     (let [command (assoc request
                          :command/name :tasking/submit-task
@@ -63,7 +66,7 @@
                (= "CAS failed" (::anom/message result))
                (< attempt 4))
         (do (rmp/l1-clear!) (recur (inc attempt)))
-        (if-let [value (:command/result result)] value result)))))
+        (if-let [value (:command/result result)] value result))))))
 
 (defn task [system actor-id request-id]
   (let [result (qp/process-query

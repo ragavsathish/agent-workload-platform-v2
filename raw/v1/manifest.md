@@ -194,3 +194,11 @@ entry version at the planning time. It contains no private owner or tailnet
 identifier. It is an operational observation, not a byte copy from the pinned
 v1 source tree. The prior public deployment source and rules remain pinned in
 the earlier manifest sections.
+
+## Current worktree delta captured 2026-11-08
+
+The [deployment-level source capture](deployment-levels-worktree.md) records
+the uncommitted v1 deployment selection changes separately from the pinned
+baseline commit above. Its exact binary patch and digest are preserved in
+`deployment-levels-worktree.patch`; it is not represented as part of the pinned
+commit.

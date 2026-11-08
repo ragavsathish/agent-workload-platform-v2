@@ -4,7 +4,8 @@
             [awp-v2.tasking.api]
             [awp-v2.session.api]
             [awp-v2.knowledge.api]
-            [awp-v2.song.api]))
+            [awp-v2.song.api]
+            [awp-v2.deployment.api]))
 
 (defn -main [& _]
   (let [verdict (tools/validate-spec-composition

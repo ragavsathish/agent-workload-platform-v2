@@ -1,0 +1,213 @@
+-- allium: 3
+-- Cites docs/plan/16-durable-song-owner/spec.feature,
+-- docs/wiki/durable-song-journey.md, and raw/v1/song-workspace-effect.py.
+
+entity DurableSong {
+    generation_id: String
+    request_id: String
+    owner: String
+    input_digest: String
+    lyric_task_id: String
+    lyric_state: pending | claimed | completed | failed | uncertain | cancelled
+    lyric_result_digest: String
+    manifest_digest: String
+    review_state: absent | presented | approved | rejected
+    decision_id: String
+    render_task_id: String
+    render_state: absent | requested | completed | failed
+    audio_digest: String
+    status: String
+}
+
+entity SongJourneyEvidence {
+    generation_id: String
+    owner: String
+    lyric_task_id: String
+    lyric_result_digest: String
+    manifest_digest: String
+    decision_id: String
+    render_task_id: String
+    audio_digest: String
+    outcome: unqualified | exercised
+}
+
+rule AcceptDurableSong {
+    when: DurableSongRequested(generation_id, request_id, owner, input_digest, lyric_task_id)
+    requires: not exists DurableSong{request_id: request_id, owner: owner}
+    ensures: DurableSong.created(generation_id: generation_id, request_id: request_id, owner: owner, input_digest: input_digest, lyric_task_id: lyric_task_id, lyric_state: pending, lyric_result_digest: "", manifest_digest: "", review_state: absent, decision_id: "", render_task_id: "", render_state: absent, audio_digest: "", status: "writing_lyrics")
+}
+
+rule ClaimLyrics {
+    when: LyricTaskClaimed(generation_id, owner, lyric_task_id)
+    let song = DurableSong{generation_id: generation_id}
+    requires: exists song
+    requires: song.owner = owner
+    requires: song.lyric_task_id = lyric_task_id
+    requires: song.lyric_state = pending
+    ensures: song.lyric_state = claimed
+}
+
+rule CompleteLyrics {
+    when: ValidLyricResultObserved(generation_id, owner, lyric_task_id, lyric_result_digest, manifest_digest)
+    let song = DurableSong{generation_id: generation_id}
+    requires: exists song
+    requires: song.owner = owner
+    requires: song.lyric_task_id = lyric_task_id
+    requires: song.lyric_state = claimed
+    requires: lyric_result_digest != ""
+    requires: manifest_digest != ""
+    ensures: song.lyric_state = completed
+    ensures: song.lyric_result_digest = lyric_result_digest
+    ensures: song.manifest_digest = manifest_digest
+    ensures: song.status = "lyrics_ready"
+}
+
+rule PresentLyrics {
+    when: ManifestPresented(generation_id, owner, manifest_digest)
+    let song = DurableSong{generation_id: generation_id}
+    requires: exists song
+    requires: song.owner = owner
+    requires: song.status = "lyrics_ready"
+    requires: song.manifest_digest = manifest_digest
+    ensures: song.review_state = presented
+}
+
+rule ApprovePresentedLyrics {
+    when: ManifestApproved(generation_id, owner, manifest_digest, decision_id)
+    let song = DurableSong{generation_id: generation_id}
+    requires: exists song
+    requires: song.owner = owner
+    requires: song.status = "lyrics_ready"
+    requires: song.review_state = presented
+    requires: song.manifest_digest = manifest_digest
+    requires: decision_id != ""
+    ensures: song.review_state = approved
+    ensures: song.decision_id = decision_id
+}
+
+rule RejectPresentedLyrics {
+    when: ManifestRejected(generation_id, owner, manifest_digest, decision_id)
+    let song = DurableSong{generation_id: generation_id}
+    requires: exists song
+    requires: song.owner = owner
+    requires: song.status = "lyrics_ready"
+    requires: song.review_state = presented
+    requires: song.manifest_digest = manifest_digest
+    requires: decision_id != ""
+    ensures: song.review_state = rejected
+    ensures: song.decision_id = decision_id
+}
+
+rule RequestApprovedRender {
+    when: ApprovedSongRenderRequested(generation_id, owner, manifest_digest, render_task_id)
+    let song = DurableSong{generation_id: generation_id}
+    requires: exists song
+    requires: song.owner = owner
+    requires: song.status = "lyrics_ready"
+    requires: song.review_state = approved
+    requires: song.manifest_digest = manifest_digest
+    requires: song.render_state = absent
+    ensures: song.render_task_id = render_task_id
+    ensures: song.render_state = requested
+    ensures: song.status = "generating_music"
+}
+
+rule StoreApprovedAudio {
+    when: ApprovedSongAudioStored(generation_id, owner, render_task_id, audio_digest)
+    let song = DurableSong{generation_id: generation_id}
+    requires: exists song
+    requires: song.owner = owner
+    requires: song.render_task_id = render_task_id
+    requires: song.render_state = requested
+    requires: song.review_state = approved
+    requires: song.status = "generating_music"
+    requires: audio_digest != ""
+    ensures: song.audio_digest = audio_digest
+    ensures: song.render_state = completed
+    ensures: song.status = "complete"
+}
+
+rule FailDurableLyrics {
+    when: LyricTaskFailed(generation_id, owner, lyric_task_id)
+    let song = DurableSong{generation_id: generation_id}
+    requires: exists song
+    requires: song.owner = owner
+    requires: song.lyric_task_id = lyric_task_id
+    requires: song.status = "writing_lyrics"
+    ensures: song.lyric_state = failed
+    ensures: song.status = "failed"
+}
+
+rule FailDurableRender {
+    when: SongRenderFailed(generation_id, owner, render_task_id)
+    let song = DurableSong{generation_id: generation_id}
+    requires: exists song
+    requires: song.owner = owner
+    requires: song.render_task_id = render_task_id
+    requires: song.status = "generating_music"
+    ensures: song.render_state = failed
+    ensures: song.status = "failed"
+}
+
+rule CancelDurableSong {
+    when: DurableSongCancelled(generation_id, owner)
+    let song = DurableSong{generation_id: generation_id}
+    requires: exists song
+    requires: song.owner = owner
+    requires: song.status = "writing_lyrics" or song.status = "lyrics_ready" or song.status = "generating_music"
+    ensures: song.status = "cancelled"
+    ensures: song.audio_digest = ""
+}
+
+rule QualifySongJourney {
+    when: SongJourneyIndependentlyObserved(generation_id, owner, lyric_task_id, lyric_result_digest, manifest_digest, decision_id, render_task_id, audio_digest)
+    let song = DurableSong{generation_id: generation_id}
+    requires: exists song
+    requires: song.owner = owner
+    requires: song.lyric_task_id = lyric_task_id
+    requires: song.lyric_state = completed
+    requires: song.lyric_result_digest = lyric_result_digest
+    requires: song.manifest_digest = manifest_digest
+    requires: song.review_state = approved
+    requires: song.decision_id = decision_id
+    requires: song.render_task_id = render_task_id
+    requires: song.render_state = completed
+    requires: song.audio_digest = audio_digest
+    requires: song.status = "complete"
+    requires: lyric_result_digest != ""
+    requires: decision_id != ""
+    ensures: SongJourneyEvidence.created(generation_id: generation_id, owner: owner, lyric_task_id: lyric_task_id, lyric_result_digest: lyric_result_digest, manifest_digest: manifest_digest, decision_id: decision_id, render_task_id: render_task_id, audio_digest: audio_digest, outcome: exercised)
+}
+
+invariant CompletedSongWasApproved {
+    for song in DurableSongs:
+        song.status = "complete" implies song.review_state = approved
+}
+
+invariant QualifiedJourneyHasActualTaskResult {
+    for journey in SongJourneyEvidences:
+        journey.outcome = exercised implies journey.lyric_result_digest != ""
+}
+
+surface DurableSongOwner {
+    facing song: DurableSong
+    exposes:
+        song.generation_id
+        song.status
+        song.manifest_digest
+        song.review_state
+        song.audio_digest
+    provides:
+        DurableSongRequested(generation_id, request_id, owner, input_digest, lyric_task_id)
+        LyricTaskClaimed(generation_id, owner, lyric_task_id)
+        ValidLyricResultObserved(generation_id, owner, lyric_task_id, lyric_result_digest, manifest_digest)
+        ManifestPresented(generation_id, owner, manifest_digest)
+        ManifestApproved(generation_id, owner, manifest_digest, decision_id)
+        ManifestRejected(generation_id, owner, manifest_digest, decision_id)
+        ApprovedSongRenderRequested(generation_id, owner, manifest_digest, render_task_id)
+        ApprovedSongAudioStored(generation_id, owner, render_task_id, audio_digest)
+        LyricTaskFailed(generation_id, owner, lyric_task_id)
+        SongRenderFailed(generation_id, owner, render_task_id)
+        DurableSongCancelled(generation_id, owner)
+        SongJourneyIndependentlyObserved(generation_id, owner, lyric_task_id, lyric_result_digest, manifest_digest, decision_id, render_task_id, audio_digest)
+}

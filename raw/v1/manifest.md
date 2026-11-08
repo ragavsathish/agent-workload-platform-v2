@@ -91,6 +91,18 @@ All snapshots below are byte copies from the same pinned v1 commit named above.
 | [Personal song: song-prompt.md](song-prompt.md) | `products/voice-agent/apps/pi-agent/voice-agent/prompts/music/APPEND_SYSTEM.md` | `02d973ccf9f20c62e190af35dd5422e4cb1b3e66ff1722bd5d65c87aef302953` |
 | [Personal song: song-gateway.py](song-gateway.py) | `products/voice-agent/apps/gateway/src/voice_gateway/main.py` | `e1938eb224cd9d37a69f107ea82d950f6accfd6e3249a7d860f711e8f510eb93` |
 
+## Slice 16 durable lyric owner evidence
+
+Both snapshots below are byte copies from the same pinned v1 commit. They
+complete the already pinned song service, lyric workspace effect, durable
+owner, and manifest validator evidence for the owner submission and result
+protocol.
+
+| Snapshot | Original path | SHA-256 |
+| --- | --- | --- |
+| [Song owner server](song-owner-server.ts) | `platform/agent-execution/pi-durable-task/owner-server.ts` | `1028e03d996894aa35bdb26d8a37bda21044bb0fe4ab6d0eb1652a616ed683fd` |
+| [Song response parser](song-pi-response.py) | `products/voice-agent/packages/tasking/src/voice_agent/tasking/application/pi_response.py` | `69d6ff3567f3d82659f482535c665e220b57fe851cf253fd84cba7303e5b2ff8` |
+
 ## Slice 11 evidence
 
 All snapshots below are byte copies from the same pinned v1 commit named above.

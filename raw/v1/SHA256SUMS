@@ -75,3 +75,5 @@ c475eba44d3e11b7a73dec7d3cc63429aaadb0b3b1f7af2b1b4be3e98d50edf1  raw/v1/task-wo
 1500d8e584945c82f4af27f05c6c62ae9c8094f5b8ba86da48ade6105d6ac24b  raw/v1/task-gateway-test.py
 e57c51cf3f136c240c58d641990849fadd16ff6ad59d0d9f1f4e44cce1251bb2  raw/v1/task-image-ensure.py
 9e9a36d0e3f3dc3a0d196385ae8b55fb7a5d9349394478ae499d8f177ec5753c  raw/v1/task-execution-images.py
+1028e03d996894aa35bdb26d8a37bda21044bb0fe4ab6d0eb1652a616ed683fd  raw/v1/song-owner-server.ts
+69d6ff3567f3d82659f482535c665e220b57fe851cf253fd84cba7303e5b2ff8  raw/v1/song-pi-response.py

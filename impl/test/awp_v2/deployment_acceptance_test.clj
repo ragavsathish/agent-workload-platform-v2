@@ -80,3 +80,47 @@
       (rmp/l1-clear!)
       (is (= :degraded (:readiness (deployment/status sys))))
       (finally (deployment/close-system! sys)))))
+
+(deftest deployment-readiness-001-http-decoded-service-keys-persist-ready
+  (let [dir (.toString (java.nio.file.Files/createTempDirectory
+                        "awp-deployment-readiness-"
+                        (make-array java.nio.file.attribute.FileAttribute 0)))
+        sys (deployment/open-system {:storage-dir dir :owner "owner@example.test"})]
+    (try
+      (deployment/select! sys "readiness-http" "full")
+      ;; The live Grain HTTP boundary parses every nested JSON key as a keyword.
+      (deployment/observe! sys "full" {:grain true :pi true :broker true
+                                        :gateway true :scheduler true} "ready")
+      (rmp/l1-clear!)
+      (is (= :ready (:readiness (deployment/status sys))))
+      (deployment/close-system! sys)
+      (rmp/l1-clear!)
+      (let [reopened (deployment/open-system {:storage-dir dir :owner "owner@example.test"})]
+        (try
+          (is (= :ready (:readiness (deployment/status reopened))))
+          (finally (deployment/close-system! reopened))))
+      (finally (deployment/close-system! sys)))))
+
+(deftest deployment-readiness-002-ambiguous-service-key-refuses-ready
+  (let [sys (deployment/open-system {})]
+    (try
+      (deployment/select! sys "readiness-ambiguous" "full")
+      (deployment/observe! sys "full" {"grain" false :grain true
+                                        :pi true :broker true :gateway true
+                                        :scheduler true} "ready")
+      (rmp/l1-clear!)
+      (is (= :degraded (:readiness (deployment/status sys))))
+      (finally (deployment/close-system! sys)))))
+
+(deftest deployment-readiness-003-lifecycle-states-remain-explicit
+  (let [sys (deployment/open-system {})
+        services {:grain true :pi true :broker true :gateway true :scheduler true}]
+    (try
+      (deployment/select! sys "readiness-lifecycle" "full")
+      (deployment/observe! sys "full" services "starting")
+      (rmp/l1-clear!)
+      (is (= :starting (:readiness (deployment/status sys))))
+      (deployment/observe! sys "full" services "not_ready")
+      (rmp/l1-clear!)
+      (is (= :not_ready (:readiness (deployment/status sys))))
+      (finally (deployment/close-system! sys)))))

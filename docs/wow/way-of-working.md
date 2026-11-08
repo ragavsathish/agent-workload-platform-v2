@@ -14,4 +14,4 @@ from the scenarios while the implementation is red. An independent gate checks
 the result. A later generation can remove `impl/` and rebuild from the durable
 documents through a clean-room fence.
 
-The current planned slice is [owner typed-turn reload recovery](../plan/36-owner-turn-reload-recovery/plan.md).
+The current planned slice is [deployment readiness projection](../plan/37-deployment-readiness-projection/plan.md).

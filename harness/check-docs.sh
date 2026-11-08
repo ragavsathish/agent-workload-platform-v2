@@ -159,6 +159,13 @@ for id in $(rg -o '@deployment-[0-9]+' docs/plan/23-deployment-levels/spec.featu
   fi
 done
 
+for id in $(rg -o '@deployment-readiness-[0-9]+' docs/plan/37-deployment-readiness-projection/spec.feature | tr -d '@'); do
+  if ! rg -q "$id" impl/test/awp_v2/deployment_acceptance_test.clj; then
+    echo "Acceptance scenario $id has no named deployment test" >&2
+    exit 1
+  fi
+done
+
 for id in $(rg -o '@owner-client-[0-9]+' docs/plan/24-owner-client/spec.feature | tr -d '@'); do
   test_id="${id//-/_}"
   if ! rg -q "$id|$test_id" \

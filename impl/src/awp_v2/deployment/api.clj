@@ -46,6 +46,18 @@
                (contains? #{"voice" "durable" "full"} level))
     {:error :invalid-level}
     (command! sys :select {:selection-id selection-id :level level})))
+(defn- service-key [key]
+  (cond
+    (string? key) key
+    (keyword? key) (name key)
+    :else nil))
+(defn- healthy-service? [services service]
+  (let [matches (keep (fn [[key value]]
+                        (when (= service (service-key key)) value))
+                      services)]
+    ;; Duplicate spellings such as "grain" and :grain make the observation
+    ;; ambiguous; fail closed even when one of the values is true.
+    (and (= 1 (count matches)) (true? (first matches)))))
 (declare status)
 (defn observe! [sys active-level services readiness]
   (if-not (and (contains? #{"voice" "durable" "full"} active-level)
@@ -57,7 +69,7 @@
                      "voice" #{"grain" "pi" "broker" "gateway"}
                      "durable" #{"grain" "pi" "broker" "gateway" "scheduler"}
                      "full" #{"grain" "pi" "broker" "gateway" "scheduler"})
-          healthy? (every? #(true? (get services %)) required)
+          healthy? (every? #(healthy-service? services %) required)
           observed (cond
                      (= "starting" readiness) :starting
                      (= "not_ready" readiness) :not_ready

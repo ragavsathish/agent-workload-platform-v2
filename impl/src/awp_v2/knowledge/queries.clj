@@ -41,6 +41,13 @@
                                       (= :accepted (get-in s [:taxonomy-proposals (:left-id %) :status]))
                                       (= :accepted (get-in s [:taxonomy-proposals (:right-id %) :status]))))
                         (sort-by :relation-id) vec)}))
+(defquery :knowledge taxonomy-relation-item {:grain.event-model/reads #{:knowledge/state}} [ctx]
+  (if-let [value (get-in (state ctx) [:taxonomy-relations (get-in ctx [:query :relation-id])])]
+    {:query/result value} (missing)))
+(defquery :knowledge taxonomy-relation-proposals {:grain.event-model/reads #{:knowledge/state}} [ctx]
+  {:query/result (->> (:taxonomy-relations (state ctx)) vals (sort-by :relation-id) vec)})
+(defquery :knowledge taxonomy-relation-outcomes {:grain.event-model/reads #{:knowledge/state}} [ctx]
+  {:query/result (->> (:taxonomy-relation-attempts (state ctx)) vals (sort-by :result-id) vec)})
 (defquery :knowledge taxonomy-outcomes {:grain.event-model/reads #{:knowledge/state}} [ctx]
   {:query/result (->> (:taxonomy-outcomes (state ctx)) vals (sort-by :result-id) vec)})
 (defquery :knowledge quality-cases {:grain.event-model/reads #{:knowledge/state}} [ctx]

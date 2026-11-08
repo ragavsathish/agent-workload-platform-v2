@@ -83,6 +83,12 @@
 (defn taxonomy-proposals [system actor] (read! system actor :taxonomy-proposals {}))
 (defn taxonomy-current [system actor] (read! system actor :taxonomy-current {}))
 (defn taxonomy-relations [system actor] (read! system actor :taxonomy-relations {}))
+(defn taxonomy-relation-item [system actor relation-id]
+  (read! system actor :taxonomy-relation-item {:relation-id relation-id}))
+(defn taxonomy-relation-proposals [system actor]
+  (read! system actor :taxonomy-relation-proposals {}))
+(defn taxonomy-relation-outcomes [system actor]
+  (read! system actor :taxonomy-relation-outcomes {}))
 (defn taxonomy-outcomes [system actor] (read! system actor :taxonomy-outcomes {}))
 (defn quality-cases [system actor] (read! system actor :quality-cases {}))
 (defn quality-run [system actor run-id] (read! system actor :quality-run-status {:run-id run-id}))
@@ -170,11 +176,33 @@
              :digest (digest [result-id source-id status model-version prompt-version])})
     {:error :incorrect}))
 
+(defn taxonomy-relation-attempt! [system actor {:keys [owner result-id source-id source-digest
+                                                        model-version prompt-version policy-version
+                                                        status trace-id candidates] :as data}]
+  (if (and (every? #(nonblank-bounded? % 256)
+                   [owner result-id source-id source-digest model-version prompt-version policy-version])
+           (= owner actor)
+           (#{:completed :empty :invalid :timeout :failed} status)
+           (vector? candidates) (<= (count candidates) 2)
+           (or (= :completed status) (empty? candidates))
+           (or (not= :completed status) (seq candidates))
+           (or (and (= :completed status) (nonblank-bounded? trace-id 256))
+               (and (not= :completed status)
+                    (or (nil? trace-id) (nonblank-bounded? trace-id 256))))
+           (= (set (keys data)) #{:owner :result-id :source-id :source-digest :model-version
+                                  :prompt-version :policy-version :status :trace-id :candidates}))
+    (issue! system actor :taxonomy-relation-attempt (assoc data :digest (digest data)))
+    {:error :incorrect}))
+
 (defn taxonomy-relation! [system actor {:keys [relation-id left-id right-id relation-kind source-id evidence] :as data}]
   (if (and (every? #(nonblank-bounded? % 256) [relation-id left-id right-id source-id])
            (nonblank-bounded? evidence 1000) (#{:broader :related} relation-kind))
     (issue! system actor :taxonomy-relation (select-keys data [:relation-id :left-id :right-id
-                                                               :relation-kind :source-id :evidence]))
+                                                               :relation-kind :source-id :evidence
+                                                               :result-id :source-digest :model-version
+                                                               :prompt-version :policy-version :trace-id
+                                                               :left-revision :right-revision :origin
+                                                               :replaces-id :owner]))
     {:error :incorrect}))
 
 (defn taxonomy-relation-review! [system actor relation-id action-id expected-revision decision]
@@ -184,6 +212,18 @@
     (issue! system actor :taxonomy-relation-review
             {:relation-id relation-id :action-id action-id :expected-revision expected-revision
              :decision decision :at (str (OffsetDateTime/now))})
+    {:error :incorrect}))
+
+(defn taxonomy-relation-correct!
+  [system actor relation-id action-id expected-revision replacement-id left-id right-id relation-kind evidence]
+  (if (and (every? #(nonblank-bounded? % 256)
+                   [relation-id action-id replacement-id left-id right-id])
+           (integer? expected-revision) (<= 0 expected-revision)
+           (#{:broader :related} relation-kind) (nonblank-bounded? evidence 1000))
+    (issue! system actor :taxonomy-relation-correct
+            {:relation-id relation-id :action-id action-id :expected-revision expected-revision
+             :replacement-id replacement-id :left-id left-id :right-id right-id
+             :relation-kind relation-kind :evidence evidence :at (str (OffsetDateTime/now))})
     {:error :incorrect}))
 
 (defn- valid-turn? [{:keys [source-id conversation-id message-id transcript captured-at status origin]}]

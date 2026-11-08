@@ -17,4 +17,4 @@ Cites the [slice plan](../../docs/plan/17-knowledge-quality/plan.md), [quality p
 
 **Public tailnet deployment: open.** It remains an independent external-device qualification.
 
-The bounded ORC candidate path currently proposes concepts only. Relation model quality cannot pass until a production relation proposal exists and has independently reviewed cases. The previous model configuration remains the rollback target for any future candidate run.
+The bounded ORC path now proposes concepts and relation candidates. Relation model quality still requires independently reviewed cases and a frozen production run. One synthetic ORC relation inference returned a candidate; two model calls failed safely, and live staging remains unqualified. See the [slice 19 report](grounded-relations-report.md). The previous model configuration remains the rollback target for any future candidate run.

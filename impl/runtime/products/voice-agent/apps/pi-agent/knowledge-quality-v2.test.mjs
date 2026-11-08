@@ -129,3 +129,32 @@ test("quality-009 incomplete review keeps independent gates and rollback", () =>
   const status = qualificationStatus({ readiness, score: null, migration: "open", deployment: "open", rollbackId: "incumbent" });
   assert.deepEqual(status, { modelQuality: "open", privateMigration: "open", publicDeployment: "open", rollbackId: "incumbent" });
 });
+
+test("relation-011 reviewed endpoint pairs score direction, kind, and unsupported meaning", () => {
+  const text = "Event modeling is a kind of software design.";
+  const endpoints = [{ id: "event", label: "Event modeling", evidence: "Event modeling" },
+    { id: "design", label: "software design", evidence: "software design" }];
+  const item = caseOf({ branch: "relation", sourceText: text, endpointConcepts: endpoints,
+    expected: [{ leftId: "event", rightId: "design", kind: "broader", evidence: text }] });
+  const score = scoreBranches([item], [observation(item, [
+    { leftId: "design", rightId: "event", kind: "broader", evidence: text, published: false },
+    { leftId: "event", rightId: "design", kind: "related", evidence: text, published: false },
+  ])], policy).branches.relation;
+  assert.equal(score.wrongDirection, 1);
+  assert.equal(score.wrongKind, 1);
+  assert.equal(score.unsupportedMeaning, 2);
+  assert.equal(score.exactEvidenceValidity, 1);
+  assert.equal(score.wrongPublishedRelations, 0);
+  assert.equal(score.misses, 1);
+  assert.equal(assessReadiness(corpus({ ...item, endpointConcepts: [] }), policy).status, "open");
+});
+
+test("relation-012 protocol success without independent corpus remains open", () => {
+  const text = "Event modeling is a kind of software design.";
+  const item = caseOf({ branch: "relation", sourceText: text,
+    endpointConcepts: [{ id: "event", label: "Event modeling", evidence: "Event modeling" },
+      { id: "design", label: "software design", evidence: "software design" }],
+    expected: [{ leftId: "event", rightId: "design", kind: "broader", evidence: text }],
+    annotationStatus: "pending", reviews: [] });
+  assert.ok(assessReadiness(corpus(item), policy).reasons.includes("unreviewed-cases"));
+});

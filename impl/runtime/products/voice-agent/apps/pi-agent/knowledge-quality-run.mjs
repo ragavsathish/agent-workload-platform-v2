@@ -73,9 +73,9 @@ export async function observeNative(item, run) {
 }
 
 export async function observeOrc(item, run) {
-  if (item.branch === "relation") return { caseId: item.id, branch: item.branch, owner: item.owner,
-    status: "unavailable", predictions: [] };
-  const request = { id: item.id, owner: item.owner, sourceText: item.sourceText, modelId: run.modelId };
+  const request = { id: item.id, owner: item.owner, sourceText: item.sourceText, modelId: run.modelId,
+    branch: item.branch, endpointConcepts: item.endpointConcepts,
+    promptId: run.promptId, policyId: run.policyId };
   const result = await child("clojure", ["-M", "-m", "awp-v2.knowledge.quality-orc-runner"],
     JSON.stringify(request), 180_000, implementationDir);
   const marker = result.stdout.lastIndexOf("AWP_QUALITY_RESULT:");

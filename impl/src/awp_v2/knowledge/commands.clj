@@ -6,6 +6,11 @@
             [awp-v2.knowledge.schemas]
             [cognitect.anomalies :as anom]))
 
+(defn- digest [value]
+  (.formatHex (java.util.HexFormat/of)
+              (.digest (java.security.MessageDigest/getInstance "SHA-256")
+                       (.getBytes (pr-str value) "UTF-8"))))
+
 (defn- refuse [kind]
   {::anom/category (case kind :not-found ::anom/not-found :incorrect ::anom/incorrect ::anom/conflict)
    ::anom/message (name kind)})
@@ -43,6 +48,7 @@
         relation (get-in state [:taxonomy-relations (:relation-id data)])
         prior-taxonomy-action (get-in state [:taxonomy-actions (:action-id data)])
         prior-result (get-in state [:taxonomy-result-ids (:result-id data)])
+        relation-attempt (get-in state [:taxonomy-relation-attempts (:result-id data)])
         result
         (cond
           (and (= op :quality-review)
@@ -176,19 +182,88 @@
             prior-result (if (= prior-result (:digest data))
                            {:value {:status :reused :result-id (:result-id data)}} (refuse :conflict))
             :else {:fact data :value {:status (:status data) :result-id (:result-id data)}})
+          (= op :taxonomy-relation-attempt)
+          (cond
+            (not= owner (:owner data)) (refuse :not-found)
+            (nil? source) (refuse :not-found)
+            (not= (:source-digest data) (digest (:transcript source))) (refuse :conflict)
+            relation-attempt (if (= (:digest relation-attempt) (:digest data))
+                               {:value {:status :reused :result-id (:result-id data)}}
+                               (refuse :conflict))
+            (and (= :completed (:status data))
+                 (or (not= (count (:candidates data))
+                           (count (set (map :relation-id (:candidates data))))))
+                     (some (fn [candidate]
+                             (let [left (get-in state [:taxonomy-proposals (:left-id candidate)])
+                                   right (get-in state [:taxonomy-proposals (:right-id candidate)])]
+                               (or (not (#{:broader :related} (:relation-kind candidate)))
+                                   (not (string? (:relation-id candidate)))
+                                   (nil? left) (nil? right)
+                                   (not= :accepted (:status left))
+                                   (not= :accepted (:status right))
+                                   (= (:left-id candidate) (:right-id candidate))
+                                   (not= (:revision left) (:left-revision candidate))
+                                   (not= (:revision right) (:right-revision candidate))
+                                   (not (and (string? (:evidence candidate))
+                                             (.contains ^String (:transcript source)
+                                                        ^String (:evidence candidate))))))
+                           (:candidates data)))) (refuse :incorrect)
+            :else {:fact data :value {:status (:status data) :result-id (:result-id data)}})
           (= op :taxonomy-relation)
           (let [left (get-in state [:taxonomy-proposals (:left-id data)])
-                right (get-in state [:taxonomy-proposals (:right-id data)])]
+                right (get-in state [:taxonomy-proposals (:right-id data)])
+                attempt (get-in state [:taxonomy-relation-attempts (:result-id data)])
+                candidate (some #(when (= (:relation-id %) (:relation-id data)) %)
+                                (:candidates attempt))]
             (cond
               (nil? source) (refuse :not-found)
+              (and (:owner data) (not= owner (:owner data))) (refuse :not-found)
               (or (nil? left) (nil? right)) (refuse :not-found)
               (or (not= :accepted (:status left)) (not= :accepted (:status right))) (refuse :conflict)
               (= (:left-id data) (:right-id data)) (refuse :incorrect)
+              (and (:result-id data)
+                   (or (nil? attempt) (not= :completed (:status attempt))
+                       (not= (select-keys data [:relation-id :left-id :right-id :relation-kind
+                                                :evidence :left-revision :right-revision])
+                             candidate)
+                       (not= (:source-id data) (:source-id attempt))
+                       (not= (:source-digest data) (:source-digest attempt))
+                       (not= (:model-version data) (:model-version attempt))
+                       (not= (:prompt-version data) (:prompt-version attempt))
+                       (not= (:policy-version data) (:policy-version attempt))
+                       (not= (:trace-id data) (:trace-id attempt)))) (refuse :conflict)
               (or (not (string? (:evidence data)))
                   (not (.contains ^String (:transcript source) ^String (:evidence data)))) (refuse :incorrect)
-              relation (if (= (dissoc relation :status :revision :reviews) (dissoc data :status :revision :reviews))
+              relation (if (= (dissoc relation :status :revision :reviews :corrected-by)
+                              (dissoc data :status :revision :reviews :corrected-by))
                          {:value {:status :reused :relation-id (:relation-id data)}} (refuse :conflict))
               :else {:fact data :value (assoc data :status :pending :revision 0)}))
+          (= op :taxonomy-relation-correct)
+          (let [original (get-in state [:taxonomy-relations (:relation-id data)])
+                correction-source (get-in state [:sources (:source-id original)])
+                left (get-in state [:taxonomy-proposals (:left-id data)])
+                right (get-in state [:taxonomy-proposals (:right-id data)])]
+            (cond
+              (nil? original) (refuse :not-found)
+              prior-taxonomy-action (if (= (select-keys prior-taxonomy-action
+                                                        [:relation-id :replacement-id :expected-revision
+                                                         :left-id :right-id :relation-kind :evidence])
+                                         (select-keys data [:relation-id :replacement-id :expected-revision
+                                                            :left-id :right-id :relation-kind :evidence]))
+                                      {:value (get-in state [:taxonomy-relations (:replacement-id data)])}
+                                      (refuse :conflict))
+              (not= :pending (:status original)) (refuse :conflict)
+              (not= (:revision original) (:expected-revision data)) (refuse :conflict)
+              (get-in state [:taxonomy-relations (:replacement-id data)]) (refuse :conflict)
+              (or (nil? left) (nil? right)
+                  (not= :accepted (:status left)) (not= :accepted (:status right))) (refuse :conflict)
+              (= (:left-id data) (:right-id data)) (refuse :incorrect)
+              (or (nil? correction-source)
+                  (not (.contains ^String (:transcript correction-source)
+                                  ^String (:evidence data)))) (refuse :incorrect)
+              :else {:fact (assoc data :decision :rejected :owner owner)
+                     :value {:relation-id (:replacement-id data) :status :pending
+                             :replaces-id (:relation-id data) :revision 0}}))
           (= op :taxonomy-relation-review)
           (cond
             (nil? relation) (refuse :not-found)
@@ -203,6 +278,16 @@
                              [(:left-id relation) (:right-id relation)])) (refuse :conflict)
             (and (= :accepted (:decision data)) (= :broader (:relation-kind relation))
                  (broader-reaches? state (:right-id relation) (:left-id relation))) (refuse :conflict)
+            (and (= :accepted (:decision data))
+                 (some #(and (not= (:relation-id %) (:relation-id relation))
+                             (= :accepted (:status %))
+                             (= (:relation-kind %) (:relation-kind relation))
+                             (or (and (= (:left-id %) (:left-id relation))
+                                      (= (:right-id %) (:right-id relation)))
+                                 (and (= :related (:relation-kind relation))
+                                      (= (:left-id %) (:right-id relation))
+                                      (= (:right-id %) (:left-id relation)))))
+                       (vals (:taxonomy-relations state)))) (refuse :conflict)
             :else {:fact data :value (assoc relation :status (:decision data) :revision (inc (:revision relation)))})
           (= op :daily-request)
           (if account
@@ -280,6 +365,8 @@
 (defcommand :knowledge taxonomy-model-outcome {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :taxonomy-model-outcome ctx))
 (defcommand :knowledge taxonomy-relation {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :taxonomy-relation ctx))
 (defcommand :knowledge taxonomy-relation-review {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :taxonomy-relation-review ctx))
+(defcommand :knowledge taxonomy-relation-attempt {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :taxonomy-relation-attempt ctx))
+(defcommand :knowledge taxonomy-relation-correct {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :taxonomy-relation-correct ctx))
 (defcommand :knowledge quality-case {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :quality-case ctx))
 (defcommand :knowledge quality-review {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :quality-review ctx))
 (defcommand :knowledge quality-run {:grain.event-model/reads #{:knowledge/state} :grain.event-model/produces #{:knowledge/fact}} [ctx] (decide :quality-run ctx))

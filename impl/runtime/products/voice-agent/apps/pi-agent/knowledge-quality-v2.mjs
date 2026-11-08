@@ -35,9 +35,21 @@ function keyOf(item, branch) {
 function validExpected(item, sourceText, branch) {
   if (!item || typeof item !== "object" || !nonempty(item.kind)) return false;
   if (branch === "assertion" && !assertionKinds.has(item.kind)) return false;
-  if (branch === "relation" && (!nonempty(item.leftId) || !nonempty(item.rightId))) return false;
+  if (branch === "relation" && (!nonempty(item.leftId) || !nonempty(item.rightId)
+      || !["broader", "related"].includes(item.kind))) return false;
   if (item.kind === "none") return branch === "assertion" && item.evidence === "";
   return nonempty(item.evidence) && sourceText.includes(item.evidence);
+}
+
+function validRelationEndpoints(item) {
+  if (item.branch !== "relation") return true;
+  const endpoints = item.endpointConcepts;
+  return Array.isArray(endpoints) && endpoints.length === 2
+    && new Set(endpoints.map((entry) => entry?.id)).size === 2
+    && endpoints.every((entry) => nonempty(entry?.id) && nonempty(entry?.label)
+      && nonempty(entry?.evidence) && item.sourceText.includes(entry.evidence))
+    && (item.expected ?? []).every((entry) => endpoints.some((endpoint) => endpoint.id === entry.leftId)
+      && endpoints.some((endpoint) => endpoint.id === entry.rightId));
 }
 
 export function assessReadiness(manifest, policy) {
@@ -74,7 +86,8 @@ export function assessReadiness(manifest, policy) {
     }
     if (!BRANCHES.includes(branch) || !SPLITS.has(item?.split) || !nonempty(item?.sourceText)
         || !nonempty(item?.owner) || !nonempty(item?.sourceId) || !nonempty(item?.semanticFamilyId)
-        || !Array.isArray(item?.expected) || !item.expected.every((entry) => validExpected(entry, item.sourceText, branch))) {
+        || !Array.isArray(item?.expected) || !item.expected.every((entry) => validExpected(entry, item.sourceText, branch))
+        || !validRelationEndpoints(item)) {
       code(reasons, "invalid-case"); continue;
     }
     const priorFamily = familySplits.get(item.semanticFamilyId);
@@ -135,7 +148,8 @@ function branchScore(branch) {
   return { cases: 0, expected: 0, predicted: 0, truePositives: 0, falseAdditions: 0,
     misses: 0, excerptErrors: 0, unsupportedSkillProfile: 0, wrongPublishedRelations: 0,
     crossOwnerDisclosures: 0, runtimeErrors: 0, confusion: {}, classCounts: {},
-    validExcerpts: 0, excerptChecks: 0 };
+    validExcerpts: 0, excerptChecks: 0, wrongDirection: 0, wrongKind: 0,
+    unsupportedMeaning: 0 };
 }
 
 function addConfusion(report, expected, predicted) {
@@ -173,6 +187,16 @@ export function scoreBranches(cases, observations, policy) {
         score.falseAdditions += 1;
         const sameEvidence = expected.find((candidate) => candidate.evidence === prediction.evidence && candidate.kind !== "none");
         addConfusion(score, sameEvidence?.kind ?? "none", prediction.kind);
+        if (item.branch === "relation") {
+          if (expected.some((candidate) => candidate.leftId === prediction.rightId
+              && candidate.rightId === prediction.leftId && candidate.kind === prediction.kind)) score.wrongDirection += 1;
+          else if (expected.some((candidate) => candidate.leftId === prediction.leftId
+              && candidate.rightId === prediction.rightId && candidate.kind !== prediction.kind)) score.wrongKind += 1;
+          if (nonempty(prediction.evidence) && item.sourceText.includes(prediction.evidence)
+              && !expected.some((candidate) => keyOf(candidate, "relation") === keyOf(prediction, "relation"))) {
+            score.unsupportedMeaning += 1;
+          }
+        }
         if (["skill_evidence", "profile_update"].includes(prediction.kind) && !expected.some((candidate) => candidate.kind === prediction.kind)) score.unsupportedSkillProfile += 1;
         if (item.branch === "relation" && prediction.published === true) score.wrongPublishedRelations += 1;
         rows.push({ caseId: item.id, status: "false_addition", prediction });

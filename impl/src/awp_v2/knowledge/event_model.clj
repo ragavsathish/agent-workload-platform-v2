@@ -23,6 +23,8 @@
                              :taxonomy-model-outcome "RecordModelOutcome"
                              :taxonomy-relation "ProposeRelation"
                              :taxonomy-relation-review "DecideRelation"
+                             :taxonomy-relation-attempt "RecordRelationAttempt"
+                             :taxonomy-relation-correct "CorrectRelationProposal"
                              :quality-case "RegisterReviewCase"
                              :quality-review "ApproveReviewCase"
                              :quality-run "StartQualityRun"
@@ -35,6 +37,8 @@
                 :grain/allium [{:spec (cond
                                        (#{:legacy-snapshot :legacy-resource :legacy-switch :legacy-rollback} op)
                                        "specs/knowledge-extraction-migration.allium"
+                                       (#{:taxonomy-relation-attempt :taxonomy-relation-correct} op)
+                                       "specs/grounded-relations.allium"
                                        (#{:taxonomy-proposal :taxonomy-review :taxonomy-map :taxonomy-model-outcome
                                           :taxonomy-relation :taxonomy-relation-review} op)
                                        "specs/knowledge-taxonomy.allium"
@@ -56,6 +60,9 @@
                                         :taxonomy-proposals [:map [:owner :string]]
                                         :taxonomy-current [:map [:owner :string]]
                                         :taxonomy-relations [:map [:owner :string]]
+                                        :taxonomy-relation-item [:map [:owner :string] [:relation-id :string]]
+                                        :taxonomy-relation-proposals [:map [:owner :string]]
+                                        :taxonomy-relation-outcomes [:map [:owner :string]]
                                         :taxonomy-outcomes [:map [:owner :string]]
                                         :quality-cases [:map [:owner :string]]
                                         :quality-run-status [:map [:owner :string] [:run-id :string]]}]

@@ -87,6 +87,15 @@ git -C "$TARGET" gc -q --prune=now --aggressive
 [[ -f "$TARGET/specs/private-knowledge-continuity.allium" ]] || {
   echo "FENCE FAILED: slice 18 behavior missing" >&2; exit 1;
 }
+[[ -f "$TARGET/docs/plan/19-grounded-relations/spec.feature" ]] || {
+  echo "FENCE FAILED: slice 19 contract missing" >&2; exit 1;
+}
+[[ -f "$TARGET/raw/orc/ontology-exploration.clj" ]] || {
+  echo "FENCE FAILED: pinned ORC relation discovery missing" >&2; exit 1;
+}
+[[ -f "$TARGET/specs/grounded-relations.allium" ]] || {
+  echo "FENCE FAILED: slice 19 behavior missing" >&2; exit 1;
+}
 [[ "$(git -C "$TARGET" rev-list --all --count)" == 1 ]] || {
   echo "FENCE FAILED: prior history remains" >&2; exit 1
 }

@@ -52,6 +52,7 @@
     :taxonomy-model-outcome (-> state
                                 (assoc-in [:taxonomy-outcomes (:result-id data)] (dissoc data :digest))
                                 (assoc-in [:taxonomy-result-ids (:result-id data)] (:digest data)))
+    :taxonomy-relation-attempt (assoc-in state [:taxonomy-relation-attempts (:result-id data)] data)
     :taxonomy-relation (assoc-in state [:taxonomy-relations (:relation-id data)]
                                  (assoc data :status :pending :revision 0 :reviews []))
     :taxonomy-relation-review (-> state
@@ -60,6 +61,23 @@
                                   (update-in [:taxonomy-relations (:relation-id data) :reviews] conj
                                              (select-keys data [:action-id :expected-revision :decision :at]))
                                   (assoc-in [:taxonomy-actions (:action-id data)] data))
+    :taxonomy-relation-correct
+    (let [old (get-in state [:taxonomy-relations (:relation-id data)])
+          replacement (-> (select-keys data [:left-id :right-id :relation-kind :evidence])
+                          (assoc :relation-id (:replacement-id data)
+                                 :owner (:owner data)
+                                 :source-id (:source-id old)
+                                 :origin :owner-correction
+                                 :replaces-id (:relation-id data)
+                                 :status :pending :revision 0 :reviews []))]
+      (-> state
+          (assoc-in [:taxonomy-relations (:relation-id data) :status] :rejected)
+          (assoc-in [:taxonomy-relations (:relation-id data) :corrected-by] (:replacement-id data))
+          (update-in [:taxonomy-relations (:relation-id data) :revision] inc)
+          (update-in [:taxonomy-relations (:relation-id data) :reviews] conj
+                     (select-keys data [:action-id :expected-revision :decision :at]))
+          (assoc-in [:taxonomy-relations (:replacement-id data)] replacement)
+          (assoc-in [:taxonomy-actions (:action-id data)] data)))
     :quality-case (assoc-in state [:quality-cases (:case-id data)]
                             (assoc data :review-status :pending :privacy-status :pending :review-history []))
     :quality-review (-> state

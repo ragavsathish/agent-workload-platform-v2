@@ -23,6 +23,8 @@
    :knowledge/taxonomy-model-outcome command-schema
    :knowledge/taxonomy-relation command-schema
    :knowledge/taxonomy-relation-review command-schema
+   :knowledge/taxonomy-relation-attempt command-schema
+   :knowledge/taxonomy-relation-correct command-schema
    :knowledge/quality-case command-schema
    :knowledge/quality-review command-schema
    :knowledge/quality-run command-schema
@@ -41,6 +43,9 @@
    :knowledge/taxonomy-proposals [:map [:owner :string]]
    :knowledge/taxonomy-current [:map [:owner :string]]
    :knowledge/taxonomy-relations [:map [:owner :string]]
+   :knowledge/taxonomy-relation-item [:map [:owner :string] [:relation-id :string]]
+   :knowledge/taxonomy-relation-proposals [:map [:owner :string]]
+   :knowledge/taxonomy-relation-outcomes [:map [:owner :string]]
    :knowledge/taxonomy-outcomes [:map [:owner :string]]
    :knowledge/quality-cases [:map [:owner :string]]
    :knowledge/quality-run-status [:map [:owner :string] [:run-id :string]]})

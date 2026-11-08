@@ -18,6 +18,11 @@
 (defn- stable-uuid [value]
   (UUID/nameUUIDFromBytes (.getBytes (str value) "UTF-8")))
 
+(defn- trace-uuid [value]
+  (cond (instance? UUID value) value
+        (string? value) (try (UUID/fromString value) (catch Exception _ nil))
+        :else nil))
+
 (defn- digest [value]
   (.formatHex (java.util.HexFormat/of)
               (.digest (MessageDigest/getInstance "SHA-256") (.getBytes (str value) "UTF-8"))))
@@ -158,8 +163,17 @@
       (ensure-relationship! system id (taxonomy-item-uri owner (:left-id relation))
                             (taxonomy-item-uri owner (:right-id relation))
                             (case (:relation-kind relation) :broader "skos:broader" :related "skos:related")
-                            {:relation-id (:relation-id relation)
-                             :review-action (-> relation :reviews last :action-id)}))
+                            (cond-> {:relation-id (:relation-id relation)
+                                     :owner-hash (digest owner)
+                                     :source-id (:source-id relation)
+                                     :evidence (:evidence relation)
+                                     :result-id (:result-id relation)
+                                     :model (:model-version relation)
+                                     :prompt-version (:prompt-version relation)
+                                     :policy-version (:policy-version relation)
+                                     :review-action (-> relation :reviews last :action-id)}
+                              (trace-uuid (:trace-id relation))
+                              (assoc :trace-id (trace-uuid (:trace-id relation))))))
     {:ontology-id id :category-count (count (taxonomy/categories "personal-v1"))
      :item-count (count accepted) :relation-count (count relations)}))
 
@@ -180,12 +194,16 @@
 (defn taxonomy-owner-concept [system owner proposal-id]
   (some #(when (= proposal-id (:awp-proposal-id %)) %) (taxonomy-owner-concepts system owner)))
 
+(declare taxonomy-owner-traverse)
+
 (defn taxonomy-owner-search [system owner query-text]
   (if-not (and (string? query-text) (not (str/blank? query-text)))
     []
     (let [needle (str/lower-case query-text)]
       (->> (taxonomy-owner-concepts system owner)
-           (filter #(str/includes? (str/lower-case (:label %)) needle)) vec))))
+           (filter #(str/includes? (str/lower-case (:label %)) needle))
+           (mapv #(assoc % :awp-relations
+                         (taxonomy-owner-traverse system owner (:awp-proposal-id %))))))))
 
 (defn taxonomy-owner-traverse [system owner proposal-id]
   (let [visible (set (map :awp-proposal-id (taxonomy-owner-concepts system owner)))]
@@ -425,3 +443,147 @@
           {:error :incorrect}
           {:status :staged
            :proposals (mapv #(knowledge/taxonomy-propose! system owner %) resolved)})))))
+
+(defn- bounded-relation-sheet [model prompt-version policy-version]
+  (dsl/workflow (str "awp-owner-source-bounded-relations-" (digest (str model ":" prompt-version ":" policy-version)))
+    (dsl/blackboard
+      {:source-text :string :endpoint-catalog :string
+       :relations [:vector [:map [:left-id :string] [:right-id :string]
+                            [:kind :string] [:evidence :string]]]})
+    (dsl/sequence "propose-relations"
+      (dsl/llm "grounded-relation-candidates" :model model
+        :instruction (str "Propose at most two subject relations between the supplied accepted endpoint IDs. "
+                          "Return only left-id, right-id, kind, and evidence. "
+                          "kind is broader or related. For broader, the left subject is a type or subset of the right. "
+                          "related is a non-hierarchical subject association. "
+                          "Evidence must be an exact substring of source-text that directly states the relation, "
+                          "not merely a list of the two names. Do not infer causal, ownership, employment, "
+                          "belief, or other personal facts as subject relations. Return [] when no grounded relation exists.")
+        :reads [:source-text :endpoint-catalog] :writes [:relations]
+        :retry {:max-attempts 1 :backoff-ms [200]}))))
+
+(defn explore-local-relations-bounded!
+  "Run a bounded ORC LLM node over one owned source and accepted endpoint catalog."
+  [system owner source-id model prompt-version policy-version endpoint-ids]
+  (let [state (models/owner-state system owner)
+        source (get-in state [:sources source-id])
+        endpoints (mapv #(get-in state [:taxonomy-proposals %]) endpoint-ids)]
+    (when-not (and source (= 2 (count endpoint-ids)) (every? #(= :accepted (:status %)) endpoints)
+                   (every? #(and (string? %) (not (str/blank? %)))
+                           [model prompt-version policy-version]))
+      (throw (ex-info "owned source and accepted endpoints required" {:source-id source-id})))
+    (router/register! :awp-local-ollama
+                      {:provider :openai :model model
+                       :config {:api-base "http://127.0.0.1:11434/v1"
+                                :api-key "ollama"}})
+    (let [control (control-plane/start
+                    {:event-store (:event-store system) :cache (:cache system)
+                     :context (assoc system :llm-provider :awp-local-ollama)
+                     :heartbeat-interval-ms 1000})]
+      (try
+        (let [sheet-id (sheet/build-workflow! system (bounded-relation-sheet model prompt-version policy-version))
+              catalog (pr-str (mapv #(select-keys % [:proposal-id :text :evidence]) endpoints))
+              result (sheet/execute system sheet-id
+                                    {:source-text (:transcript source) :endpoint-catalog catalog}
+                                    :timeout-ms 150000)]
+          (if (= :success (:status result))
+            {:status :completed :trace-id (str (:trace-id result))
+             :candidates (get-in result [:outputs :relations])}
+            {:status (if (= :timeout (:status result)) :timeout :failed)
+             :trace-id (some-> (:trace-id result) str) :candidates []
+             :diagnostic (when (:relation-debug? system)
+                           (select-keys result [:status :error :outputs]))}))
+        (finally (control-plane/stop control))))))
+
+(defn- normalize-relation-candidate [candidate]
+  (let [field (fn [key] (or (get candidate key) (get candidate (name key))))
+        kind (or (field :relation-kind) (field :kind))]
+    {:left-id (field :left-id) :right-id (field :right-id)
+     :relation-kind (cond (keyword? kind) kind (string? kind) (keyword kind) :else nil)
+     :evidence (field :evidence)}))
+
+(defn- valid-relation-candidates? [source selected revisions candidates]
+  (and (vector? candidates) (<= 1 (count candidates) 2)
+       (= (count candidates) (count (set (map #(select-keys % [:left-id :right-id :relation-kind :evidence]) candidates))))
+       (every? (fn [{:keys [left-id right-id relation-kind evidence]}]
+                 (and (contains? selected left-id) (contains? selected right-id)
+                      (not= left-id right-id) (#{:broader :related} relation-kind)
+                      (string? evidence) (<= 1 (count evidence) 1000)
+                      (not (str/blank? evidence))
+                      (str/includes? source evidence)
+                      (integer? (get revisions left-id)) (integer? (get revisions right-id))))
+               candidates)))
+
+(defn propose-relations!
+  "Persist one bounded ORC relation attempt and stage its valid candidates as Grain pending relations.
+   An injected :relation-model! is used only by deterministic acceptance checks."
+  [system owner source-id model prompt-version policy-version endpoint-ids]
+  (let [state (models/owner-state system owner)
+        source (get-in state [:sources source-id])
+        endpoints (mapv #(get-in state [:taxonomy-proposals %]) endpoint-ids)
+        revisions (into {} (map (juxt :proposal-id :revision) endpoints))]
+    (if-not (and source (= 2 (count endpoint-ids)) (= 2 (count (set endpoint-ids)))
+                 (every? #(= :accepted (:status %)) endpoints)
+                 (every? #(and (string? %) (not (str/blank? %)))
+                         [model prompt-version policy-version]))
+      {:error :incorrect}
+      (let [source-digest (digest (pr-str (:transcript source)))
+            result-id (str "orc-relation:" (subs (digest (pr-str [owner source-id source-digest
+                                                                  endpoint-ids revisions model prompt-version
+                                                                  policy-version])) 0 48))
+            existing (get-in state [:taxonomy-relation-attempts result-id])
+            response (if existing nil
+                         (try
+                           (if-let [model-fn (:relation-model! system)]
+                             (model-fn {:owner owner :source-id source-id :source-text (:transcript source)
+                                        :endpoints endpoints :model model :prompt-version prompt-version
+                                        :policy-version policy-version})
+                             (explore-local-relations-bounded! system owner source-id model prompt-version
+                                                               policy-version endpoint-ids))
+                           (catch Throwable e
+                             {:status (if (= :timeout (:status (ex-data e))) :timeout :failed)
+                              :trace-id nil :candidates []})))
+            raw-status (:status response)
+            normalized (when (and (map? response) (vector? (:candidates response)))
+                         (mapv normalize-relation-candidate (:candidates response)))
+            status (if existing (:status existing)
+                       (cond
+                         (#{:timeout :failed} raw-status) raw-status
+                         (or (= :empty raw-status)
+                             (and (= :completed raw-status) (empty? normalized))) :empty
+                         (and (= :completed raw-status)
+                              (valid-relation-candidates? (:transcript source) (set endpoint-ids)
+                                                          revisions normalized)) :completed
+                         :else :invalid))
+            candidates (if existing (:candidates existing)
+                           (if (= :completed status)
+                             (mapv (fn [candidate]
+                                     (assoc candidate
+                                            :relation-id
+                                            (str "orc-relation-edge:"
+                                                 (subs (digest (pr-str [result-id candidate])) 0 48))
+                                            :left-revision (get revisions (:left-id candidate))
+                                            :right-revision (get revisions (:right-id candidate))))
+                                   normalized)
+                             []))
+            trace-id (if existing (:trace-id existing) (some-> (:trace-id response) str))
+            attempt-data {:owner owner :result-id result-id :source-id source-id :source-digest source-digest
+                          :model-version model :prompt-version prompt-version
+                          :policy-version policy-version :status status
+                          :trace-id trace-id :candidates candidates}
+            recorded (if existing {:status :reused :result-id result-id}
+                         (knowledge/taxonomy-relation-attempt! system owner attempt-data))]
+        (if (:error recorded)
+          recorded
+          (if (= :completed status)
+            (let [relations (mapv (fn [candidate]
+                                    (knowledge/taxonomy-relation!
+                                      system owner (merge candidate
+                                        (select-keys attempt-data [:result-id :source-id :source-digest
+                                                                   :model-version :prompt-version
+                                                                   :policy-version :trace-id])
+                                        {:origin :model :owner owner}))) candidates)]
+              (if-let [error (some :error relations)]
+                {:error error :result-id result-id}
+                {:status (if existing :reused :staged) :result-id result-id :relations relations}))
+            {:status status :result-id result-id :relations []}))))))

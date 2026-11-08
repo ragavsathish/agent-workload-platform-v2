@@ -1,0 +1,80 @@
+-- allium: 3
+-- Sources: docs/plan/18-private-knowledge-continuity/spec.feature,
+-- docs/wiki/private-knowledge-continuity.md, raw/v1/c3-personal-knowledge.feature.
+
+entity SourceSnapshot {
+    snapshot_id: String
+    digest: String
+    status: String
+}
+
+entity ResourceDisposition {
+    snapshot_id: String
+    legacy_id: String
+    kind: String
+    status: String
+    evidence_digest: String
+}
+
+entity ShadowReport {
+    report_id: String
+    snapshot_id: String
+    source_digest: String
+    status: String
+}
+
+entity ReadChoice {
+    owner: String
+    report_id: String
+    source: String
+}
+
+rule FreezeSource {
+    when: SourceVerified(snapshot_id, digest)
+    requires: not exists SourceSnapshot{snapshot_id: snapshot_id}
+    ensures: SourceSnapshot.created(snapshot_id: snapshot_id, digest: digest, status: "frozen")
+}
+
+rule AccountResource {
+    when: ResourceReviewed(snapshot_id, legacy_id, kind, status, evidence_digest)
+    let snapshot = SourceSnapshot{snapshot_id: snapshot_id}
+    requires: exists snapshot
+    requires: not exists ResourceDisposition{snapshot_id: snapshot_id, legacy_id: legacy_id}
+    ensures: ResourceDisposition.created(snapshot_id: snapshot_id, legacy_id: legacy_id, kind: kind, status: status, evidence_digest: evidence_digest)
+}
+
+rule RecordShadowReport {
+    when: ShadowReconciled(report_id, snapshot_id, source_digest)
+    let snapshot = SourceSnapshot{snapshot_id: snapshot_id}
+    requires: exists snapshot
+    requires: snapshot.digest = source_digest
+    requires: not exists ShadowReport{report_id: report_id}
+    ensures: ShadowReport.created(report_id: report_id, snapshot_id: snapshot_id, source_digest: source_digest, status: "qualified")
+}
+
+rule ApproveReadChoice {
+    when: OwnerApproved(owner, report_id)
+    let report = ShadowReport{report_id: report_id}
+    requires: exists report
+    requires: report.status = "qualified"
+    requires: not exists ReadChoice{owner: owner, report_id: report_id}
+    ensures: ReadChoice.created(owner: owner, report_id: report_id, source: "shadow")
+}
+
+surface SnapshotReview {
+    facing snapshot: SourceSnapshot
+    exposes:
+        snapshot.snapshot_id
+    provides:
+        SourceVerified(snapshot_id, digest)
+        ResourceReviewed(snapshot_id, legacy_id, kind, status, evidence_digest)
+        ShadowReconciled(report_id, snapshot_id, source_digest)
+}
+
+surface OwnerCutover {
+    facing choice: ReadChoice
+    exposes:
+        choice.owner
+    provides:
+        OwnerApproved(owner, report_id)
+}

@@ -45,6 +45,7 @@
                                    (->> (conj (vec items) (select-keys event [:cursor :summary]))
                                         (take-last 2000) vec)))
                (= :complete (:action event)) (assoc :result (:result event))
+               (= :dispatch (:action event)) (assoc :source-revision (:source-revision event))
                (= :fail (:action event)) (assoc :failure (:failure event)))]
     (assoc state id next)))
 
@@ -60,7 +61,7 @@
     (merge task {:status :pending :recovery-required? false}
            (get (states context) task-id))))
 
-(defn- transition [action {:keys [actor-id] {:keys [task-id workspace summary result failure]} :command :as context}]
+(defn- transition [action {:keys [actor-id] {:keys [task-id workspace source-revision summary result failure]} :command :as context}]
   (let [task (task-state context task-id)
         status (:status task)
         owner? (= (admission/canonical-owner actor-id) (:owner task))
@@ -70,7 +71,7 @@
                                   (= workspace (:workspace task)))
                    :progress (= status :running)
                    :complete (= status :running)
-                   :fail (= status :running)
+                   :fail (#{:pending :running} status)
                    :interrupt (= status :running)
                    :abort (#{:pending :running :sleeping} status)
                    :retry (and (= status :pending) (:recovery-required? task))
@@ -90,6 +91,7 @@
             recovery? (= action :interrupt)
             body (cond-> {:task-id task-id :action action
                           :status new-status :recovery-required? recovery?}
+                   (and (= action :dispatch) source-revision) (assoc :source-revision source-revision)
                    (= action :progress) (assoc :cursor cursor :summary (safe-summary summary))
                    (= action :complete) (assoc :result result)
                    (= action :fail) (assoc :failure failure))

@@ -18,7 +18,7 @@
   (:import [java.nio.file Files]
            [java.time OffsetDateTime]))
 
-(defn open-system [{:keys [eligible-workspaces storage-dir tenant-id workspace-roots]}]
+(defn open-system [{:keys [eligible-workspaces storage-dir tenant-id workspace-roots task-workspace-dir]}]
   (validator/verify-or-throw!)
   (let [owned? (nil? storage-dir)
         dir (if storage-dir
@@ -31,6 +31,7 @@
         cache (kv/start (lmdb/->KV-Store-LMDB {:storage-dir (.getPath dir) :db-name "tasking"}))]
     {:event-store store :cache cache :cache-dir dir :owned-dir? owned?
      :artifact-dir (io/file dir "artifacts")
+     :task-workspace-dir (or task-workspace-dir (io/file dir "workspaces"))
      :closed? (atom false)
      :tenant-id (or tenant-id
                     (java.util.UUID/nameUUIDFromBytes
@@ -81,8 +82,12 @@
 (defn accepted-count [system]
   (count (read-models/requests system)))
 
-(defn dispatch! [system task-id workspace]
-  (lifecycle/issue! system :tasking/dispatch-task {:task-id task-id :workspace workspace}))
+(defn dispatch!
+  ([system task-id workspace] (dispatch! system task-id workspace nil))
+  ([system task-id workspace source-revision]
+   (lifecycle/issue! system :tasking/dispatch-task
+                     (cond-> {:task-id task-id :workspace workspace}
+                       source-revision (assoc :source-revision source-revision)))))
 
 (defn report-progress! [system task-id summary]
   (lifecycle/issue! system :tasking/record-progress {:task-id task-id :summary summary}))
@@ -96,7 +101,7 @@
     (if (not= :running (:status task))
       {::anom/category ::anom/conflict ::anom/message "task is not running"}
       (try
-        (let [captured (artifacts/capture! system task-id (:workspace task))
+        (let [captured (artifacts/capture! system task-id (:workspace task) (:source-revision task))
               answer (subs (or text "Task completed.") 0 (min 12000 (count (or text "Task completed."))))
               response {:text answer
                         :spoken (subs (or spoken answer) 0 (min 2000 (count (or spoken answer))))

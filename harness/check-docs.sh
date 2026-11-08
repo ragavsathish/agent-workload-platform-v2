@@ -80,4 +80,12 @@ for id in $(rg -o '@artifact-[0-9]+' docs/plan/12-task-result-delivery/spec.feat
   fi
 done
 
+for id in $(rg -o '@delivery-[0-9]+' docs/plan/13-task-worker-delivery/spec.feature | tr -d '@'); do
+  test_id="${id//-/_}"
+  if ! rg -q "$id|$test_id" impl/deployment/test_task_worker_delivery.py impl/deployment/test_artifact_delivery.py impl/test/awp_v2/artifact_acceptance_test.clj; then
+    echo "Acceptance scenario $id has no named test" >&2
+    exit 1
+  fi
+done
+
 echo "documentation gate OK"

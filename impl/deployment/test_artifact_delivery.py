@@ -6,6 +6,7 @@ import json
 import os
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -16,7 +17,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from deployment import GrainTaskClient
+from deployment import GrainTaskClient, ScheduledExecutor, TaskScheduler
 from gateway import GatewayServer, task_public
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -150,3 +151,117 @@ class ArtifactDeliveryAcceptance(unittest.TestCase):
         self.assertEqual(result["result"]["result"]["artifacts"], ["workspace"])
         self.assertNotIn("secret", serialized)
         self.assertNotIn("s3://", serialized)
+
+    def run_controlled_scheduled(self, workspace: str, key: str) -> str:
+        instruction = "Make one selected change and commit it" if "committed" in key else "Make one selected change"
+        with self.request("", data={"identity": OWNER, "instruction": instruction, "workspace": workspace}, key=key) as response:
+            task_id = json.load(response)["task_id"]
+        worker = self.root / "controlled-worker.py"
+        worker.write_text("""import json, os, pathlib, subprocess, urllib.request
+task = os.environ['AWP_SCHEDULED_TASK_ID']
+root = pathlib.Path(os.environ['AWP_SCHEDULED_TASK_WORKSPACE'])
+if os.environ['AWP_SCHEDULED_TASK_SOURCE_REVISION'] == 'scratch':
+    (root / 'note.txt').write_text('worker made this\\n')
+else:
+    (root / 'readme.txt').write_text('worker changed this\\n')
+    if 'commit it' in os.environ['AWP_SCHEDULED_TASK_INSTRUCTION']:
+        subprocess.run(['git', '-C', str(root), 'add', '.'], check=True)
+        subprocess.run(['git', '-C', str(root), '-c', 'user.name=Worker', '-c', 'user.email=worker@example.test',
+                        'commit', '-qm', 'worker change'], check=True)
+for operation, body in [('progress', {'task-id': task, 'summary': 'Writing selected work.'}),
+                        ('capture-complete', {'task-id': task, 'response': {'text': 'Worker finished'}})]:
+    request = urllib.request.Request(os.environ['AWP_GRAIN_SESSION_URL'] + '/internal/task/' + operation,
+        data=json.dumps(body).encode(), method='POST',
+        headers={'Authorization': 'Bearer ' + os.environ['AWP_GRAIN_SESSION_TOKEN'],
+                 'Content-Type': 'application/json'})
+    with urllib.request.urlopen(request, timeout=20) as response: response.read()
+""")
+        env = {**self.env, "AWP_GRAIN_SESSION_URL": self.grain.base_url,
+               "WORKER_PI_EXECUTION_MODE": "host"}
+        executor = ScheduledExecutor(self.grain, TaskScheduler(self.root / f"{workspace}-claims.json"),
+                                     (sys.executable, str(worker)), env)
+        try:
+            executor.reconcile()
+            for _ in range(120):
+                task = self.grain.call("read", {"task-id": task_id})
+                if task.get("status") in {"completed", "failed"}:
+                    break
+                time.sleep(0.1)
+            self.assertEqual(task["status"], "completed", task)
+            self.assertEqual(task["source-revision"], "scratch" if workspace == "scratch" else
+                             subprocess.check_output(["git", "-C", str(self.project), "rev-parse", "HEAD"], text=True).strip())
+        finally:
+            for process in executor.running.values():
+                process.wait(timeout=10)
+        return task_id
+
+    def test_delivery_001_008_009_scheduled_scratch_owner_download(self):
+        """delivery-008 and delivery-009: fresh owner delivery and foreign-owner denial."""
+        task_id = self.run_controlled_scheduled("scratch", "delivery-scratch")
+        self.assertEqual(list(self.scratch.iterdir()), [])
+        self.stop_gateway()
+        self.start_grain()
+        self.gateway = GatewayServer(("127.0.0.1", 0), self.grain, "gateway-token", OWNER)
+        self.thread = threading.Thread(target=self.gateway.serve_forever, daemon=True)
+        self.thread.start()
+        self.base = f"http://127.0.0.1:{self.gateway.server_port}/v1/tasks"
+        with self.request(f"/{task_id}") as response:
+            view = json.load(response)
+        self.assertEqual(view["result"]["result"]["response"]["text"], "Worker finished")
+        self.assertEqual(view["source_revision"], "scratch")
+        with self.request(f"/{task_id}/artifacts/workspace") as response:
+            self.assertEqual(response.headers["Cache-Control"], "private, no-store")
+            with zipfile.ZipFile(io.BytesIO(response.read())) as archive:
+                self.assertEqual(archive.read("note.txt"), b"worker made this\n")
+        with self.assertRaises(urllib.error.HTTPError) as denied:
+            self.request(f"/{task_id}/artifacts/workspace", identity="foreign@example.test")
+        self.assertEqual(denied.exception.code, 403)
+        denied.exception.close()
+
+    def test_delivery_002_scheduled_repository_patch_is_task_specific(self):
+        (self.project / "intruder.txt").write_text("not selected\n")
+        task_id = self.run_controlled_scheduled("project", "delivery-project")
+        with self.request(f"/{task_id}/artifacts/patch") as response:
+            patch = response.read()
+        self.assertIn(b"worker changed this", patch)
+        self.assertNotIn(b"intruder", patch)
+        self.assertEqual((self.project / "readme.txt").read_text(), "before\n")
+
+    def test_delivery_002_committed_worker_change_stays_in_patch(self):
+        task_id = self.run_controlled_scheduled("project", "delivery-project-committed")
+        with self.request(f"/{task_id}/artifacts/patch") as response:
+            patch = response.read()
+        self.assertIn(b"worker changed this", patch)
+        self.assertIn(b"before", patch)
+
+    def test_delivery_005_capture_failure_does_not_advertise_bytes(self):
+        with self.request("", data={"identity": OWNER, "instruction": "Oversized work", "workspace": "scratch"}, key="oversized") as response:
+            task_id = json.load(response)["task_id"]
+        self.grain.call("dispatch", {"task-id": task_id, "workspace": "scratch"})
+        (self.scratch / "too-large.bin").write_bytes(b"x" * (16_777_216 + 1))
+        self.assertEqual(self.grain.call("capture-complete", {"task-id": task_id,
+                                                                "response": {"text": "False success"}})["status"], "failed")
+        with self.request(f"/{task_id}") as response:
+            view = json.load(response)
+        self.assertEqual(view["status"], "failed")
+        self.assertIsNone(view["result"]["result"])
+        with self.assertRaises(urllib.error.HTTPError) as denied:
+            self.request(f"/{task_id}/artifacts/workspace")
+        self.assertEqual(denied.exception.code, 404)
+        denied.exception.close()
+
+    def test_delivery_007_late_callbacks_preserve_original_artifact(self):
+        task_id = self.submit_and_finish("scratch", "first", "note.txt")
+        with self.request(f"/{task_id}/artifacts/workspace") as response:
+            original = response.read()
+        (self.scratch / "note.txt").write_text("second")
+        for operation, body in [("capture-complete", {"task-id": task_id, "response": {"text": "Second"}}),
+                                ("fail", {"task-id": task_id, "failure": "Late failure"})]:
+            with self.assertRaises(urllib.error.HTTPError) as denied:
+                self.grain.call(operation, body)
+            self.assertEqual(denied.exception.code, 409)
+            denied.exception.close()
+        with self.request(f"/{task_id}/artifacts/workspace") as response:
+            self.assertEqual(response.read(), original)
+        with self.request(f"/{task_id}") as response:
+            self.assertEqual(json.load(response)["result"]["result"]["response"]["text"], "Done")

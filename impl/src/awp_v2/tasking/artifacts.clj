@@ -1,5 +1,6 @@
 (ns awp-v2.tasking.artifacts
-  (:require [clojure.java.io :as io])
+  (:require [clojure.data.json :as json]
+            [clojure.java.io :as io])
   (:import [java.io ByteArrayOutputStream File]
            [java.nio.file Files LinkOption Path StandardCopyOption]
            [java.security MessageDigest]
@@ -11,18 +12,31 @@
 (defn- digest [^bytes data]
   (format "%064x" (BigInteger. 1 (.digest (MessageDigest/getInstance "SHA-256") data))))
 (defn- fail! [reason] (throw (ex-info reason {:artifact/error true})))
-(defn- run-git [^File root args]
-  (let [process (.start (ProcessBuilder. ^java.util.List (into ["git" "-C" (.getPath root)] args)))
+(defn- run-git [^File root args & [env]]
+  (let [builder (ProcessBuilder. ^java.util.List (into ["git" "-C" (.getPath root)] args))
+        _ (when env (.putAll (.environment builder) env))
+        process (.start builder)
         data (with-open [in (.getInputStream process)] (.readAllBytes in))
         error (with-open [in (.getErrorStream process)] (.readAllBytes in))]
     (when-not (zero? (.waitFor process))
       (fail! (str "repository capture failed: " (String. error "UTF-8"))))
     data))
-(defn- repo-patch [^File root max-bytes]
-  (run-git root ["add" "--intent-to-add" "--all"])
-  (let [data (run-git root ["diff" "--binary" "HEAD"])]
-    (when (> (alength data) max-bytes) (fail! "task patch exceeds allowed size"))
-    data))
+(defn- repo-patch [^File root max-bytes source-revision]
+  (let [index-path (String. (run-git root ["rev-parse" "--git-path" "index"]) "UTF-8")
+        index (io/file root (.trim index-path))
+        temporary (Files/createTempFile "awp-task-index-" ".index"
+                                        (make-array java.nio.file.attribute.FileAttribute 0))
+        env {"GIT_INDEX_FILE" (str temporary)}]
+    (try
+      (if (.isFile index)
+        (Files/copy (.toPath index) temporary
+                    (into-array StandardCopyOption [StandardCopyOption/REPLACE_EXISTING]))
+        (Files/deleteIfExists temporary))
+      (run-git root ["add" "--intent-to-add" "--all"] env)
+      (let [data (run-git root ["diff" "--binary" (or source-revision "HEAD")] env)]
+        (when (> (alength data) max-bytes) (fail! "task patch exceeds allowed size"))
+        data)
+      (finally (Files/deleteIfExists temporary)))))
 (defn- scratch-archive [^File root max-bytes]
   (let [base (.toRealPath (.toPath root) (make-array LinkOption 0))]
     (with-open [walk (Files/walk base (make-array java.nio.file.FileVisitOption 0))]
@@ -48,12 +62,20 @@
                   (let [data (.toByteArray output)]
                     (when (> (alength data) max-bytes) (fail! "scratch archive exceeds allowed size"))
                     data)))))))))
-(defn capture! [{:keys [artifact-dir workspace-roots max-artifact-bytes]} task-id workspace]
-  (let [^File root (some-> (get workspace-roots workspace) io/file)
+(defn capture! [{:keys [artifact-dir workspace-roots task-workspace-dir max-artifact-bytes]} task-id workspace source-revision]
+  (let [task-root (when task-workspace-dir (io/file task-workspace-dir (str task-id)))
+        marker (when task-root (io/file task-root "source.json"))
+        record (when (and marker (.isFile marker)) (json/read-str (slurp marker)))
+        _ (when (and source-revision
+                     (or (not= workspace (get record "logical"))
+                         (not= source-revision (get record "revision"))))
+            (fail! "selected source identity does not match task"))
+        ^File root (if record (io/file task-root "workspace")
+                       (some-> (get workspace-roots workspace) io/file))
         max-bytes (or max-artifact-bytes default-max-bytes)
         kind (if (= workspace "scratch") "workspace" "patch")]
     (when-not (and root (.isDirectory root)) (fail! "selected workspace is unavailable"))
-    (let [data (if (= kind "patch") (repo-patch root max-bytes)
+    (let [data (if (= kind "patch") (repo-patch root max-bytes source-revision)
                    (scratch-archive root max-bytes))
           sha (digest data)
           directory (io/file artifact-dir (str task-id))

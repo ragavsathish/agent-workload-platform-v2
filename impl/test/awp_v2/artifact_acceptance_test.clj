@@ -49,6 +49,18 @@
     (let [bytes (:bytes (artifact sys owner id "patch"))]
       (is (re-find #"before|after" (String. ^bytes bytes "UTF-8")))))))
 
+(deftest delivery-002-capture-preserves-repository-index
+  (fixture "project" (fn [_ dir sys id _]
+    (let [index (io/file dir ".git" "index")
+          original (Files/readAllBytes (.toPath index))]
+      (spit (io/file dir "readme.txt") "after\n")
+      (spit (io/file dir "new.txt") "new\n")
+      (is (= :completed (:status (capture! sys id "Done"))))
+      (let [patch (String. ^bytes (:bytes (artifact sys owner id "patch")) "UTF-8")]
+        (is (re-find #"new.txt" patch))
+        (is (re-find #"after" patch)))
+      (is (java.util.Arrays/equals original (Files/readAllBytes (.toPath index))))))))
+
 (deftest artifact-002-scratch-archive
   (fixture "scratch" (fn [_ dir sys id _]
     (spit (io/file dir "note.txt") "hello")

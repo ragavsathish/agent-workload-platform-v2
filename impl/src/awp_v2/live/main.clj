@@ -27,6 +27,8 @@
                         (map str/trim) (remove str/blank?) set)
         task-system (tasking/open-system {:storage-dir (required "AWP_TASKING_STORAGE_DIR")
                                           :eligible-workspaces workspaces
+                                          :task-workspace-dir (or (System/getenv "AWP_TASK_WORKSPACE_DIR")
+                                                                  (str (required "AWP_TASKING_STORAGE_DIR") "/workspaces"))
                                           :workspace-roots (json/read-str (or (System/getenv "AWP_WORKSPACE_MAP_JSON") "{}"))})
         incident-source (when-let [rules-file (System/getenv "AWP_INCIDENT_RULES_FILE")]
                           (incident-adapter/adapter

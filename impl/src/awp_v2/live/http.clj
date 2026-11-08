@@ -112,7 +112,7 @@
       "owned-progress" (tasking/progress task-system owner task-id
                                          (long (or (:after data) 0))
                                          (long (or (:limit data) 100)))
-      "dispatch" (tasking/dispatch! task-system task-id (:workspace data))
+      "dispatch" (tasking/dispatch! task-system task-id (:workspace data) (:source-revision data))
       "progress" (tasking/report-progress! task-system task-id (:summary data))
       "complete" (tasking/complete! task-system task-id (:result data))
       "capture-complete" (tasking/capture-complete! task-system task-id (:response data))

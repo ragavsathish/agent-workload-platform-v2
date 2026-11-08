@@ -6,7 +6,7 @@
   {:tasking/submit-task
    [:map [:request-id :uuid] [:owner :string]
     [:instruction :string] [:workspace :string]]
-   :tasking/dispatch-task [:map [:task-id :uuid] [:workspace :string]]
+   :tasking/dispatch-task [:map [:task-id :uuid] [:workspace :string] [:source-revision {:optional true} :string]]
    :tasking/record-progress [:map [:task-id :uuid] [:summary :string]]
    :tasking/complete-task [:map [:task-id :uuid] [:result :any]]
    :tasking/fail-task [:map [:task-id :uuid] [:failure :string]]
@@ -25,6 +25,7 @@
             [:status :keyword] [:recovery-required? :boolean]
             [:cursor {:optional true} :int]
             [:summary {:optional true} :string]
+            [:source-revision {:optional true} :string]
             [:result {:optional true} :any]
             [:failure {:optional true} :string]]})
 

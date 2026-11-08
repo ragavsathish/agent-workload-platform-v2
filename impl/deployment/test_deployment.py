@@ -57,9 +57,10 @@ class DeploymentAcceptance(unittest.TestCase):
         sup.stop()
 
     def test_deploy_006_independent_scheduler(self):
+        task_id = "11111111-1111-4111-8111-111111111111"
         class Grain:
             def __init__(self): self.calls = []
-            def tasks(self): return [{"task-id": "t1", "status": "pending", "workspace": "scratch", "instruction": "test"}]
+            def tasks(self): return [{"task-id": task_id, "status": "pending", "workspace": "scratch", "instruction": "test"}]
             def call(self, op, data): self.calls.append((op, data)); return {"status": "running"}
         grain = Grain()
         executor = ScheduledExecutor(grain, TaskScheduler(self.root / "claims.json"),
@@ -68,7 +69,7 @@ class DeploymentAcceptance(unittest.TestCase):
         try:
             executor.reconcile()
             self.assertEqual([op for op, _ in grain.calls], ["dispatch"])
-            self.assertIn("t1", executor.running)
+            self.assertIn(task_id, executor.running)
             executor.reconcile()
             self.assertEqual([op for op, _ in grain.calls], ["dispatch"])
         finally:
@@ -280,10 +281,11 @@ class DeploymentAcceptance(unittest.TestCase):
         self.assertEqual(len(seen), 2)
 
     def test_deploy_007_interrupted_claim_recovery(self):
+        task_id = "22222222-2222-4222-8222-222222222222"
         class Grain:
             def __init__(self):
                 self.calls = []
-                self.task = {"task-id": "t1", "status": "running", "workspace": "scratch", "instruction": "test"}
+                self.task = {"task-id": task_id, "status": "running", "workspace": "scratch", "instruction": "test"}
             def tasks(self): return [self.task]
             def call(self, op, data): self.calls.append((op, data)); return {"status": "pending"}
         grain = Grain()
@@ -292,7 +294,7 @@ class DeploymentAcceptance(unittest.TestCase):
             {"AWP_WORKSPACE_MAP_JSON": '{"scratch":"' + str(self.root) + '"}'})
         executor.reconcile()
         self.assertEqual([op for op, _ in grain.calls], ["interrupt"])
-        self.assertEqual(scheduler.reason("t1"), "recovery required")
+        self.assertEqual(scheduler.reason(task_id), "recovery required")
         grain.task = {**grain.task, "status": "pending", "recovery-required?": True}
         executor.reconcile()
         self.assertEqual([op for op, _ in grain.calls], ["interrupt"])

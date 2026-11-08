@@ -12,7 +12,7 @@
      :produces #{:tasking/task-accepted}
      :grain/allium [{:spec "specs/tasking.allium" :kind :rule :name "AdmitTask"}
                     {:spec "specs/tasking.allium" :kind :rule :name "ReuseTask"}]}
-    :tasking/dispatch-task {:description "Start controlled work." :schema [:map [:task-id :uuid] [:workspace :string]]
+    :tasking/dispatch-task {:description "Start controlled work." :schema [:map [:task-id :uuid] [:workspace :string] [:source-revision {:optional true} :string]]
                             :reads #{:tasking/requests :tasking/lifecycle}
                             :produces #{:tasking/task-transitioned}
                             :grain/allium [{:spec "specs/task-lifecycle.allium" :kind :rule :name "StartExecution"}]}
@@ -55,6 +55,7 @@
               [:status :keyword] [:recovery-required? :boolean]
               [:cursor {:optional true} :int]
               [:summary {:optional true} :string]
+              [:source-revision {:optional true} :string]
               [:result {:optional true} :any]
               [:failure {:optional true} :string]]}}
    :read-models

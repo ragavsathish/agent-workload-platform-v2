@@ -36,6 +36,7 @@ def task_public(task: dict) -> dict:
     return {"id": task_id, "task_id": task_id,
             "instruction": task.get("instruction", ""),
             "workspace": task.get("workspace", ""),
+            "source_revision": task.get("source-revision"),
             "status": status,
             "recovery_required": task.get("recovery-required?", False),
             "progress": [{"id": item.get("cursor", 0),

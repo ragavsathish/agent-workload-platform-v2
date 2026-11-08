@@ -8,12 +8,109 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
+import re
+import shutil
 import signal
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
+
+
+TASK_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
+
+
+@dataclass(frozen=True)
+class PreparedTaskWorkspace:
+    path: Path
+    source_revision: str
+    image_ref: str | None = None
+    gitea_repository: str | None = None
+
+
+def prepare_task_workspace(task_id: str, logical: str, source: Path, task_root: Path,
+                           mode: str = "host", image_map: dict[str, str] | None = None) -> PreparedTaskWorkspace:
+    """Materialize one immutable selected source into a task-owned working tree."""
+    if not TASK_ID.fullmatch(task_id):
+        raise ValueError("invalid task identity")
+    if logical != "scratch" and not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,127}", logical):
+        raise ValueError("invalid selected repository")
+    if mode not in {"host", "gondolin"}:
+        raise ValueError("invalid task execution mode")
+    destination = task_root / task_id
+    marker = destination / "source.json"
+    workspace = destination / "workspace"
+    if marker.exists():
+        record = json.loads(marker.read_text())
+        if (record.get("logical") != logical or record.get("source") != str(source.resolve())
+                or record.get("mode") != mode
+                or not workspace.is_dir()):
+            raise ValueError("prepared task source does not match selection")
+        image_ref = record.get("image_ref")
+        if image_ref and not Path(image_ref).exists():
+            raise ValueError("prepared execution image is unavailable")
+        return PreparedTaskWorkspace(workspace, record["revision"], record.get("image_ref"),
+                                     record.get("gitea_repository"))
+    if destination.exists():
+        raise ValueError("task workspace is incomplete")
+    if logical != "scratch" and not source.is_dir():
+        raise ValueError("selected source is unavailable")
+    task_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    staging = Path(tempfile.mkdtemp(prefix=f".{task_id}-", dir=task_root))
+    try:
+        if logical == "scratch":
+            (staging / "workspace").mkdir(mode=0o700)
+            revision = "scratch"
+        else:
+            revision = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"],
+                                               text=True, stderr=subprocess.DEVNULL).strip()
+            if not re.fullmatch(r"[0-9a-f]{40}", revision):
+                raise ValueError("selected source revision is invalid")
+            subprocess.run(["git", "clone", "--quiet", "--no-hardlinks", str(source), str(staging / "workspace")],
+                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            copied = subprocess.check_output(["git", "-C", str(staging / "workspace"), "rev-parse", "HEAD"],
+                                             text=True).strip()
+            if copied != revision:
+                raise ValueError("selected source changed during preparation")
+        image_ref = None
+        gitea_repository = None
+        config_file = staging / "workspace" / ".pi" / "gondolin.json"
+        if logical != "scratch" and config_file.is_file():
+            config = json.loads(config_file.read_text())
+            if not isinstance(config, dict):
+                raise ValueError("invalid task execution declaration")
+            grant = config.get("gitea")
+            if grant is not None:
+                if not isinstance(grant, dict) or grant.get("access") != "write" or grant.get("repository") != logical:
+                    raise ValueError("repository grant does not match selected workspace")
+                gitea_repository = logical
+            if mode == "gondolin" and "image" in config:
+                declared = config["image"]
+                if not isinstance(declared, str) or not declared:
+                    raise ValueError("declared execution image is invalid")
+                mapped = (image_map or {}).get(f"{declared}@{revision}")
+                if mapped:
+                    candidate = Path(mapped).resolve()
+                else:
+                    relative = Path(declared)
+                    if relative.is_absolute():
+                        raise ValueError("declared execution image requires a verified handoff")
+                    candidate = (staging / "workspace" / relative).resolve()
+                    if not candidate.is_relative_to((staging / "workspace").resolve()):
+                        raise ValueError("declared execution image escaped selected source")
+                if not candidate.is_file() and not candidate.is_dir():
+                    raise ValueError("declared execution image is unavailable")
+                image_ref = str(candidate if mapped else (destination / "workspace" / relative))
+        _write_json(staging / "source.json", {"logical": logical, "source": str(source.resolve()), "mode": mode,
+                                               "revision": revision, "image_ref": image_ref,
+                                               "gitea_repository": gitea_repository})
+        staging.replace(destination)
+        return PreparedTaskWorkspace(workspace, revision, image_ref, gitea_repository)
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -302,21 +399,45 @@ class ScheduledExecutor:
             if not task_id:
                 break
             task = next(t for t in tasks if str(t.get("task-id", t.get("task_id"))) == task_id)
-            self.client.call("dispatch", {"task-id": task_id, "workspace": task["workspace"]})
             task_env = dict(self.env)
             workspace_map = json.loads(self.env.get("AWP_WORKSPACE_MAP_JSON", "{}"))
             workspace = workspace_map.get(task["workspace"])
-            if not isinstance(workspace, str) or not Path(workspace).is_dir():
-                self.client.call("interrupt", {"task-id": task_id})
+            task_root = Path(self.env.get("AWP_TASK_WORKSPACE_DIR") or
+                             str(Path(self.env.get("AWP_TASKING_STORAGE_DIR") or
+                                      self.scheduler.path.parent) / "workspaces"))
+            try:
+                if not isinstance(workspace, str) or not Path(workspace).is_dir():
+                    raise ValueError("selected workspace is unavailable")
+                prepared = prepare_task_workspace(task_id, task["workspace"], Path(workspace), task_root,
+                                                  self.env.get("WORKER_PI_EXECUTION_MODE", "gondolin"),
+                                                  json.loads(self.env.get("AWP_TASK_IMAGE_MAP_JSON", "{}")))
+            except (ValueError, OSError, subprocess.CalledProcessError, json.JSONDecodeError):
+                self.client.call("fail", {"task-id": task_id,
+                                          "failure": "Selected source or execution image preparation failed."})
                 self.scheduler.interrupt(task_id)
-                raise RuntimeError("accepted task workspace is not published on this host")
+                tasks = [t for t in tasks if str(t.get("task-id", t.get("task_id"))) != task_id]
+                continue
+            self.client.call("dispatch", {"task-id": task_id, "workspace": task["workspace"],
+                                          "source-revision": prepared.source_revision})
             task_env.update({"AWP_SCHEDULED_TASK_ID": task_id,
-                             "AWP_SCHEDULED_TASK_WORKSPACE": workspace,
-                             "AWP_SCHEDULED_TASK_INSTRUCTION": task["instruction"]})
-            self.running[task_id] = subprocess.Popen(self.worker_command, env=task_env,
-                                                       start_new_session=True,
-                                                       stdout=subprocess.DEVNULL,
-                                                       stderr=subprocess.DEVNULL)
+                             "AWP_SCHEDULED_TASK_WORKSPACE": str(prepared.path),
+                             "AWP_SCHEDULED_TASK_INSTRUCTION": task["instruction"],
+                             "AWP_SCHEDULED_TASK_SOURCE_REVISION": prepared.source_revision,
+                             "AWP_SCHEDULED_TASK_IMAGE_REF": prepared.image_ref or "",
+                             "AWP_SCHEDULED_TASK_GITEA_REPOSITORY": prepared.gitea_repository or ""})
+            try:
+                log_dir = Path(self.env.get("AWP_TASK_WORKER_LOG_DIR") or str(task_root.parent / "worker-logs"))
+                log_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+                log_dir.chmod(0o700)
+                descriptor = os.open(log_dir / f"{task_id}.log", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+                with os.fdopen(descriptor, "ab", buffering=0) as output:
+                    self.running[task_id] = subprocess.Popen(self.worker_command, env=task_env,
+                                                               start_new_session=True,
+                                                               stdout=output, stderr=subprocess.STDOUT)
+            except OSError:
+                self.client.call("fail", {"task-id": task_id,
+                                          "failure": "Task worker could not start; inspect private diagnostics."})
+                self.scheduler.interrupt(task_id)
             tasks = [t for t in tasks if str(t.get("task-id", t.get("task_id"))) != task_id]
         for task_id, process in list(self.running.items()):
             if process.poll() is not None:

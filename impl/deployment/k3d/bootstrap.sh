@@ -64,14 +64,14 @@ ensure_cluster() {
   fi
   local attempt=0
   while [[ "$attempt" -lt 90 ]]; do
-    if docker exec "$SERVER" k3s kubectl get nodes >/dev/null 2>&1; then return 0; fi
+    if docker exec "$SERVER" kubectl get nodes >/dev/null 2>&1; then return 0; fi
     sleep 2
     attempt=$((attempt + 1))
   done
   die 'k3d server did not become ready within 180 seconds'
 }
 
-k() { docker exec -i "$SERVER" k3s kubectl "$@"; }
+k() { docker exec -i "$SERVER" kubectl "$@"; }
 
 random_secret() {
   local target="$1"
@@ -192,11 +192,11 @@ import_optional_voice_secrets() {
     ensure_secret awp-v2 broker-client token "$broker_token"
   fi
   if [[ -s "$edge_env" ]] && ! k -n awp-v2 get secret voice-edge-settings >/dev/null 2>&1; then
-    docker exec -i "$SERVER" k3s kubectl -n awp-v2 create secret generic voice-edge-settings \
+    docker exec -i "$SERVER" kubectl -n awp-v2 create secret generic voice-edge-settings \
       --from-env-file=/dev/stdin --dry-run=client -o yaml <"$edge_env" | k apply -f - >/dev/null
   fi
   if [[ -s "$owner_sample" ]] && ! k -n awp-v2 get secret voxlock-owner-sample >/dev/null 2>&1; then
-    docker exec -i "$SERVER" k3s kubectl -n awp-v2 create secret generic voxlock-owner-sample \
+    docker exec -i "$SERVER" kubectl -n awp-v2 create secret generic voxlock-owner-sample \
       --from-file=voxlock-voice-sample=/dev/stdin --dry-run=client -o yaml <"$owner_sample" | k apply -f - >/dev/null
   fi
 }
@@ -245,7 +245,7 @@ apply_flux() {
   local known_hosts
   known_hosts='github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl'
   if ! k -n flux-system get secret awp-v2-source >/dev/null 2>&1; then
-    docker exec -i "$SERVER" k3s kubectl -n flux-system create secret generic awp-v2-source \
+    docker exec -i "$SERVER" kubectl -n flux-system create secret generic awp-v2-source \
       --from-file=identity=/dev/stdin --from-literal="known_hosts=${known_hosts}" \
       --dry-run=client -o yaml <"$FLUX_KEY" | k apply -f - >/dev/null
   fi
@@ -324,7 +324,11 @@ EOF
 status() {
   k get nodes
   k -n awp-v2 get pods,services
-  k -n flux-system get gitrepositories,kustomizations
+  if k get crd gitrepositories.source.toolkit.fluxcd.io >/dev/null 2>&1; then
+    k -n flux-system get gitrepositories,kustomizations
+  else
+    printf 'flux=not-installed\n'
+  fi
   if [[ "$CREATED_CLUSTER" == 1 ]] || k -n awp-ops get deployment semaphore >/dev/null 2>&1; then
     printf 'semaphore_url=http://localhost:%s\n' "$UI_PORT"
   fi

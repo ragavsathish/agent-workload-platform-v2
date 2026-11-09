@@ -19,8 +19,9 @@ loopback-only; no public or tailnet application route is added.
   running with data in the host-backed support directory. Bootstrap must reuse
   it and must not recreate or delete it. A clean host with no cluster gets a
   new loopback-only cluster and persistent local-path backing.
-- K3s includes `k3s kubectl`; `docker exec k3d-awp-v2-ops-server-0 k3s kubectl`
-  avoids a host `kubectl` install. K3s also has the packaged Helm controller,
+- The k3d server image provides `/bin/kubectl` as a symlink to `k3s`;
+  `docker exec k3d-awp-v2-ops-server-0 kubectl` avoids a host `kubectl`
+  install. K3s also has the packaged Helm controller,
   although the first GitOps slice does not move the existing Semaphore release.
 - A private repository needs a checkout and a read-only credential inside the
   cluster. The bootstrap reads an SSH key from the private local support

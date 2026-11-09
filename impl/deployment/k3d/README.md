@@ -10,7 +10,7 @@ impl/deployment/k3d/bootstrap.sh status
 ```
 
 The host-side command prerequisites are Docker and k3d. It uses the k3d server
-container's `k3s kubectl`, installs Flux `v2.10.0` from its pinned upstream
+container's bundled `kubectl` entry point (a symlink to `k3s`), installs Flux `v2.10.0` from its pinned upstream
 release manifest, builds/imports the source-defined Grain, gateway, Edge, and
 trace-render images, then waits for Flux to report the private Git source and
 core Kustomization Ready. Flutter web assets are built in the pinned

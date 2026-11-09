@@ -1,7 +1,8 @@
 # Slice 50 decisions
 
 1. Use Flux v2.10.0 with controllers installed through the Kubernetes API
-   reached by `docker exec ... k3s kubectl`; do not require a host Flux,
+   reached by the bundled `kubectl` entry point in the k3d server container;
+   do not require a host Flux,
    kubectl, or Helm executable.
 2. Use a private GitHub repository and a read-only SSH deploy key. The key is
    kept under the user support directory with restrictive permissions and is

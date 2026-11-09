@@ -2,17 +2,16 @@
 
 ## Goal
 
-Make local AWP v2 start from the private GitHub source through Flux on k3d. The
+Make local AWP v2 start from the public GitHub source through Flux on k3d. The
 user-side bootstrap requires Docker and k3d, creates the cluster only when
 absent, reuses existing cluster and persistent storage, installs a pinned Flux
-release, and points Flux at the private AWP v2 repository using a read-only
-deploy key.
+release, and points Flux at the public AWP v2 repository without a credential.
 Application Services remain ClusterIP. The current Semaphore route stays
 loopback-only; no public or tailnet application route is added.
 
 ## Discovery
 
-- The v2 checkout initially had no Git remote. A new private source repository
+- The v2 checkout initially had no Git remote. A public source repository
   is available at `ragavsathish/agent-workload-platform-v2`; its selected
   source revision must be pushed before Flux can reconcile it.
 - The k3d host already has Docker and k3d, and the `awp-v2-ops` cluster is
@@ -23,12 +22,8 @@ loopback-only; no public or tailnet application route is added.
   `docker exec k3d-awp-v2-ops-server-0 kubectl` avoids a host `kubectl`
   install. K3s also has the packaged Helm controller,
   although the first GitOps slice does not move the existing Semaphore release.
-- A private repository needs a checkout and a read-only credential inside the
-  cluster. The bootstrap reads an SSH key from the private local support
-  directory and never prints it. Acquiring/attaching that key to GitHub is a
-  one-time repository setup operation, separate from repeated local bootstrap.
-  Docker and k3d alone cannot provide credentials or source access to a private
-  GitHub repository.
+- Flux reads the public source anonymously over HTTPS; no Git key or
+  Kubernetes authentication Secret is needed.
 - Flux reconciles Kubernetes manifests; it does not build local images or
   provide host macOS services. The bootstrap builds and imports the source-
   defined Grain, gateway, Edge, and trace-render images before reconciliation
@@ -40,16 +35,15 @@ loopback-only; no public or tailnet application route is added.
 See [spec.feature](spec.feature). The script must:
 
 1. Require only `docker` and `k3d` host executables, a running Docker engine,
-   a checkout, and the preprovisioned private read-only deploy key.
+   a checkout of the public source.
 2. Create `awp-v2-ops` only if absent; reuse or start it otherwise without
    deleting it, changing the current context, or touching PVC data.
-3. Install Flux controllers at the pinned version and configure a private
-   `GitRepository` plus `Kustomization` for the repository's local deployment
-   path, using a mode-0600 read-only deploy key outside source control.
+3. Install Flux controllers at the pinned version and configure a public
+   `GitRepository` plus `Kustomization` for the repository's deployment path.
 4. Create runtime Secrets outside Git; build and import local source-defined
    images; suspend voice reconciliation when broker/owner inputs are missing.
 5. Keep AWP Services ClusterIP and the only local operator entry at loopback.
-6. Report a clear prerequisite error when source/auth material is missing;
+6. Report a clear prerequisite error when the source is unavailable;
    never claim GitOps readiness before Flux reports the source and
    Kustomization Ready.
 
@@ -62,9 +56,8 @@ waits for Flux readiness. Core, optional voice, and fresh-cluster Semaphore
 Kustomizations are under `impl/deployment/k3d/`.
 
 Static validation passed: `bash -n impl/deployment/k3d/bootstrap.sh` and a
-trailing-whitespace scan across Slice 50 deployment and plan files. The private
-GitHub source repo is populated on `main`; its read-only deploy key is
-provisioned at the support path with mode 0600.
+trailing-whitespace scan across Slice 50 deployment and plan files. The public
+GitHub source repo is populated on `main`; Flux reads it anonymously.
 
 Runtime verification on 2026-11-09:
 

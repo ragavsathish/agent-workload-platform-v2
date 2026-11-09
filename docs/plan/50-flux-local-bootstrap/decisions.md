@@ -4,9 +4,8 @@
    reached by the bundled `kubectl` entry point in the k3d server container;
    do not require a host Flux,
    kubectl, or Helm executable.
-2. Use a private GitHub repository and a read-only SSH deploy key. The key is
-   kept under the user support directory with restrictive permissions and is
-   stored as a Kubernetes Secret only in the `flux-system` namespace.
+2. Use the public GitHub repository over HTTPS; Flux needs no repository
+   credential or Kubernetes authentication Secret.
 3. Do not recreate the existing k3d cluster or replace any PV/PVC during
    bootstrap. Reuse the existing persistent state and its loopback ports.
 4. Keep the Flux source scope explicit. Do not recursively apply every YAML

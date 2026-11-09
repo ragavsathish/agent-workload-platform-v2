@@ -10,24 +10,20 @@ impl/deployment/k3d/bootstrap.sh status
 ```
 
 The host-side command prerequisites are Docker and k3d. It uses the k3d server
-container's bundled `kubectl` entry point (a symlink to `k3s`), installs Flux `v2.10.0` from its pinned upstream
-release manifest, builds/imports the source-defined Grain, gateway, Edge, and
-trace-render images, then waits for Flux to report the private Git source and
+container's bundled `kubectl` entry point (a symlink to `k3s`), installs Flux
+`v2.10.0` from its pinned upstream release manifest, builds/imports the
+source-defined Grain, gateway, Edge, and
+trace-render images, then waits for Flux to report the public Git source and
 core Kustomization Ready. Flutter web assets are built in the pinned
 `ghcr.io/cirruslabs/flutter:3.47.7` container when absent from the checkout.
 Flux applies only the resources explicitly listed in
 [`kustomization.yaml`](kustomization.yaml). It pulls the chart and upstream
 images declared by those manifests.
 
-Before first use, place the private repository's **read-only deploy key** at
-`~/Library/Application Support/AWPv2/k3d/flux/github-deploy-key` with mode
-0600. Its matching public key must be registered as a read-only deploy key on
-the private `ragavsathish/agent-workload-platform-v2` repository. Bootstrap
-does not create a GitHub credential, print a private key, or write credentials
-into Git. Keep a private source checkout on a new host and provision the
-deploy key once; Docker and k3d alone cannot grant access to a private Git
-repository. The repository's `main` branch must contain this bootstrap slice
-before Flux can reconcile it.
+Flux reads the public
+[`ragavsathish/agent-workload-platform-v2`](https://github.com/ragavsathish/agent-workload-platform-v2)
+repository over HTTPS without credentials. The repository's `main` branch
+must contain this bootstrap slice before Flux can reconcile it.
 
 The script creates `awp-v2-ops` only when absent. When present it reuses or
 starts the existing cluster, preserves all PVCs, and never deletes/recreates

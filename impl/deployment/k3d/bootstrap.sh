@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # One-command local AWP v2 bootstrap. Requires only Docker and k3d on the host.
-# Flux reads the private GitHub repo with a read-only deploy key stored outside
-# the checkout. This script never deletes the cluster or persistent storage.
+# Flux reads the public GitHub repo anonymously. This script never deletes the
+# cluster or persistent storage.
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 STATE="${HOME}/Library/Application Support/AWPv2/k3d"
@@ -13,7 +13,6 @@ API_PORT="6448"
 UI_PORT="9780"
 FLUX_VERSION="v2.10.0"
 FLUX_INSTALL_URL="https://github.com/fluxcd/flux2/releases/download/${FLUX_VERSION}/install.yaml"
-FLUX_KEY="${STATE}/flux/github-deploy-key"
 SECRET_DIR="${STATE}/secrets"
 CREATED_CLUSTER=0
 PLATFORM="linux/arm64"
@@ -28,13 +27,8 @@ preflight() {
   need docker
   need k3d
   docker info >/dev/null 2>&1 || die 'Docker engine is not running'
-  if [[ "${1:-source}" == source ]]; then
-    [[ -f "$FLUX_KEY" ]] || die "private source key missing: $FLUX_KEY (install the read-only GitHub deploy key with mode 0600)"
-    [[ -s "$FLUX_KEY" ]] || die 'private source key is empty'
-    chmod 600 "$FLUX_KEY"
-  fi
-  mkdir -p "$STATE/storage" "$SECRET_DIR" "${STATE}/flux"
-  chmod 700 "$STATE" "$STATE/storage" "$SECRET_DIR" "${STATE}/flux"
+  mkdir -p "$STATE/storage" "$SECRET_DIR"
+  chmod 700 "$STATE" "$STATE/storage" "$SECRET_DIR"
   case "$(docker info --format '{{.Architecture}}')" in
     arm64|aarch64) PLATFORM='linux/arm64' ;;
     amd64|x86_64) PLATFORM='linux/amd64' ;;
@@ -242,13 +236,6 @@ apply_flux() {
   k -n flux-system rollout status deployment/source-controller --timeout=300s >/dev/null
   k -n flux-system rollout status deployment/kustomize-controller --timeout=300s >/dev/null
 
-  local known_hosts
-  known_hosts='github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl'
-  if ! k -n flux-system get secret awp-v2-source >/dev/null 2>&1; then
-    docker exec -i "$SERVER" kubectl -n flux-system create secret generic awp-v2-source \
-      --from-file=identity=/dev/stdin --from-literal="known_hosts=${known_hosts}" \
-      --dry-run=client -o yaml <"$FLUX_KEY" | k apply -f - >/dev/null
-  fi
   k apply -f - <"${ROOT}/impl/deployment/k3d/flux/source.yaml" >/dev/null
   if [[ "$CREATED_CLUSTER" == 1 ]]; then
     apply_semaphore_source
@@ -264,7 +251,7 @@ apply_flux() {
   fi
 
   k -n flux-system wait gitrepository/awp-v2 --for=condition=Ready --timeout=300s >/dev/null || \
-    die 'Flux could not fetch the private repository; check the read-only deploy key and that main contains the bootstrap manifests'
+    die 'Flux could not fetch the public repository; check network access and that main contains the bootstrap manifests'
   k -n flux-system wait kustomization/awp-v2-core --for=condition=Ready --timeout=600s >/dev/null || \
     die 'Flux source is ready but core AWP reconciliation did not become Ready'
   if [[ "$CREATED_CLUSTER" == 1 ]]; then

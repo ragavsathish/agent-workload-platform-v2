@@ -30,9 +30,10 @@ loopback-only; no public or tailnet application route is added.
   Docker and k3d alone cannot provide credentials or source access to a private
   GitHub repository.
 - Flux reconciles Kubernetes manifests; it does not build local images or
-  provide host macOS services. The bootstrap imports the two locally built
-  application images before Flux reconciliation. Voice remains degraded when
-  the private native broker credential/host capability is not available.
+  provide host macOS services. The bootstrap builds and imports the source-
+  defined Grain, gateway, Edge, and trace-render images before reconciliation
+  when voice inputs are present. Voice remains degraded when the private
+  native broker credential/host capability is not available.
 
 ## Acceptance scenarios
 
@@ -56,14 +57,33 @@ See [spec.feature](spec.feature). The script must:
 
 `impl/deployment/k3d/bootstrap.sh` creates or reuses/starts the cluster, builds
 and imports the source-defined local images, installs Flux `v2.10.0` through
-the in-cluster K3s kubectl client, prepares private Secrets, and waits for Flux
-readiness. Core, optional voice, and fresh-cluster Semaphore Kustomizations
-are under `impl/deployment/k3d/`.
+the k3d server's bundled `kubectl` entry point, prepares private Secrets, and
+waits for Flux readiness. Core, optional voice, and fresh-cluster Semaphore
+Kustomizations are under `impl/deployment/k3d/`.
 
 Static validation passed: `bash -n impl/deployment/k3d/bootstrap.sh` and a
-trailing-whitespace scan across Slice 50 deployment and plan files. Runtime
-reconciliation is intentionally not run here: the GitHub repository is private
-and must first contain the selected source snapshot. A read-only deploy key is
-provisioned at the documented support path with mode 0600. On the existing
-cluster, Semaphore's current Helm release and PVCs are preserved; takeover by
-the K3s Helm Controller is deferred to a separately reviewed migration.
+trailing-whitespace scan across Slice 50 deployment and plan files. The private
+GitHub source repo is populated on `main`; its read-only deploy key is
+provisioned at the support path with mode 0600.
+
+Runtime verification on 2026-11-09:
+
+- `bootstrap.sh up` reused `awp-v2-ops`, built/imported the four source-defined
+  local images, and completed without deleting the cluster or its PVCs.
+- Flux `GitRepository/awp-v2`, `Kustomization/awp-v2-core`, and
+  `Kustomization/awp-v2-voice` reported Ready at `main@sha1:57211353336b3bed9ca26ebc06b283642c8a84e1`.
+- All 11 AWP pods returned Ready. The Grain PVC remained Bound with UID
+  `99491dfc-8d65-4417-b413-a42ee1f87804` and PV `awp-v2-grain-candidate`.
+- Prometheus `/-/ready` passed. PromQL returned gateway readiness `1`,
+  `up{job="fluent-bit-k3d-node"}=1`, and 112 k3d-node CPU series.
+- Every AWP Service remains ClusterIP. The only Ingress is Semaphore at
+  `localhost`; k3d maps its UI to `127.0.0.1:9780` and API to
+  `127.0.0.1:6448`.
+- The existing Semaphore Helm release and PVCs are preserved. Flux's
+  Semaphore Kustomization remains suspended on this existing cluster pending
+  a reviewed Helm ownership migration; a newly created cluster installs
+  Semaphore through K3s's Helm Controller.
+- Voice inputs were present, so the Edge and trace-render Kustomization was
+  enabled. This establishes deployment readiness only; owner-authenticated
+  live voice and host-native Pi/MLX/Gondolin operations remain separate
+  qualification gates.

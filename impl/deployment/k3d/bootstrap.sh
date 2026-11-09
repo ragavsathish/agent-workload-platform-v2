@@ -249,7 +249,7 @@ apply_flux() {
       --from-file=identity=/dev/stdin --from-literal="known_hosts=${known_hosts}" \
       --dry-run=client -o yaml <"$FLUX_KEY" | k apply -f - >/dev/null
   fi
-  k apply -f "${ROOT}/impl/deployment/k3d/flux/source.yaml" >/dev/null
+  k apply -f - <"${ROOT}/impl/deployment/k3d/flux/source.yaml" >/dev/null
   if [[ "$CREATED_CLUSTER" == 1 ]]; then
     apply_semaphore_source
   else

@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: trace-render-worker
+  namespace: awp-v2
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: trace-render-worker
+  ports:
+    - name: http
+      port: 9460
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trace-render-worker
+  namespace: awp-v2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: trace-render-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: trace-render-worker
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: trace-render-worker
+          image: awp-v2-trace-render-worker:slice47
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 9460
+          env:
+            - { name: ARTIFACT_ENDPOINT_URL, value: http://s3mock.awp-v2.svc.cluster.local:9090 }
+            - { name: ARTIFACT_BUCKET, value: agent-artifacts }
+            - { name: ARTIFACT_ACCESS_KEY, value: local-test }
+            - { name: ARTIFACT_SECRET_KEY, value: local-test }
+            - { name: INFERENCE_BROKER_BASE_URL, value: http://host.docker.internal:9443/v1 }
+            - { name: INFERENCE_BROKER_TOKEN_FILE, value: /run/secrets/broker-token }
+            - { name: TRACE_RENDER_WORKER_PORT, value: "9460" }
+            - { name: TRACE_RENDER_TIMEOUT_MS, value: "600000" }
+            - { name: OTEL_EXPORTER_OTLP_ENDPOINT, value: http://otel-lgtm.awp-v2.svc.cluster.local:4318 }
+            - { name: OTEL_DEPLOYMENT_ENVIRONMENT, value: awp-v2-local }
+            - { name: OTEL_LOGS_EXPORTER, value: none }
+            - { name: OTEL_METRIC_EXPORT_INTERVAL, value: "5000" }
+          volumeMounts:
+            - { name: scratch, mountPath: /scratch }
+            - { name: tmp, mountPath: /tmp }
+            - { name: broker-token, mountPath: /run/secrets/broker-token, subPath: token, readOnly: true }
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: "2", memory: 2Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+      volumes:
+        - name: scratch
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: broker-token
+          secret:
+            secretName: broker-client
+            defaultMode: 0440

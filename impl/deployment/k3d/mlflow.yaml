@@ -1,0 +1,103 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow
+  namespace: awp-v2
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: mlflow
+  ports:
+    - name: http
+      port: 5000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mlflow
+  namespace: awp-v2
+spec:
+  serviceName: mlflow
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mlflow
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mlflow
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mlflow
+          image: ghcr.io/mlflow/mlflow:v3.17.1-full@sha256:190306b1739b9646d6d39333594334b69ba14ab843db927712c790b50892f262
+          imagePullPolicy: IfNotPresent
+          command: ["mlflow"]
+          args:
+            - server
+            - --backend-store-uri
+            - sqlite:////var/lib/mlflow/mlflow.db
+            - --artifacts-destination
+            - s3://agent-artifacts/mlflow
+            - --serve-artifacts
+            - --host
+            - 0.0.0.0
+            - --port
+            - "5000"
+            - --workers
+            - "1"
+          env:
+            - { name: AWS_ACCESS_KEY_ID, value: local-test }
+            - { name: AWS_SECRET_ACCESS_KEY, value: local-test }
+            - { name: AWS_DEFAULT_REGION, value: us-east-1 }
+            - { name: AWS_S3_ADDRESSING_STYLE, value: path }
+            - { name: MLFLOW_S3_ENDPOINT_URL, value: http://s3mock.awp-v2.svc.cluster.local:9090 }
+            - { name: HOME, value: /tmp }
+          ports:
+            - { name: http, containerPort: 5000 }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/mlflow }
+            - { name: tmp, mountPath: /tmp }
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: "2", memory: 2Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 10Gi

@@ -12,6 +12,7 @@ import plistlib
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from deployment import (GrainTaskClient, ScheduledExecutor, ServiceSpec,
@@ -98,6 +99,23 @@ def native_specs(env: dict[str, str]) -> tuple[ServiceSpec, ...]:
                                                            "--state", env["AWP_DEPLOY_STATE"]), IMPL),)
 
 
+def service_environment(env_file: Path, state: Path) -> dict[str, str]:
+    """Build the complete environment shared by a supervisor and its restart gate."""
+    values = load_env(env_file)
+    level = values.get("AWP_DEPLOYMENT_LEVEL", "full")
+    if level not in {"voice", "durable", "full"}:
+        raise ValueError("AWP_DEPLOYMENT_LEVEL must be voice, durable, or full")
+    values.update({"AWP_DEPLOY_ENV": str(env_file), "AWP_DEPLOY_STATE": str(state)})
+    environment = {**os.environ, **values}
+    environment["AWP_DEPLOYMENT_LEVEL"] = level
+    if level != "voice":
+        environment["WORKER_PI_EXECUTION_MODE"] = execution_mode_for_level(level)
+    telemetry = RUNTIME / "products/voice-agent/packages/telemetry/src"
+    environment["PYTHONPATH"] = os.pathsep.join([str(BROKER / "src"), str(telemetry),
+        environment.get("PYTHONPATH", "")])
+    return environment
+
+
 def schedule(env: dict[str, str], state: Path) -> None:
     level = env.get("AWP_DEPLOYMENT_LEVEL", "full")
     if level not in {"durable", "full"}:
@@ -125,6 +143,139 @@ def service_status(state: Path) -> dict[str, dict[str, object]]:
     return result
 
 
+def _ps_table() -> dict[int, tuple[int, int, str]]:
+    """Return PID -> (parent PID, process group, command) for safe lifecycle checks."""
+    output = subprocess.check_output(
+        ["ps", "-axo", "pid=,ppid=,pgid=,command="], text=True
+    )
+    result: dict[int, tuple[int, int, str]] = {}
+    for line in output.splitlines():
+        fields = line.strip().split(None, 3)
+        if len(fields) != 4:
+            continue
+        try:
+            pid, ppid, pgid = map(int, fields[:3])
+        except ValueError:
+            continue
+        result[pid] = (ppid, pgid, fields[3])
+    return result
+
+
+def _matching_run_processes(state: Path, env_file: Path) -> list[int]:
+    script = str(Path(__file__).resolve())
+    relative_script = str(Path(__file__).resolve().relative_to(ROOT))
+    return [pid for pid, (_ppid, pgid, command) in _ps_table().items()
+            if pgid == pid and "stack.py run" in command
+            and (script in command or relative_script in command)
+            and str(env_file) in command and str(state) in command]
+
+
+def _owned_supervisor(state: Path, env_file: Path) -> tuple[int, dict[str, int]] | None:
+    """Find the unique stack.py run parent that owns every recorded child."""
+    run_dir = state / "run"
+    records = {}
+    for file in run_dir.glob("*.json"):
+        try:
+            record = json.loads(file.read_text())
+            records[file.stem] = int(record["pid"])
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"invalid service record: {file.name}") from exc
+    if not records:
+        if _matching_run_processes(state, env_file):
+            raise RuntimeError("matching supervisor exists without verified service records")
+        return None
+
+    processes = _ps_table()
+    parent_ids: set[int] = set()
+    for name, pid in records.items():
+        process = processes.get(pid)
+        if process is None:
+            raise RuntimeError(f"recorded {name} process is not running")
+        ppid, pgid, _command = process
+        if pgid != pid:
+            raise RuntimeError(f"recorded {name} process group is unexpected")
+        parent_ids.add(ppid)
+    if len(parent_ids) != 1:
+        raise RuntimeError("recorded services do not share one supervisor")
+
+    supervisor_pid = next(iter(parent_ids))
+    supervisor = processes.get(supervisor_pid)
+    if supervisor is None:
+        raise RuntimeError("AWP v2 supervisor is not running")
+    _ppid, pgid, command = supervisor
+    script = str(Path(__file__).resolve())
+    relative_script = str(Path(__file__).resolve().relative_to(ROOT))
+    expected = ((script in command or relative_script in command)
+                and "stack.py run" in command and "--env" in command
+                and str(env_file) in command and "--state" in command
+                and str(state) in command)
+    if not expected or pgid != supervisor_pid:
+        raise RuntimeError("process owning AWP v2 services does not match the requested stack")
+    return supervisor_pid, records
+
+
+def stop_stack(state: Path, env_file: Path, timeout: float = 45.0) -> dict[str, object]:
+    """Gracefully stop only the verified native stack supervisor and its children."""
+    if not env_file.is_file():
+        raise FileNotFoundError("service environment file does not exist")
+    load_env(env_file)
+    owned = _owned_supervisor(state, env_file)
+    if owned is None:
+        return {"stopped": False, "already_stopped": True, "services": []}
+    supervisor_pid, children = owned
+    started = time.monotonic()
+    os.kill(supervisor_pid, signal.SIGTERM)
+    deadline = started + timeout
+    while time.monotonic() < deadline:
+        processes = _ps_table()
+        supervisor_alive = supervisor_pid in processes
+        live_children = [name for name, pid in children.items() if pid in processes]
+        if not supervisor_alive and not live_children:
+            (state / "supervisor.json").unlink(missing_ok=True)
+            return {"stopped": True, "already_stopped": False,
+                    "services": sorted(children),
+                    "duration_seconds": round(time.monotonic() - started, 2)}
+        time.sleep(0.25)
+    raise TimeoutError("native stack did not stop cleanly; no force-kill was attempted")
+
+
+def start_stack(state: Path, env_file: Path, timeout: float = 180.0) -> dict[str, object]:
+    """Start the native stack detached and wait for its supervisor readiness gate."""
+    if not env_file.is_file():
+        raise FileNotFoundError("service environment file does not exist")
+    load_env(env_file)
+    if _owned_supervisor(state, env_file) is not None:
+        raise RuntimeError("native stack is already running")
+    if _matching_run_processes(state, env_file):
+        raise RuntimeError("matching native stack process exists without verified service ownership")
+    state.mkdir(parents=True, exist_ok=True, mode=0o700)
+    state.chmod(0o700)
+    log_path = state / "supervisor.log"
+    command = [sys.executable, "-u", str(Path(__file__).resolve()), "run",
+               "--env", str(env_file), "--state", str(state)]
+    with log_path.open("ab", buffering=0) as log:
+        process = subprocess.Popen(command, cwd=IMPL, stdin=subprocess.DEVNULL,
+                                   stdout=log, stderr=subprocess.STDOUT,
+                                   start_new_session=True, close_fds=True)
+    (state / "supervisor.json").write_text(json.dumps({"pid": process.pid,
+                                                       "command": command}) + "\n")
+    (state / "supervisor.json").chmod(0o600)
+    expected_names = {spec.name for spec in native_specs(service_environment(env_file, state))}
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        code = process.poll()
+        if code is not None:
+            (state / "supervisor.json").unlink(missing_ok=True)
+            raise RuntimeError(f"native stack exited during startup with code {code}")
+        children = service_status(state)
+        if expected_names <= children.keys() and all(
+                children[name]["running"] for name in expected_names):
+            return {"started": True, "supervisor_pid": process.pid,
+                    "services": sorted(expected_names)}
+        time.sleep(0.25)
+    raise TimeoutError("native stack did not become ready before timeout")
+
+
 def install_launchagent(env_file: Path, state: Path, label: str) -> Path:
     plist = Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
     plist.parent.mkdir(parents=True, exist_ok=True)
@@ -145,7 +296,7 @@ def install_launchagent(env_file: Path, state: Path, label: str) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("run", "schedule", "status", "check-ready", "install", "rollback", "qualify-version", "activate-version"))
+    parser.add_argument("command", choices=("run", "schedule", "status", "check-ready", "start", "stop", "install", "rollback", "qualify-version", "activate-version"))
     parser.add_argument("--env", type=Path)
     parser.add_argument("--state", type=Path, required=True)
     parser.add_argument("--version")
@@ -155,6 +306,13 @@ def main() -> None:
     state = args.state.resolve()
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     state.chmod(0o700)
+    if args.command in {"start", "stop"}:
+        if not args.env:
+            parser.error("--env is required")
+        env_file = args.env.resolve()
+        result = start_stack(state, env_file) if args.command == "start" else stop_stack(state, env_file)
+        print(json.dumps(result, sort_keys=True))
+        return
     if args.command == "status":
         import urllib.request
         values = load_env(args.env.resolve()) if args.env else {}
@@ -243,21 +401,11 @@ def main() -> None:
     if not args.env:
         parser.error("--env is required")
     env_file = args.env.resolve()
-    values = load_env(env_file)
-    level = values.get("AWP_DEPLOYMENT_LEVEL", "full")
-    if level not in {"voice", "durable", "full"}:
-        raise ValueError("AWP_DEPLOYMENT_LEVEL must be voice, durable, or full")
-    values.update({"AWP_DEPLOY_ENV": str(env_file), "AWP_DEPLOY_STATE": str(state)})
+    load_env(env_file)
     if args.command == "install":
         print(install_launchagent(env_file, state, "com.awp.v2.owner-stack"))
         return
-    environment = {**os.environ, **values}
-    environment["AWP_DEPLOYMENT_LEVEL"] = level
-    if level != "voice":
-        environment["WORKER_PI_EXECUTION_MODE"] = execution_mode_for_level(level)
-    telemetry = RUNTIME / "products/voice-agent/packages/telemetry/src"
-    environment["PYTHONPATH"] = os.pathsep.join([str(BROKER / "src"), str(telemetry),
-        environment.get("PYTHONPATH", "")])
+    environment = service_environment(env_file, state)
     if args.command == "schedule":
         def stop_schedule(_signum, _frame):
             raise KeyboardInterrupt

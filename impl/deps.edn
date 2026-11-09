@@ -1,6 +1,10 @@
 {:paths ["src"]
  :deps {org.clojure/clojure {:mvn/version "1.12.0"}
         org.clojure/data.json {:mvn/version "2.5.1"}
+        ;; Grain pins lmdbjava 0.9.2 with native .33-2, whose Linux arm64
+        ;; binary requires glibc 2.38. Pin the upstream compatible native
+        ;; repack while leaving Grain's source revision unchanged.
+        org.lmdbjava/native {:mvn/version "0.9.33-5"}
         cat/schema-util
         {:git/url "https://github.com/ObneyAI/grain.git"
          :git/sha "dbf5b5229aad09785e40f71e96adf65c90f971d5"

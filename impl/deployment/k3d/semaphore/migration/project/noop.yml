@@ -1,0 +1,9 @@
+---
+- name: Verify the pinned Semaphore host-runner project
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Emit a harmless, fixed marker
+      ansible.builtin.debug:
+        msg: "AWP v2 Grain migration project pin check"

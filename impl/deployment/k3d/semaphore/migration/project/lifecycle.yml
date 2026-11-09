@@ -1,0 +1,41 @@
+---
+- name: Validate the staged native runtime rollback path
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Assert reviewed source, state, and staged runtime paths
+      ansible.builtin.assert:
+        that:
+          - awp_repo_root == "/Users/sathish.narayanan/Documents/git/agent-workload-platform-v2"
+          - awp_state_root == "/private/tmp/awp-v2-state"
+          - awp_service_env == "/private/tmp/awp-v2-deploy-config/service.env"
+          - awp_runtime_root is match("^/Users/.*/Library/Application Support/AWPv2/k3d/semaphore/source-[a-f0-9]{64}-full$")
+        quiet: true
+
+    - name: Verify staged source image and its ability to restart the native services
+      ansible.builtin.command:
+        argv:
+          - /opt/homebrew/bin/python3.14
+          - "{{ playbook_dir }}/lifecycle.py"
+          - validate-start
+          - --runtime-root
+          - "{{ awp_runtime_root }}"
+          - --env
+          - "{{ awp_service_env }}"
+          - --state
+          - "{{ awp_state_root }}"
+          - --match-script
+          - "{{ awp_repo_root }}/impl/deployment/stack.py"
+          - --stack-sha256
+          - "{{ awp_stack_sha256 }}"
+          - --source-runtime-root
+          - "{{ awp_source_runtime_root }}"
+          - --source-stack-sha256
+          - "{{ awp_source_stack_sha256 }}"
+      register: lifecycle_result
+      changed_when: false
+
+    - name: Publish only the runtime path and service list
+      ansible.builtin.debug:
+        var: lifecycle_result.stdout

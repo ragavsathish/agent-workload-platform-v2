@@ -134,6 +134,12 @@
   (when-not (and system (string? token) (not (str/blank? token)))
     (throw (ex-info "system and token required" {})))
   (let [server (HttpServer/create (InetSocketAddress. ^String host (int port)) 0)]
+    (.createContext server "/health"
+      (reify HttpHandler
+        (handle [_ exchange]
+          (if (= "GET" (.getRequestMethod exchange))
+            (send! exchange 200 {:status "ready"})
+            (send! exchange 405 {:error "method-not-allowed"})))))
     (.createContext server "/internal/session"
       (reify HttpHandler
         (handle [_ exchange]

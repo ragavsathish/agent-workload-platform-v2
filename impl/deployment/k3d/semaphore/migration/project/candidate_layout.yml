@@ -1,0 +1,35 @@
+---
+- name: Inspect the retained Grain candidate layout without changing it
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Assert the reviewed candidate and source paths
+      ansible.builtin.assert:
+        that:
+          - awp_state_root == "/private/tmp/awp-v2-state"
+          - awp_service_env == "/private/tmp/awp-v2-deploy-config/service.env"
+          - awp_candidate_root == "{{ lookup('env', 'HOME') }}/Library/Application Support/AWPv2/k3d/storage/awp-v2-grain-candidate/grain-candidate"
+        quiet: true
+
+    - name: Read the candidate directory and compare the pinned manifest paths
+      ansible.builtin.command:
+        argv:
+          - /opt/homebrew/bin/python3.14
+          - "{{ playbook_dir }}/candidate_layout.py"
+          - --env
+          - "{{ awp_service_env }}"
+          - --state
+          - "{{ awp_state_root }}"
+          - --target
+          - "{{ awp_candidate_root }}"
+          - --runtime-root
+          - "{{ awp_runtime_root }}"
+          - --stack-sha256
+          - "{{ awp_stack_sha256 }}"
+      register: candidate_layout_result
+      changed_when: false
+
+    - name: Publish only the redacted layout classification and path checks
+      ansible.builtin.debug:
+        var: candidate_layout_result.stdout

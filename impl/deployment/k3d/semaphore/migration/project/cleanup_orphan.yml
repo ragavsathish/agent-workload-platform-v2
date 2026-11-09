@@ -1,0 +1,30 @@
+---
+- name: Clean up only validated orphaned Semaphore preflight processes
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Assert the cleanup is limited to the reviewed task and paths
+      ansible.builtin.assert:
+        that:
+          - awp_state_root == "/private/tmp/awp-v2-state"
+          - awp_repo_root == "/Users/sathish.narayanan/Documents/git/agent-workload-platform-v2"
+        quiet: true
+
+    - name: Validate and terminate only the orphaned task process tree
+      ansible.builtin.command:
+        argv:
+          - /opt/homebrew/bin/python3.14
+          - "{{ playbook_dir }}/cleanup_orphan.py"
+          - --ansible-pid
+          - "70547"
+          - --module-pid
+          - "70558"
+          - --preflight-pid
+          - "70559"
+      register: cleanup_result
+      changed_when: "'cleanup=complete' in cleanup_result.stdout"
+
+    - name: Publish the cleanup result
+      ansible.builtin.debug:
+        var: cleanup_result.stdout

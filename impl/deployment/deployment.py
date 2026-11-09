@@ -345,8 +345,9 @@ class GrainTaskClient:
     """Private scheduler capability to the Grain task authority."""
     def __init__(self, base_url: str, token: str, owner: str | None = None):
         parsed = urlsplit(base_url)
-        if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost"}:
-            raise ValueError("Grain scheduler endpoint must be loopback HTTP")
+        allowed_hosts = {"127.0.0.1", "localhost", "grain.awp-v2.svc.cluster.local"}
+        if parsed.scheme != "http" or parsed.hostname not in allowed_hosts:
+            raise ValueError("Grain scheduler endpoint must be loopback or the private k3d Grain service")
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.owner = owner

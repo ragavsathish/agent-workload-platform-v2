@@ -118,6 +118,7 @@
                              :knowledge-system knowledge-system
                              :song-system song-system
                              :token (required "AWP_GRAIN_SESSION_TOKEN")
+                             :host (or (System/getenv "AWP_GRAIN_BIND_HOST") "127.0.0.1")
                              :port (Integer/parseInt (or (System/getenv "AWP_GRAIN_SESSION_PORT")
                                                          "9447"))})
         poller (atom nil)]
@@ -135,5 +136,7 @@
                  (knowledge/close-system! knowledge-system)
                  (song/close-system! song-system)
                  (tasking/close-system! task-system))))
-    (println (str "Grain session bridge listening on 127.0.0.1:" (http/port server)))
+    (println (str "Grain session bridge listening on "
+                  (or (System/getenv "AWP_GRAIN_BIND_HOST") "127.0.0.1")
+                  ":" (http/port server)))
     @(promise)))

@@ -1,0 +1,45 @@
+---
+- name: Read-only Grain migration preflight
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Check the reviewed source paths and lifecycle digest are fixed
+      ansible.builtin.assert:
+        that:
+          - awp_repo_root == "/Users/sathish.narayanan/Documents/git/agent-workload-platform-v2"
+          - awp_state_root == "/private/tmp/awp-v2-state"
+          - awp_service_env == "/private/tmp/awp-v2-deploy-config/service.env"
+          - awp_runtime_root is match("^/Users/.*/Library/Application Support/AWPv2/k3d/semaphore/source-[a-f0-9]{64}-full$")
+          - awp_stack_sha256 | length == 64
+          - awp_source_stack_sha256 | length == 64
+        quiet: true
+
+    - name: Inspect native v2 readiness without recording events
+      ansible.builtin.command:
+        argv:
+          - /opt/homebrew/bin/python3.14
+          - "{{ playbook_dir }}/preflight.py"
+          - --env
+          - "{{ awp_service_env }}"
+          - --state
+          - "{{ awp_state_root }}"
+          - --runtime-root
+          - "{{ awp_runtime_root }}"
+          - --match-script
+          - "{{ awp_repo_root }}/impl/deployment/stack.py"
+          - --stack-sha256
+          - "{{ awp_stack_sha256 }}"
+      register: preflight_result
+      changed_when: false
+      check_mode: false
+
+    - name: Require healthy native Grain before reporting preflight success
+      ansible.builtin.assert:
+        that:
+          - (preflight_result.stdout | from_json).health_status == 200
+        quiet: true
+
+    - name: Publish the redacted store and activity summary
+      ansible.builtin.debug:
+        var: preflight_result.stdout

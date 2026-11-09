@@ -14,4 +14,4 @@ from the scenarios while the implementation is red. An independent gate checks
 the result. A later generation can remove `impl/` and rebuild from the durable
 documents through a clean-room fence.
 
-The current planned slice is [Edge browser asset deployment](../plan/38-edge-client-asset-deployment/plan.md).
+The current planned slice is [Grain in k3d with isolated durable state](../plan/43-k3d-grain-core/plan.md).

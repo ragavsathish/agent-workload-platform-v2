@@ -1,0 +1,25 @@
+- name: Read-only, redacted v2 native broker status
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Query only the approved native broker and authenticated v2 health paths
+      ansible.builtin.command:
+        argv:
+          - /opt/homebrew/bin/dotenvx
+          - run
+          - --quiet
+          - --strict
+          - -f
+          - /Users/sathish.narayanan/Library/Application Support/PipecatEdge/apps/broker/broker.env
+          - --
+          - /opt/homebrew/bin/python3
+          - "{{ playbook_dir }}/host_broker_probe.py"
+      register: host_broker_result
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Publish only the helper's allowlisted status record
+      ansible.builtin.debug:
+        var: host_broker_result.stdout

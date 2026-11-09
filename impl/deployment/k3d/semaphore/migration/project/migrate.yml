@@ -1,0 +1,441 @@
+---
+- name: Migrate native Grain state to retained k3d candidate and preserve rollback
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    grain_context: k3d-awp-v2-ops
+    grain_namespace: awp-v2
+    grain_candidate_root: "{{ awp_candidate_root }}"
+    grain_migration_backup: "{{ awp_migration_backup }}-task-{{ semaphore_vars.task_details.id }}"
+  pre_tasks:
+    - name: Check reviewed native and candidate paths
+      ansible.builtin.assert:
+        that:
+          - awp_repo_root == "/Users/sathish.narayanan/Documents/git/agent-workload-platform-v2"
+          - awp_state_root == "/private/tmp/awp-v2-state"
+          - awp_service_env == "/private/tmp/awp-v2-deploy-config/service.env"
+          - awp_runtime_root is match("^/Users/.*/Library/Application Support/AWPv2/k3d/semaphore/source-[a-f0-9]{64}-full$")
+          - awp_candidate_root == "{{ lookup('env', 'HOME') }}/Library/Application Support/AWPv2/k3d/storage/awp-v2-grain-candidate/grain-candidate"
+          - awp_migration_backup == "{{ lookup('env', 'HOME') }}/Library/Application Support/AWPv2/migrations/grain-state-slice44-2026-11-09"
+        quiet: true
+
+    - name: Read the current candidate claim namespace UID and retained PV identity
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --context, "{{ grain_context }}", -n, awp-v2, get, pvc, grain-data-stable, -o, "jsonpath={.metadata.namespace} {.metadata.uid} {.spec.volumeName}"]
+      register: initial_pvc_identity
+      changed_when: false
+
+    - name: Require the reviewed candidate claim and retained PV before maintenance
+      ansible.builtin.assert:
+        that:
+          - initial_pvc_identity.stdout == "awp-v2 99491dfc-8d65-4417-b413-a42ee1f87804 awp-v2-grain-candidate"
+        quiet: true
+
+    - name: Inspect the current candidate file layout without changing it
+      ansible.builtin.command:
+        argv:
+          - /opt/homebrew/bin/python3.14
+          - "{{ playbook_dir }}/candidate_layout.py"
+          - --env
+          - "{{ awp_service_env }}"
+          - --state
+          - "{{ awp_state_root }}"
+          - --target
+          - "{{ awp_candidate_root }}"
+          - --runtime-root
+          - "{{ awp_runtime_root }}"
+          - --stack-sha256
+          - "{{ awp_stack_sha256 }}"
+      register: initial_candidate_layout
+      changed_when: false
+
+    - name: Require a recognized, read-only inspected candidate layout
+      ansible.builtin.assert:
+        that:
+          - (initial_candidate_layout.stdout | from_json).layout in ["canonical", "native"]
+        quiet: true
+
+  tasks:
+    - name: Quiesce, snapshot, migrate, restart source, and verify candidate continuity
+      block:
+        - name: Run fresh read-only native preflight immediately before maintenance
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/python3.14
+              - "{{ playbook_dir }}/preflight.py"
+              - --env
+              - "{{ awp_service_env }}"
+              - --state
+              - "{{ awp_state_root }}"
+              - --runtime-root
+              - "{{ awp_runtime_root }}"
+              - --match-script
+              - "{{ awp_repo_root }}/impl/deployment/stack.py"
+              - --stack-sha256
+              - "{{ awp_stack_sha256 }}"
+          register: fresh_preflight
+          changed_when: false
+
+        - name: Require the fresh source preflight to pass with no active tasks
+          ansible.builtin.assert:
+            that:
+              - (fresh_preflight.stdout | from_json).preflight == "passed"
+              - (fresh_preflight.stdout | from_json).health_status == 200
+              - (fresh_preflight.stdout | from_json).owner_task_count == 0
+              - (fresh_preflight.stdout | from_json).latest_typed_turn == "none"
+              - (fresh_preflight.stdout | from_json).compaction_status == "idle"
+              - not (fresh_preflight.stdout | from_json).attached_task
+            quiet: true
+
+        - name: Scale down only the internal Grain candidate
+          ansible.builtin.command:
+            argv: [/usr/local/bin/kubectl, --context, "{{ grain_context }}", -n, "{{ grain_namespace }}", scale, statefulset/grain, --replicas=0]
+          register: candidate_scale_down
+          changed_when: true
+
+        - name: Wait for candidate Grain to release the retained PV
+          ansible.builtin.command:
+            argv: [/usr/local/bin/kubectl, --context, "{{ grain_context }}", -n, "{{ grain_namespace }}", wait, --for=delete, pod/grain-0, --timeout=180s]
+          changed_when: false
+
+        - name: Record the stable claim and retained PV identity before copy
+          ansible.builtin.command:
+            argv: [/usr/local/bin/kubectl, --context, "{{ grain_context }}", -n, "{{ grain_namespace }}", get, pvc, grain-data-stable, -o, "jsonpath={.metadata.namespace} {.metadata.uid} {.spec.volumeName}"]
+          register: pvc_before
+          changed_when: false
+
+        - name: Recheck native activity immediately before stopping its supervisor
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/python3.14
+              - "{{ playbook_dir }}/preflight.py"
+              - --env
+              - "{{ awp_service_env }}"
+              - --state
+              - "{{ awp_state_root }}"
+              - --runtime-root
+              - "{{ awp_runtime_root }}"
+              - --match-script
+              - "{{ awp_repo_root }}/impl/deployment/stack.py"
+              - --stack-sha256
+              - "{{ awp_stack_sha256 }}"
+          register: quiescence_preflight
+          changed_when: false
+
+        - name: Require native quiescence immediately before maintenance
+          ansible.builtin.assert:
+            that:
+              - (quiescence_preflight.stdout | from_json).preflight == "passed"
+              - (quiescence_preflight.stdout | from_json).health_status == 200
+              - (quiescence_preflight.stdout | from_json).owner_task_count == 0
+              - (quiescence_preflight.stdout | from_json).latest_typed_turn == "none"
+              - (quiescence_preflight.stdout | from_json).compaction_status == "idle"
+              - not (quiescence_preflight.stdout | from_json).attached_task
+            quiet: true
+
+        - name: Gracefully stop only the verified native v2 supervisor through Semaphore
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/python3.14
+              - "{{ playbook_dir }}/lifecycle.py"
+              - stop-source
+              - --runtime-root
+              - "{{ awp_runtime_root }}"
+              - --env
+              - "{{ awp_service_env }}"
+              - --state
+              - "{{ awp_state_root }}"
+              - --match-script
+              - "{{ awp_repo_root }}/impl/deployment/stack.py"
+              - --stack-sha256
+              - "{{ awp_stack_sha256 }}"
+          register: source_stop
+          changed_when: true
+
+        - name: Create durable SQLite and LMDB snapshots and atomically replace candidate data
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/python3.14
+              - "{{ playbook_dir }}/migrate_state.py"
+              - migrate
+              - --env
+              - "{{ awp_service_env }}"
+              - --state
+              - "{{ awp_state_root }}"
+              - --runtime-root
+              - "{{ awp_runtime_root }}"
+              - --target
+              - "{{ grain_candidate_root }}"
+              - --backup
+              - "{{ grain_migration_backup }}"
+              - --stack-sha256
+              - "{{ awp_stack_sha256 }}"
+          register: migration_result
+          changed_when: true
+
+        - name: Restart native v2 using the verified Application Support runtime clone
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/python3.14
+              - "{{ playbook_dir }}/lifecycle.py"
+              - start-source
+              - --runtime-root
+              - "{{ awp_runtime_root }}"
+              - --env
+              - "{{ awp_service_env }}"
+              - --state
+              - "{{ awp_state_root }}"
+              - --match-script
+              - "{{ awp_repo_root }}/impl/deployment/stack.py"
+              - --stack-sha256
+              - "{{ awp_stack_sha256 }}"
+          register: source_start
+          changed_when: "'already_running' not in source_start.stdout"
+
+        - name: Recheck source owner/session identity after restart
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/python3.14
+              - "{{ playbook_dir }}/preflight.py"
+              - --env
+              - "{{ awp_service_env }}"
+              - --state
+              - "{{ awp_state_root }}"
+              - --runtime-root
+              - "{{ awp_runtime_root }}"
+              - --match-script
+              - "{{ awp_repo_root }}/impl/deployment/stack.py"
+              - --stack-sha256
+              - "{{ awp_stack_sha256 }}"
+          register: source_after
+          changed_when: false
+
+        - name: Require the selected source session to survive native restart
+          ansible.builtin.assert:
+            that:
+              - (source_after.stdout | from_json).preflight == "passed"
+              - (source_after.stdout | from_json).health_status == 200
+              - (source_after.stdout | from_json).owner_session_identity_sha256 == (fresh_preflight.stdout | from_json).owner_session_identity_sha256
+              - (source_after.stdout | from_json).owner_session_identity_count == (fresh_preflight.stdout | from_json).owner_session_identity_count
+              - (source_after.stdout | from_json).owner_session_count == (fresh_preflight.stdout | from_json).owner_session_count
+            quiet: true
+
+        - name: Update candidate owner identity in its private Secret without exposing values
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/python3.14
+              - "{{ playbook_dir }}/owner_secret.py"
+              - --runtime-root
+              - "{{ awp_runtime_root }}"
+              - --stack-sha256
+              - "{{ awp_stack_sha256 }}"
+          register: owner_secret_result
+          changed_when: true
+
+        - name: Apply the internal-only Grain candidate manifest
+          ansible.builtin.command:
+            argv: [/usr/local/bin/kubectl, --context, "{{ grain_context }}", apply, -f, "{{ playbook_dir }}/grain.yaml"]
+          register: manifest_result
+          changed_when: true
+
+        - name: Wait for the Grain candidate to be ready on the retained PVC
+          ansible.builtin.command:
+            argv: [/usr/local/bin/kubectl, --context, "{{ grain_context }}", -n, "{{ grain_namespace }}", rollout, status, statefulset/grain, --timeout=240s]
+          changed_when: false
+
+        - name: Verify the same persistent claim and PV are still attached
+          ansible.builtin.command:
+            argv: [/usr/local/bin/kubectl, --context, "{{ grain_context }}", -n, "{{ grain_namespace }}", get, pvc, grain-data-stable, -o, "jsonpath={.metadata.namespace} {.metadata.uid} {.spec.volumeName}"]
+          register: pvc_after
+          changed_when: false
+
+        - name: Require the retained PVC and PV identity to remain stable
+          ansible.builtin.assert:
+            that:
+              - pvc_after.stdout == pvc_before.stdout
+              - (pvc_after.stdout.split())[0] == "awp-v2"
+              - (pvc_after.stdout.split())[2] == "awp-v2-grain-candidate"
+            quiet: true
+
+        - name: Verify owner-scoped session and task continuity over loopback
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/python3.14
+              - "{{ playbook_dir }}/candidate_probe.py"
+              - --env
+              - "{{ awp_service_env }}"
+              - --runtime-root
+              - "{{ awp_runtime_root }}"
+              - --stack-sha256
+              - "{{ awp_stack_sha256 }}"
+              - --source-snapshot
+              - "{{ grain_migration_backup }}/source-state"
+          register: continuity
+          changed_when: false
+
+        - name: Publish redacted owner and per-store continuity counts before assertions
+          ansible.builtin.debug:
+            msg:
+              candidate_owner_query: "{{ (continuity.stdout | from_json).candidate_owner_query }}"
+              session_count: "{{ (continuity.stdout | from_json).session_count }}"
+              active_session_count: "{{ (continuity.stdout | from_json).active_session_count }}"
+              session_identity_count: "{{ (continuity.stdout | from_json).session_identity_count }}"
+              session_identity_sha256: "{{ (continuity.stdout | from_json).session_identity_sha256 }}"
+              task_count: "{{ (continuity.stdout | from_json).task_count }}"
+              native_session_count: "{{ (continuity.stdout | from_json).native_session_count }}"
+              native_active_session_count: "{{ (continuity.stdout | from_json).native_active_session_count }}"
+              native_session_identity_count: "{{ (continuity.stdout | from_json).native_session_identity_count }}"
+              native_session_identity_sha256: "{{ (continuity.stdout | from_json).native_session_identity_sha256 }}"
+              native_task_count: "{{ (continuity.stdout | from_json).native_task_count }}"
+              store_continuity: "{{ (continuity.stdout | from_json).store_continuity }}"
+
+        - name: Require candidate projection to match the native selected session
+          ansible.builtin.assert:
+            that:
+              - (continuity.stdout | from_json).candidate_owner_query == "accepted"
+              - (continuity.stdout | from_json).session_count == (continuity.stdout | from_json).native_session_count
+              - (continuity.stdout | from_json).active_session_count == (continuity.stdout | from_json).native_active_session_count
+              - (continuity.stdout | from_json).session_identity_count == (continuity.stdout | from_json).native_session_identity_count
+              - (continuity.stdout | from_json).session_identity_count > 0
+              - (continuity.stdout | from_json).session_identity_sha256 == (continuity.stdout | from_json).native_session_identity_sha256
+              - (continuity.stdout | from_json).session_identity_match
+              - (continuity.stdout | from_json).task_count == (continuity.stdout | from_json).native_task_count
+              - (continuity.stdout | from_json).store_continuity.source_event_ids_preserved
+              - (continuity.stdout | from_json).store_continuity.source_tenant_hashes_match
+              - (continuity.stdout | from_json).store_continuity.source_event_total > 0
+            quiet: true
+
+        - name: Publish redacted migration result and session projection proof
+          ansible.builtin.debug:
+            msg:
+              - "{{ migration_result.stdout }}"
+              - "{{ continuity.stdout }}"
+
+      rescue:
+        - name: Ensure native source is restarted after a confirmed source stop
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/python3.14
+              - "{{ playbook_dir }}/lifecycle.py"
+              - start-source
+              - --runtime-root
+              - "{{ awp_runtime_root }}"
+              - --env
+              - "{{ awp_service_env }}"
+              - --state
+              - "{{ awp_state_root }}"
+              - --match-script
+              - "{{ awp_repo_root }}/impl/deployment/stack.py"
+              - --stack-sha256
+              - "{{ awp_stack_sha256 }}"
+          register: recovery_source_start
+          when: source_stop is defined and source_stop.rc == 0
+          failed_when: false
+          changed_when: "'already_running' not in recovery_source_start.stdout"
+
+        - name: Check whether the candidate rollback copy exists
+          ansible.builtin.stat:
+            path: "{{ grain_migration_backup }}/candidate-before"
+          register: candidate_backup
+
+        - name: Read current candidate scale for precise rescue gating
+          ansible.builtin.command:
+            argv: [/usr/local/bin/kubectl, --context, "{{ grain_context }}", -n, "{{ grain_namespace }}", get, statefulset, grain, -o, "jsonpath={.spec.replicas}"]
+          register: candidate_replicas
+          failed_when: false
+          changed_when: false
+
+        - name: Record whether candidate maintenance actually began
+          ansible.builtin.set_fact:
+            candidate_scaled: "{{ candidate_replicas.stdout == '0' or (candidate_scale_down is defined and candidate_scale_down.rc == 0) }}"
+
+        - name: Scale down the candidate before restoring its rollback copy
+          ansible.builtin.command:
+            argv: [/usr/local/bin/kubectl, --context, "{{ grain_context }}", -n, "{{ grain_namespace }}", scale, statefulset/grain, --replicas=0]
+          when: candidate_scaled
+          changed_when: true
+
+        - name: Wait for candidate Grain pod deletion before restoring files
+          ansible.builtin.command:
+            argv: [/usr/local/bin/kubectl, --context, "{{ grain_context }}", -n, "{{ grain_namespace }}", wait, --for=delete, pod/grain-0, --timeout=180s]
+          when: candidate_scaled
+          failed_when: false
+          changed_when: false
+
+        - name: Restore prior candidate files from the durable rollback copy
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/python3.14
+              - "{{ playbook_dir }}/migrate_state.py"
+              - restore
+              - --env
+              - "{{ awp_service_env }}"
+              - --state
+              - "{{ awp_state_root }}"
+              - --runtime-root
+              - "{{ awp_runtime_root }}"
+              - --target
+              - "{{ grain_candidate_root }}"
+              - --backup
+              - "{{ grain_migration_backup }}"
+              - --stack-sha256
+              - "{{ awp_stack_sha256 }}"
+          when: candidate_scaled and candidate_backup.stat.exists
+          register: candidate_restore
+          failed_when: false
+          changed_when: true
+
+        - name: Restore the candidate's former owner identity and token
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/python3.14
+              - "{{ playbook_dir }}/owner_secret.py"
+              - --candidate-default
+              - --runtime-root
+              - "{{ awp_runtime_root }}"
+              - --stack-sha256
+              - "{{ awp_stack_sha256 }}"
+          when: candidate_scaled and owner_secret_result is defined
+          failed_when: false
+          changed_when: true
+
+        - name: Reapply the original internal candidate deployment from rollback manifest
+          ansible.builtin.command:
+            argv: [/usr/local/bin/kubectl, --context, "{{ grain_context }}", apply, -f, "{{ playbook_dir }}/grain-rollback.yaml"]
+          when:
+            - candidate_scaled
+            - (initial_candidate_layout.stdout | from_json).layout == "canonical"
+            - not candidate_backup.stat.exists or (candidate_restore is defined and candidate_restore.rc == 0)
+          changed_when: true
+
+        - name: Reapply the native-path candidate deployment after a native-layout rollback
+          ansible.builtin.command:
+            argv: [/usr/local/bin/kubectl, --context, "{{ grain_context }}", apply, -f, "{{ playbook_dir }}/grain.yaml"]
+          when:
+            - candidate_scaled
+            - (initial_candidate_layout.stdout | from_json).layout == "native"
+            - not candidate_backup.stat.exists or (candidate_restore is defined and candidate_restore.rc == 0)
+          changed_when: true
+
+        - name: Wait for the canonical-layout candidate to be ready
+          ansible.builtin.command:
+            argv: [/usr/local/bin/kubectl, --context, "{{ grain_context }}", -n, "{{ grain_namespace }}", rollout, status, statefulset/grain, --timeout=240s]
+          when:
+            - candidate_scaled
+            - (initial_candidate_layout.stdout | from_json).layout == "canonical"
+            - not candidate_backup.stat.exists or (candidate_restore is defined and candidate_restore.rc == 0)
+          changed_when: false
+
+        - name: Wait for the native-layout candidate to be ready
+          ansible.builtin.command:
+            argv: [/usr/local/bin/kubectl, --context, "{{ grain_context }}", -n, "{{ grain_namespace }}", rollout, status, statefulset/grain, --timeout=240s]
+          when:
+            - candidate_scaled
+            - (initial_candidate_layout.stdout | from_json).layout == "native"
+            - not candidate_backup.stat.exists or (candidate_restore is defined and candidate_restore.rc == 0)
+          changed_when: false
+
+        - name: Report that the candidate migration was rolled back
+          ansible.builtin.fail:
+            msg: "Migration failed; native restart rc={{ recovery_source_start.rc | default('not-run') }}, candidate rollback rc={{ candidate_restore.rc | default('no-backup') }}. The previous internal candidate manifest is reapplied only when the PV is unchanged or its rollback copy was restored."

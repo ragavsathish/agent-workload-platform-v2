@@ -1,0 +1,24 @@
+---
+- name: Check whether the native owner can see existing Grain candidate sessions
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Query candidate owner projection over a loopback port-forward
+      ansible.builtin.command:
+        argv:
+          - /opt/homebrew/bin/python3.14
+          - "{{ playbook_dir }}/candidate_probe.py"
+          - --env
+          - "{{ awp_service_env }}"
+          - --runtime-root
+          - "{{ awp_runtime_root }}"
+          - --stack-sha256
+          - "{{ awp_stack_sha256 }}"
+      register: candidate_owner_result
+      changed_when: false
+      check_mode: false
+
+    - name: Publish only candidate session and task counts
+      ansible.builtin.debug:
+        var: candidate_owner_result.stdout

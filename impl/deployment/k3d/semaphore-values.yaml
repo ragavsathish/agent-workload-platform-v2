@@ -1,0 +1,75 @@
+nameOverride: semaphore
+fullnameOverride: semaphore
+replicaCount: 1
+
+image:
+  repository: semaphoreui/semaphore
+  tag: v2.18.3
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 3000
+  internalPort: 3000
+
+ingress:
+  enabled: true
+  className: traefik
+  hosts:
+    - host: localhost
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+persistence:
+  enabled: true
+  size: 2Gi
+  storageClass: local-path
+  accessModes:
+    - ReadWriteOnce
+
+database:
+  type: bolt
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClass: local-path
+    accessModes:
+      - ReadWriteOnce
+  existingSecret:
+
+general:
+  host: http://localhost:9780
+  maxParallelTasks: 1
+  useRemoteRunner: true
+  passwordLoginDisable: false
+  nonAdminCanCreateProject: false
+
+admin:
+  create: true
+  fullname: AWP Operator
+  username: awp-operator
+  email: awp-operator@localhost
+  existingSecret: semaphore-admin
+  passwordKey: password
+  usernameKey: username
+  fullnameKey: fullname
+  emailKey: email
+
+runner:
+  existingSecret: semaphore-runner
+  tokenKey: token
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+postgresql:
+  enabled: false
+mariadb:
+  enabled: false

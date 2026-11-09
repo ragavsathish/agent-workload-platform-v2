@@ -1,0 +1,165 @@
+apiVersion: v1
+kind: Service
+metadata: { name: gitea, namespace: awp-v2 }
+spec:
+  type: ClusterIP
+  selector: { app: gitea }
+  ports: [{ name: http, port: 3000, targetPort: 3000 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: gitea, namespace: awp-v2 }
+spec:
+  serviceName: gitea
+  replicas: 1
+  selector: { matchLabels: { app: gitea } }
+  template:
+    metadata: { labels: { app: gitea } }
+    spec:
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: gitea
+          image: docker.gitea.com/gitea:28.1.0-rootless@sha256:b1a90409ae9afcd5a5725404c3639da7245248848b99e35332968891290b953e
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: http, containerPort: 3000 }]
+          env:
+            - { name: GITEA__database__DB_TYPE, value: sqlite3 }
+            - { name: GITEA__database__PATH, value: /var/lib/gitea/data/gitea.db }
+            - { name: GITEA__security__INSTALL_LOCK, value: "true" }
+            - { name: GITEA__server__HTTP_ADDR, value: 0.0.0.0 }
+            - { name: GITEA__server__DOMAIN, value: gitea.awp-v2.svc.cluster.local }
+            - { name: GITEA__server__ROOT_URL, value: http://localhost:3001/ }
+            - { name: GITEA__server__DISABLE_SSH, value: "true" }
+            - { name: GITEA__service__DISABLE_REGISTRATION, value: "true" }
+            - { name: GITEA__service__REQUIRE_SIGNIN_VIEW, value: "false" }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/gitea }
+            - { name: config, mountPath: /etc/gitea }
+            - { name: tmp, mountPath: /tmp }
+          readinessProbe: { httpGet: { path: /api/healthz, port: http }, periodSeconds: 5, timeoutSeconds: 3 }
+          livenessProbe: { httpGet: { path: /api/healthz, port: http }, periodSeconds: 10, timeoutSeconds: 3 }
+          resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 768Mi } }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+      volumes:
+        - { name: config, emptyDir: {} }
+        - { name: tmp, emptyDir: { sizeLimit: 64Mi } }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec: { accessModes: [ReadWriteOnce], storageClassName: local-path, resources: { requests: { storage: 5Gi } } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: s3mock, namespace: awp-v2 }
+spec:
+  type: ClusterIP
+  selector: { app: s3mock }
+  ports: [{ name: http, port: 9090, targetPort: 9090 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: s3mock, namespace: awp-v2 }
+spec:
+  serviceName: s3mock
+  replicas: 1
+  selector: { matchLabels: { app: s3mock } }
+  template:
+    metadata: { labels: { app: s3mock } }
+    spec:
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, fsGroup: 65532, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: s3mock
+          image: adobe/s3mock:5.0.0@sha256:c461c8f4234bd63540d2f3a3cabce69d814c78dc890a5af08727525a028e23da
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS, value: agent-artifacts }
+            - { name: COM_ADOBE_TESTING_S3MOCK_STORE_ROOT, value: /s3mockroot }
+            - { name: COM_ADOBE_TESTING_S3MOCK_STORE_RETAIN_FILES_ON_EXIT, value: "true" }
+          ports: [{ name: http, containerPort: 9090 }]
+          volumeMounts:
+            - { name: data, mountPath: /s3mockroot }
+            - { name: tmp, mountPath: /tmp }
+          readinessProbe: { httpGet: { path: /, port: http }, periodSeconds: 5, timeoutSeconds: 3 }
+          livenessProbe: { httpGet: { path: /, port: http }, periodSeconds: 10, timeoutSeconds: 3 }
+          resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 768Mi } }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+      volumes: [{ name: tmp, emptyDir: { sizeLimit: 64Mi } }]
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec: { accessModes: [ReadWriteOnce], storageClassName: local-path, resources: { requests: { storage: 5Gi } } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: oxigraph, namespace: awp-v2 }
+spec:
+  type: ClusterIP
+  selector: { app: oxigraph }
+  ports: [{ name: http, port: 7878, targetPort: 7878 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: oxigraph, namespace: awp-v2 }
+spec:
+  serviceName: oxigraph
+  replicas: 1
+  selector: { matchLabels: { app: oxigraph } }
+  template:
+    metadata: { labels: { app: oxigraph } }
+    spec:
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, fsGroup: 65532, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: oxigraph
+          image: oxigraph/oxigraph:0.5.11@sha256:7532c1f9aa5f28c0dc6a4243198f7f6144017fab7429bf6c164a89fec9411767
+          imagePullPolicy: IfNotPresent
+          args: [serve, --location, /data, --bind, 0.0.0.0:7878]
+          ports: [{ name: http, containerPort: 7878 }]
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
+          readinessProbe: { httpGet: { path: /, port: http }, periodSeconds: 5, timeoutSeconds: 3 }
+          livenessProbe: { httpGet: { path: /, port: http }, periodSeconds: 10, timeoutSeconds: 3 }
+          resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 1Gi } }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+      volumes: [{ name: tmp, emptyDir: { sizeLimit: 32Mi } }]
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec: { accessModes: [ReadWriteOnce], storageClassName: local-path, resources: { requests: { storage: 5Gi } } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: agent-gateway, namespace: awp-v2 }
+spec:
+  type: ClusterIP
+  selector: { app: agent-gateway }
+  ports: [{ name: http, port: 9444, targetPort: 9444 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: agent-gateway, namespace: awp-v2 }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: agent-gateway } }
+  template:
+    metadata: { labels: { app: agent-gateway } }
+    spec:
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: gateway
+          image: awp-v2-gateway:slice46
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: AGENT_GATEWAY_TOKEN, valueFrom: { secretKeyRef: { name: gateway-access, key: token } } }
+            - { name: AWP_OWNER_IDENTITY, valueFrom: { secretKeyRef: { name: grain-session, key: owner } } }
+            - { name: AWP_GRAIN_SESSION_TOKEN, valueFrom: { secretKeyRef: { name: grain-session, key: token } } }
+            - { name: AWP_GRAIN_SESSION_URL, value: http://grain.awp-v2.svc.cluster.local:9447 }
+            - { name: AWP_OTEL_METRICS_ENDPOINT, value: http://otel-lgtm.awp-v2.svc.cluster.local:4318/v1/metrics }
+            - { name: AGENT_GATEWAY_BIND_HOST, value: 0.0.0.0 }
+            - { name: AGENT_GATEWAY_PORT, value: "9444" }
+          ports: [{ name: http, containerPort: 9444 }]
+          readinessProbe: { httpGet: { path: /health, port: http }, periodSeconds: 5, timeoutSeconds: 3 }
+          livenessProbe: { httpGet: { path: /health, port: http }, periodSeconds: 10, timeoutSeconds: 3 }
+          resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }

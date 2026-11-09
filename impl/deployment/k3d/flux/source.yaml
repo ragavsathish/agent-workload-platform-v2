@@ -1,0 +1,92 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: awp-v2
+  namespace: flux-system
+spec:
+  interval: 1m
+  url: ssh://git@github.com/ragavsathish/agent-workload-platform-v2.git
+  ref:
+    branch: main
+  secretRef:
+    name: awp-v2-source
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: awp-v2-core
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./impl/deployment/k3d
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: awp-v2
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      name: grain
+      namespace: awp-v2
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: agent-gateway
+      namespace: awp-v2
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      name: gitea
+      namespace: awp-v2
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      name: s3mock
+      namespace: awp-v2
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      name: oxigraph
+      namespace: awp-v2
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      name: otel-lgtm
+      namespace: awp-v2
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: grafana-mcp
+      namespace: awp-v2
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      name: mlflow
+      namespace: awp-v2
+    - apiVersion: apps/v1
+      kind: DaemonSet
+      name: fluent-bit-node-metrics
+      namespace: awp-v2
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: awp-v2-voice
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./impl/deployment/k3d/voice
+  prune: true
+  suspend: true
+  dependsOn:
+    - name: awp-v2-core
+  sourceRef:
+    kind: GitRepository
+    name: awp-v2
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: awp-v2-semaphore
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./impl/deployment/k3d/semaphore/flux
+  prune: true
+  suspend: true
+  sourceRef:
+    kind: GitRepository
+    name: awp-v2

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 import uuid
 import urllib.request
 import urllib.error
@@ -55,6 +57,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
         pass
 
     def _send(self, code: int, value: object) -> None:
+        self._record_response(code)
         body = json.dumps(value).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
@@ -64,6 +67,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _send_audio(self, body: bytes) -> None:
+        self._record_response(200)
         self.send_response(200)
         self.send_header("Content-Type", "audio/mp4")
         self.send_header("Cache-Control", "no-store")
@@ -72,6 +76,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _send_artifact(self, body: bytes, filename: str, content_type: str) -> None:
+        self._record_response(200)
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
@@ -80,6 +85,16 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _record_response(self, code: int) -> None:
+        route = urlsplit(self.path).path
+        prefix = next((name for path, name in [
+            ("/health", "health"), ("/v1/tasks", "tasks"),
+            ("/v1/knowledge", "knowledge"), ("/v1/music", "music"),
+            ("/v1/incidents", "incidents")]
+                      if route == path or route.startswith(path + "/")), "other")
+        self.server.record_metric(prefix, self.command if self.command in {"GET", "POST"} else "OTHER",
+                                  f"{code // 100}xx", prefix == "health" and code == 200)
 
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
@@ -347,6 +362,64 @@ class GatewayServer(ThreadingHTTPServer):
                  token: str, owner: str):
         super().__init__(address, GatewayHandler)
         self.grain, self.token, self.owner = grain, token, owner
+        self.metrics_endpoint = os.environ.get("AWP_OTEL_METRICS_ENDPOINT", "")
+        self.metrics_lock = threading.Lock()
+        self.metrics_start_ns = time.time_ns()
+        self.request_counts: dict[tuple[str, str, str], int] = {}
+
+    def record_metric(self, route: str, method: str, status_class: str, ready: bool) -> None:
+        if not self.metrics_endpoint:
+            return
+        with self.metrics_lock:
+            key = (route, method, status_class)
+            self.request_counts[key] = self.request_counts.get(key, 0) + 1
+            now = time.time_ns()
+            points = [{
+                "attributes": [
+                    {"key": "http_route", "value": {"stringValue": metric_route}},
+                    {"key": "http_request_method", "value": {"stringValue": metric_method}},
+                    {"key": "http_response_status_class", "value": {"stringValue": metric_status}},
+                ],
+                "startTimeUnixNano": str(self.metrics_start_ns),
+                "timeUnixNano": str(now),
+                "asInt": str(count),
+            } for (metric_route, metric_method, metric_status), count in self.request_counts.items()]
+            metrics = [{
+                "name": "awp_v2_gateway_http_requests_total",
+                "description": "HTTP responses emitted by the AWP v2 gateway, grouped by bounded route, method and status class.",
+                "unit": "{request}",
+                "sum": {"dataPoints": points, "aggregationTemporality": 2, "isMonotonic": True},
+            }]
+            if ready:
+                metrics.append({
+                    "name": "awp_v2_gateway_ready",
+                    "description": "The AWP v2 gateway health endpoint returned ready.",
+                    "unit": "1",
+                    "gauge": {"dataPoints": [{"timeUnixNano": str(now), "asDouble": 1.0}]},
+                })
+            payload = {
+                "resourceMetrics": [{
+                    "resource": {"attributes": [
+                        {"key": "service.name", "value": {"stringValue": "awp-v2-gateway"}},
+                        {"key": "service.namespace", "value": {"stringValue": "awp-v2"}},
+                        {"key": "service.version", "value": {"stringValue": "slice46"}},
+                        {"key": "deployment.environment.name", "value": {"stringValue": "awp-v2-local"}},
+                    ]},
+                    "scopeMetrics": [{
+                        "scope": {"name": "awp-v2.gateway"},
+                        "metrics": metrics,
+                    }],
+                }],
+            }
+        request = urllib.request.Request(
+            self.metrics_endpoint, data=json.dumps(payload).encode(), method="POST",
+            headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=0.5) as response:
+                response.read(1)
+        except (OSError, ValueError):
+            # Observability must not break owner requests or health probes.
+            pass
 
 
 def main() -> None:
@@ -354,7 +427,8 @@ def main() -> None:
     owner = os.environ["AWP_OWNER_IDENTITY"]
     grain = GrainTaskClient(os.environ.get("AWP_GRAIN_SESSION_URL", "http://127.0.0.1:9447"),
                             os.environ["AWP_GRAIN_SESSION_TOKEN"], owner)
-    with GatewayServer(("127.0.0.1", int(os.environ.get("AGENT_GATEWAY_PORT", "9444"))),
+    with GatewayServer((os.environ.get("AGENT_GATEWAY_BIND_HOST", "127.0.0.1"),
+                        int(os.environ.get("AGENT_GATEWAY_PORT", "9444"))),
                        grain, token, owner) as server:
         server.serve_forever()
 

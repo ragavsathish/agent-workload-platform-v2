@@ -1,0 +1,67 @@
+---
+- name: Parse pinned migration playbooks without executing host operations
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Compile pinned migration helpers without running them
+      ansible.builtin.command:
+        argv:
+          - /opt/homebrew/bin/python3.14
+          - -m
+          - py_compile
+          - "{{ playbook_dir }}/preflight.py"
+          - "{{ playbook_dir }}/candidate_probe.py"
+          - "{{ playbook_dir }}/candidate_layout.py"
+          - "{{ playbook_dir }}/owner_secret.py"
+          - "{{ playbook_dir }}/lifecycle.py"
+          - "{{ playbook_dir }}/migrate_state.py"
+          - "{{ playbook_dir }}/cleanup_orphan.py"
+      changed_when: false
+
+    - name: Check syntax of reviewed read-only and recovery playbooks
+      ansible.builtin.command:
+        argv:
+          - /opt/homebrew/bin/ansible-playbook
+          - --syntax-check
+          - --inventory
+          - localhost,
+          - "{{ playbook_dir }}/{{ item }}"
+      loop:
+        - noop.yml
+        - preflight.yml
+        - candidate_owner.yml
+        - candidate_layout.yml
+        - owner_secret.yml
+        - cleanup_orphan.yml
+        - lifecycle.yml
+        - refresh.yml
+        - secret_check.yml
+        - migrate.yml
+      register: syntax_results
+      changed_when: false
+
+    - name: Validate both Grain manifests against the live API without persisting changes
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --context
+          - k3d-awp-v2-ops
+          - apply
+          - --dry-run=server
+          - --validate=strict
+          - -f
+          - "{{ playbook_dir }}/{{ item }}"
+      loop:
+        - grain.yaml
+        - grain-rollback.yaml
+      register: manifest_dry_run
+      changed_when: false
+
+    - name: Publish only the manifest validation count
+      ansible.builtin.debug:
+        msg: "server-side dry-run passed for {{ manifest_dry_run.results | length }} Grain manifests"
+
+    - name: Publish only the parsed playbook names
+      ansible.builtin.debug:
+        msg: "syntax passed for {{ syntax_results.results | length }} pinned playbooks"

@@ -1,0 +1,64 @@
+apiVersion: v1
+kind: Service
+metadata: { name: otel-lgtm, namespace: awp-v2 }
+spec:
+  type: ClusterIP
+  selector: { app: otel-lgtm }
+  ports:
+    - { name: grafana, port: 3000, targetPort: 3000 }
+    - { name: otlp-grpc, port: 4317, targetPort: 4317 }
+    - { name: otlp-http, port: 4318, targetPort: 4318 }
+    - { name: prometheus, port: 9090, targetPort: 9090 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: otel-lgtm, namespace: awp-v2 }
+spec:
+  serviceName: otel-lgtm
+  replicas: 1
+  selector: { matchLabels: { app: otel-lgtm } }
+  template:
+    metadata: { labels: { app: otel-lgtm } }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: lgtm
+          image: grafana/otel-lgtm:0.30.1@sha256:bb182ac3174a20923fa58f00d1790fa71eb06cc0150078c0b0e8feb9e6611492
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: ENABLE_LOGS_ALL, value: "false" }
+            - { name: GF_AUTH_ANONYMOUS_ENABLED, value: "false" }
+            - { name: GF_ANALYTICS_REPORTING_ENABLED, value: "false" }
+            - { name: GF_SECURITY_ADMIN_USER, value: admin }
+            - { name: GF_SECURITY_ADMIN_PASSWORD, valueFrom: { secretKeyRef: { name: grafana-admin, key: password } } }
+            - { name: GF_SERVER_HTTP_ADDR, value: 0.0.0.0 }
+            - { name: GF_SERVER_HTTP_PORT, value: "3000" }
+            - { name: GF_SERVER_ROOT_URL, value: http://otel-lgtm.awp-v2.svc.cluster.local:3000/ }
+            - { name: GF_LOG_MODE, value: console }
+            - { name: GF_LOG_LEVEL, value: warn }
+            - { name: PROMETHEUS_EXTRA_ARGS, value: --storage.tsdb.retention.time=7d }
+          ports:
+            - { name: grafana, containerPort: 3000 }
+            - { name: otlp-grpc, containerPort: 4317 }
+            - { name: otlp-http, containerPort: 4318 }
+            - { name: prometheus, containerPort: 9090 }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
+            - name: prometheus-scrape-config
+              mountPath: /otel-lgtm/prometheus.yaml
+              subPath: prometheus.yaml
+              readOnly: true
+          startupProbe: { httpGet: { path: /api/health, port: grafana }, periodSeconds: 10, timeoutSeconds: 10, failureThreshold: 60 }
+          readinessProbe: { httpGet: { path: /api/health, port: grafana }, periodSeconds: 10, timeoutSeconds: 10, failureThreshold: 5 }
+          livenessProbe: { httpGet: { path: /api/health, port: grafana }, periodSeconds: 20, timeoutSeconds: 10, failureThreshold: 5 }
+          resources: { requests: { cpu: "1", memory: 1Gi }, limits: { cpu: "2", memory: 3Gi } }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+      volumes:
+        - { name: tmp, emptyDir: { sizeLimit: 256Mi } }
+        - name: prometheus-scrape-config
+          configMap:
+            name: otel-lgtm-prometheus-scrape
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec: { accessModes: [ReadWriteOnce], storageClassName: local-path, resources: { requests: { storage: 10Gi } } }

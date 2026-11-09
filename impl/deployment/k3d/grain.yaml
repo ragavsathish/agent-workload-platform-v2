@@ -1,0 +1,220 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: awp-v2
+  labels:
+    app.kubernetes.io/part-of: awp-v2
+    app.kubernetes.io/managed-by: semaphore
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: awp-v2-grain-candidate
+  labels:
+    app.kubernetes.io/name: grain
+    app.kubernetes.io/part-of: awp-v2
+spec:
+  capacity:
+    storage: 10Gi
+  volumeMode: Filesystem
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: awp-v2-hostpath
+  claimRef:
+    namespace: awp-v2
+    name: grain-data-stable
+  hostPath:
+    path: /var/lib/rancher/k3s/storage/awp-v2-grain-candidate
+    type: DirectoryOrCreate
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k3d-awp-v2-ops-server-0
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grain-data-stable
+  namespace: awp-v2
+  labels:
+    app.kubernetes.io/name: grain
+    app.kubernetes.io/part-of: awp-v2
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: awp-v2-hostpath
+  volumeName: awp-v2-grain-candidate
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grain
+  namespace: awp-v2
+  labels:
+    app.kubernetes.io/name: grain
+    app.kubernetes.io/part-of: awp-v2
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: grain
+  ports:
+    - name: http
+      port: 9447
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: grain
+  namespace: awp-v2
+  labels:
+    app.kubernetes.io/name: grain
+    app.kubernetes.io/part-of: awp-v2
+spec:
+  serviceName: grain
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: grain
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: grain
+        app.kubernetes.io/part-of: awp-v2
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: set-grain-volume-owner
+          image: awp-v2-grain:slice43
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              if [ "$(stat -c '%u:%g' /private/tmp/awp-v2-state)" != "10001:10001" ]; then
+                chown -R 10001:10001 /private/tmp/awp-v2-state
+                chmod -R u+rwX,g+rwX,o-rwx /private/tmp/awp-v2-state
+              fi
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+              add: [CHOWN, DAC_OVERRIDE, FOWNER]
+          volumeMounts:
+            - name: grain-data
+              mountPath: /private/tmp/awp-v2-state
+              subPath: grain-candidate
+      containers:
+        - name: grain
+          image: awp-v2-grain:slice43
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 9447
+              protocol: TCP
+          env:
+            - name: AWP_GRAIN_SESSION_PORT
+              value: "9447"
+            - name: AWP_GRAIN_BIND_HOST
+              value: 0.0.0.0
+            - name: AWP_GRAIN_SESSION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: grain-session
+                  key: token
+            - name: AWP_OWNER_IDENTITY
+              valueFrom:
+                secretKeyRef:
+                  name: grain-session
+                  key: owner
+            - name: AWP_DEPLOYMENT_LEVEL
+              value: voice
+            - name: AWP_ELIGIBLE_WORKSPACES
+              value: scratch
+            - name: AWP_WORKSPACE_MAP_JSON
+              value: "{}"
+            - name: AWP_SESSION_STORAGE_DIR
+              value: /private/tmp/awp-v2-state/sessions
+            - name: AWP_TASKING_STORAGE_DIR
+              value: /private/tmp/awp-v2-state/tasking
+            - name: AWP_TASK_WORKSPACE_DIR
+              value: /private/tmp/awp-v2-state/task-workspaces
+            - name: AWP_DEPLOYMENT_STORAGE_DIR
+              value: /private/tmp/awp-v2-state/sessions-deployment
+            - name: AWP_KNOWLEDGE_STORAGE_DIR
+              value: /private/tmp/awp-v2-state/sessions-knowledge
+            - name: AWP_SONG_STORAGE_DIR
+              value: /private/tmp/awp-v2-state/sessions-song
+            - name: AWP_INCIDENT_STORAGE_DIR
+              value: /private/tmp/awp-v2-state/sessions-incidents
+            - name: AWP_SONG_ARTIFACT_DIR
+              value: /private/tmp/awp-v2-state/sessions-songs
+            - name: HOME
+              value: /tmp
+            - name: CLJ_CACHE
+              value: /tmp/clj-cache
+          volumeMounts:
+            - name: grain-data
+              mountPath: /private/tmp/awp-v2-state
+              subPath: grain-candidate
+            - name: tmp
+              mountPath: /tmp
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: grain-data
+          persistentVolumeClaim:
+            claimName: grain-data-stable
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi

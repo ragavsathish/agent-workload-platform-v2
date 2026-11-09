@@ -1,0 +1,212 @@
+---
+- name: Refresh native v2 supervisor onto the corrected pinned runtime with rollback
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Refresh the pinned host supervisor with bounded rollback
+      block:
+        - name: Assert exact old and new runtime paths
+          ansible.builtin.assert:
+            that:
+              - awp_state_root == "/private/tmp/awp-v2-state"
+              - awp_service_env == "/private/tmp/awp-v2-deploy-config/service.env"
+              - awp_source_runtime_root == "/Users/sathish.narayanan/Library/Application Support/AWPv2/k3d/semaphore/source-a81a062312e42712636258a8b82a8ebbf3e191e518b1df091d796c65ae132ea5-full"
+              - awp_source_stack_sha256 == "a81a062312e42712636258a8b82a8ebbf3e191e518b1df091d796c65ae132ea5"
+              - awp_runtime_root is match("^/Users/.*/Library/Application Support/AWPv2/k3d/semaphore/source-[a-f0-9]{64}-full$")
+              - awp_stack_sha256 != awp_source_stack_sha256
+            quiet: true
+
+        - name: Validate the old native owner/session state before refreshing its supervisor
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/python3.14
+              - "{{ playbook_dir }}/preflight.py"
+              - --env
+              - "{{ awp_service_env }}"
+              - --state
+              - "{{ awp_state_root }}"
+              - --runtime-root
+              - "{{ awp_source_runtime_root }}"
+              - --match-script
+              - "{{ awp_repo_root }}/impl/deployment/stack.py"
+              - --stack-sha256
+              - "{{ awp_source_stack_sha256 }}"
+          register: old_preflight
+          changed_when: false
+
+        - name: Require the old supervisor health and quiescent owner state
+          ansible.builtin.assert:
+            that:
+              - (old_preflight.stdout | from_json).preflight == "passed"
+              - (old_preflight.stdout | from_json).health_status == 200
+              - (old_preflight.stdout | from_json).owner_task_count == 0
+              - (old_preflight.stdout | from_json).latest_typed_turn == "none"
+              - (old_preflight.stdout | from_json).compaction_status == "idle"
+              - not (old_preflight.stdout | from_json).attached_task
+            quiet: true
+
+        - name: Gracefully stop only the verified old staged supervisor through Semaphore
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/python3.14
+              - "{{ playbook_dir }}/lifecycle.py"
+              - stop-source
+              - --runtime-root
+              - "{{ awp_source_runtime_root }}"
+              - --env
+              - "{{ awp_service_env }}"
+              - --state
+              - "{{ awp_state_root }}"
+              - --match-script
+              - "{{ awp_repo_root }}/impl/deployment/stack.py"
+              - --stack-sha256
+              - "{{ awp_source_stack_sha256 }}"
+          register: old_source_stop
+          changed_when: true
+
+        - name: Start native v2 from the corrected current staged runtime
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/python3.14
+              - "{{ playbook_dir }}/lifecycle.py"
+              - start-source
+              - --runtime-root
+              - "{{ awp_runtime_root }}"
+              - --env
+              - "{{ awp_service_env }}"
+              - --state
+              - "{{ awp_state_root }}"
+              - --stack-sha256
+              - "{{ awp_stack_sha256 }}"
+          register: new_source_start
+          changed_when: true
+
+        - name: Validate the new supervisor identity and staged restart command
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/python3.14
+              - "{{ playbook_dir }}/lifecycle.py"
+              - validate-start
+              - --runtime-root
+              - "{{ awp_runtime_root }}"
+              - --env
+              - "{{ awp_service_env }}"
+              - --state
+              - "{{ awp_state_root }}"
+              - --match-script
+              - "{{ awp_repo_root }}/impl/deployment/stack.py"
+              - --stack-sha256
+              - "{{ awp_stack_sha256 }}"
+              - --source-runtime-root
+              - "{{ awp_runtime_root }}"
+              - --source-stack-sha256
+              - "{{ awp_stack_sha256 }}"
+          register: new_start_validation
+          changed_when: false
+
+        - name: Verify new native health and owner/session continuity
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/python3.14
+              - "{{ playbook_dir }}/preflight.py"
+              - --env
+              - "{{ awp_service_env }}"
+              - --state
+              - "{{ awp_state_root }}"
+              - --runtime-root
+              - "{{ awp_runtime_root }}"
+              - --match-script
+              - "{{ awp_repo_root }}/impl/deployment/stack.py"
+              - --stack-sha256
+              - "{{ awp_stack_sha256 }}"
+          register: new_preflight
+          changed_when: false
+
+        - name: Require new runtime health and session identity continuity
+          ansible.builtin.assert:
+            that:
+              - (new_start_validation.stdout | from_json).validation == "passed"
+              - (new_preflight.stdout | from_json).preflight == "passed"
+              - (new_preflight.stdout | from_json).health_status == 200
+              - (new_preflight.stdout | from_json).owner_task_count == 0
+              - (new_preflight.stdout | from_json).owner_session_identity_sha256 == (old_preflight.stdout | from_json).owner_session_identity_sha256
+              - (new_preflight.stdout | from_json).owner_session_identity_count == (old_preflight.stdout | from_json).owner_session_identity_count
+              - (new_preflight.stdout | from_json).owner_session_count == (old_preflight.stdout | from_json).owner_session_count
+            quiet: true
+
+        - name: Publish redacted refreshed supervisor and continuity evidence
+          ansible.builtin.debug:
+            msg:
+              supervisor_pid: "{{ (new_preflight.stdout | from_json).supervisor_pid }}"
+              service_names: "{{ (new_preflight.stdout | from_json).service_names }}"
+              health_status: "{{ (new_preflight.stdout | from_json).health_status }}"
+              owner_session_count: "{{ (new_preflight.stdout | from_json).owner_session_count }}"
+              owner_session_identity_count: "{{ (new_preflight.stdout | from_json).owner_session_identity_count }}"
+              owner_session_identity_sha256: "{{ (new_preflight.stdout | from_json).owner_session_identity_sha256 }}"
+
+      rescue:
+        - name: Stop a partially started corrected runtime if it owns the supervisor
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/python3.14
+              - "{{ playbook_dir }}/lifecycle.py"
+              - stop-source
+              - --runtime-root
+              - "{{ awp_runtime_root }}"
+              - --env
+              - "{{ awp_service_env }}"
+              - --state
+              - "{{ awp_state_root }}"
+              - --match-script
+              - "{{ awp_repo_root }}/impl/deployment/stack.py"
+              - --stack-sha256
+              - "{{ awp_stack_sha256 }}"
+          when: old_source_stop is defined and old_source_stop.rc == 0
+          failed_when: false
+          changed_when: true
+
+        - name: Restore the old pinned source runtime with its narrowly scoped time compatibility
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/python3.14
+              - "{{ playbook_dir }}/lifecycle.py"
+              - start-source
+              - --runtime-root
+              - "{{ awp_source_runtime_root }}"
+              - --env
+              - "{{ awp_service_env }}"
+              - --state
+              - "{{ awp_state_root }}"
+              - --stack-sha256
+              - "{{ awp_source_stack_sha256 }}"
+              - --legacy-time-compat
+          when: old_source_stop is defined and old_source_stop.rc == 0
+          register: rollback_start
+          failed_when: false
+          changed_when: true
+
+        - name: Verify old pinned runtime rollback health and process ownership
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/python3.14
+              - "{{ playbook_dir }}/preflight.py"
+              - --env
+              - "{{ awp_service_env }}"
+              - --state
+              - "{{ awp_state_root }}"
+              - --runtime-root
+              - "{{ awp_source_runtime_root }}"
+              - --match-script
+              - "{{ awp_repo_root }}/impl/deployment/stack.py"
+              - --stack-sha256
+              - "{{ awp_source_stack_sha256 }}"
+          when: old_source_stop is defined and old_source_stop.rc == 0
+          register: rollback_preflight
+          failed_when: false
+          changed_when: false
+
+        - name: Report the refreshed runtime task failure after bounded recovery
+          ansible.builtin.fail:
+            msg: "Runtime refresh failed; old-runtime restart rc={{ rollback_start.rc | default('not-run') }}, rollback preflight rc={{ rollback_preflight.rc | default('not-run') }}. Native source state was not copied or changed."
+

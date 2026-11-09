@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - grain.yaml
+  - app-plane.yaml
+  - telemetry.yaml
+  - grafana-mcp.yaml
+  - mlflow.yaml
+  - node-metrics.yaml

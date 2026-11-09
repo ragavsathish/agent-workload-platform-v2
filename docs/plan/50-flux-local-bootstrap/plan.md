@@ -80,3 +80,16 @@ Runtime verification on 2026-11-09:
   enabled. This establishes deployment readiness only; owner-authenticated
   live voice and host-native Pi/MLX/Gondolin operations remain separate
   qualification gates.
+
+Anonymous-source verification after the public-source update:
+
+- `bootstrap.sh up` completed and Flux fetched public `main` at
+  `main@sha1:022fb691eeda0058abb2bb7903d2deafc8160cf8` with an HTTPS URL and
+  no `secretRef`.
+- After that fetch succeeded, the generated GitHub deploy key, local keypair,
+  and `flux-system/awp-v2-source` Secret were deleted. A forced source
+  reconciliation remained Ready at the same revision; core and voice
+  Kustomizations remained Ready.
+- The deploy-key listing is empty, both local key files are absent, and the
+  Kubernetes Secret is NotFound. No key dependency remains in the bootstrap,
+  source manifest, README, or Slice 50 plan/spec/decision files.

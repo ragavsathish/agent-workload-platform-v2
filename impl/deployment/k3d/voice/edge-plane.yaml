@@ -29,7 +29,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: voice-edge
-          image: awp-v2-voice-edge:slice47
+          image: awp-v2-voice-edge:slice52
           imagePullPolicy: Never
           command: ["/app/.venv/bin/python", "bot.py"]
           args: ["-t", "webrtc", "--host", "127.0.0.1", "--port", "7860"]

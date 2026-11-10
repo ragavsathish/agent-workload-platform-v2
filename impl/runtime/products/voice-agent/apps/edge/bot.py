@@ -1087,6 +1087,12 @@ if __name__ == "__main__":
             StaticFiles(directory=client_dist / "canvaskit"),
             name="canvaskit",
         )
+    if (client_dist / "icons").is_dir():
+        app.mount(
+            "/icons",
+            StaticFiles(directory=client_dist / "icons"),
+            name="icons",
+        )
     if (client_dist / "voice-runtime").is_dir():
         app.mount(
             "/voice-runtime",
@@ -1157,7 +1163,7 @@ if __name__ == "__main__":
         ("flutter_bootstrap.js", "text/javascript"),
         ("flutter.js", "text/javascript"),
         ("flutter_service_worker.js", "text/javascript"),
-        ("favicon.svg", "image/svg+xml"),
+        ("favicon.png", "image/png"),
         ("main.dart.js", "text/javascript"),
         ("main.dart.mjs", "text/javascript"),
         ("main.dart.wasm", "application/wasm"),
@@ -1165,6 +1171,13 @@ if __name__ == "__main__":
         ("version.json", "application/json"),
     ):
         register_browser_asset(browser_asset_name, browser_asset_type)
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def browser_favicon_ico():
+        target = client_dist / "favicon.png"
+        if not target.is_file():
+            return JSONResponse({"error": "client build is missing"}, status_code=503)
+        return FileResponse(target, media_type="image/png")
 
     @app.get("/", include_in_schema=False)
     async def browser_client():

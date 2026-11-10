@@ -198,7 +198,7 @@ import_optional_voice_secrets() {
 build_images() {
   local client="${ROOT}/impl/runtime/products/voice-agent/apps/client"
   local voice_root="${ROOT}/impl/runtime/products/voice-agent"
-  local flutter_image="ghcr.io/cirruslabs/flutter:3.47.7"
+  local node_image="node:22-bookworm-slim"
   printf 'images=build-and-import platform=%s\n' "$PLATFORM"
   docker build --platform "$PLATFORM" \
     --file "${ROOT}/impl/deployment/k3d/grain.Containerfile" \
@@ -208,21 +208,26 @@ build_images() {
     --tag awp-v2-gateway:slice46 "$ROOT"
 
   if voice_inputs_present; then
-    if [[ ! -f "${client}/build/web/main.dart.js" ]]; then
-      printf 'voice_assets=build-with-container image=%s\n' "$flutter_image"
-      docker run --rm --platform "$PLATFORM" \
-        --volume "${client}:/workspace" --workdir /workspace \
-        "$flutter_image" \
-        /bin/bash -lc './tool/flutterw pub get && ./tool/flutterw build web --wasm --release --dart-define=VOICE_WEB_URL=http://localhost:7860/'
-    fi
+    printf 'voice_assets=build-flutter-with-container image=%s\n' "$node_image"
+    docker run --rm --platform "$PLATFORM" \
+      --volume "${client}:/workspace" --workdir /workspace \
+      --volume awp-v2-ui-flutter-tooling:/workspace/.flutter_tooling \
+      --volume awp-v2-ui-pub-cache:/root/.pub-cache \
+      "$node_image" /bin/sh -ec '
+        apt-get update
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl git unzip xz-utils zip libglu1-mesa
+        rm -rf /var/lib/apt/lists/*
+        ./tool/flutterw pub get
+        ./tool/flutterw build web --wasm --release --dart-define=VOICE_WEB_URL=http://localhost:7860/
+      '
     docker build --platform "$PLATFORM" \
       --file "${voice_root}/apps/edge/Containerfile" \
-      --tag awp-v2-voice-edge:slice47 "$voice_root"
+      --tag awp-v2-voice-edge:slice52 "$voice_root"
     docker build --platform "$PLATFORM" \
       --file "${voice_root}/apps/trace-render-worker/Dockerfile" \
       --tag awp-v2-trace-render-worker:slice47 "$voice_root"
     k3d image import --cluster "$CLUSTER" \
-      awp-v2-voice-edge:slice47 awp-v2-trace-render-worker:slice47
+      awp-v2-voice-edge:slice52 awp-v2-trace-render-worker:slice47
   else
     printf 'voice_images=skipped; voice prerequisites are absent\n'
   fi

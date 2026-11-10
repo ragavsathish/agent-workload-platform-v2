@@ -555,7 +555,7 @@ window.voiceBridge = {
     const url = view === 'audio-diagnostics'
       ? '/diagnostics/'
       : view === 'system-health'
-        ? '/metrics/d/voice-c4-heatmap/c4-operational-heat-map'
+        ? '/metrics/'
         : view === 'knowledge-base'
           ? '/knowledge/'
           : `/?view=${encodeURIComponent(view)}`;

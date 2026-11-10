@@ -78,7 +78,22 @@ data:
             address: http://127.0.0.1:7860/api/ingress-auth
             trustForwardHeader: false
             maxResponseBodySize: 65536
+        strip-oxigraph-prefix:
+          stripPrefix:
+            prefixes: [/oxigraph]
       routers:
+        grafana:
+          entryPoints: [tailnet]
+          rule: "HeaderRegexp(`Tailscale-User-Login`, `.+`) && (Path(`/metrics`) || PathPrefix(`/metrics/`))"
+          priority: 100
+          middlewares: [tailnet-loopback-only, strip-local-ingress-marker, owner-only]
+          service: grafana
+        oxigraph:
+          entryPoints: [tailnet]
+          rule: "HeaderRegexp(`Tailscale-User-Login`, `.+`) && PathPrefix(`/oxigraph/`)"
+          priority: 100
+          middlewares: [tailnet-loopback-only, strip-local-ingress-marker, owner-only, strip-oxigraph-prefix]
+          service: oxigraph
         live:
           entryPoints: [tailnet]
           rule: "HeaderRegexp(`Tailscale-User-Login`, `.+`) && PathPrefix(`/`)"
@@ -86,6 +101,14 @@ data:
           middlewares: [tailnet-loopback-only, strip-local-ingress-marker, owner-only]
           service: voice-edge
       services:
+        grafana:
+          loadBalancer:
+            servers:
+              - url: http://otel-lgtm.awp-v2.svc.cluster.local:3000
+        oxigraph:
+          loadBalancer:
+            servers:
+              - url: http://oxigraph.awp-v2.svc.cluster.local:7878
         voice-edge:
           loadBalancer:
             servers:

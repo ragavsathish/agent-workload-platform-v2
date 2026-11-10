@@ -5,14 +5,30 @@
   "type": "module",
   "scripts": {
     "build:bridge": "node tool/build-bridge.mjs",
+    "build:mermaid": "node tool/build-mermaid-app.mjs",
+    "build:marp": "node tool/build-marp-app.mjs",
+    "build:trace-explainer": "node tool/build-trace-explainer-app.mjs",
+    "build:journal-review": "node tool/build-journal-review-app.mjs",
+    "build:excalidraw": "node tool/build-excalidraw-app.mjs",
+    "build:web-apps": "npm run build:mermaid && npm run build:marp && npm run build:trace-explainer && npm run build:journal-review && npm run build:excalidraw && npm run build:bridge",
     "test:bridge-security": "node --test browser_test/sandbox.security.test.mjs"
   },
   "dependencies": {
+    "@marp-team/marp-core": "5.0.2",
     "@modelcontextprotocol/ext-apps": "2.0.4",
     "@pipecat-ai/client-js": "1.16.0",
-    "@pipecat-ai/small-webrtc-transport": "1.11.2"
+    "@pipecat-ai/small-webrtc-transport": "1.11.2",
+    "@recogito/text-annotator": "4.2.5",
+    "beautiful-mermaid": "1.1.3",
+    "cytoscape": "3.33.1",
+    "katex": "0.18.10",
+    "mermaid": "12.2.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
   },
   "devDependencies": {
+    "@types/react": "19.2.0",
+    "@types/react-dom": "19.2.0",
     "esbuild": "0.28.2",
     "playwright": "1.56.1"
   }

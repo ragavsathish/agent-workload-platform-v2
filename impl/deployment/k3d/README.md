@@ -50,6 +50,31 @@ their owner credentials/assets. The bootstrap reports voice as degraded when
 the required inputs are absent. It does not claim that host services or live
 voice work from k3d alone.
 
+## Private voice URL
+
+After the host broker, owner settings, and voice assets are present, run:
+
+```sh
+impl/deployment/k3d/voice/tailnet-up.sh
+```
+
+The command asks for the Tailscale owner login and a preauthorized,
+non-ephemeral auth key. It reads the key without echo, stores it only in the
+`awp-v2/voice-tailnet-auth` Kubernetes Secret, resumes the voice Flux
+Kustomization, enrolls a persistent `awp-v2-voice` tailnet node, sets the exact
+HTTPS origin and owner allowlist in `voice-edge-settings`, and prints the
+resulting MagicDNS URL. The Tailscale node state is persisted in a local-path
+PVC. The helper does not alter tailnet ACLs or expose Funnel/public ingress.
+
+Open the URL from a device signed into the same tailnet. HTTPS and signaling
+are provided by Tailscale Serve; live voice also needs direct bidirectional
+WebRTC media over the tailnet interface. The URL is only considered ready for
+use after connection and actual audio both work. Tailscale auth and access
+policy must allow this device to reach the voice node. If the owner email does
+not match the login Tailscale supplies, rerun the helper with the exact
+Tailscale user login. Re-enrollment after deleting the state PVC requires a
+new auth key.
+
 The older `semaphore.sh` and `grain.sh` scripts remain for focused operations;
 they still use host `kubectl`/Helm as documented below. Use `bootstrap.sh` for
 the Docker+k3d-only entry path.

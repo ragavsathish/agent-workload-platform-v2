@@ -132,6 +132,49 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
+        - name: tailscale
+          image: ghcr.io/tailscale/tailscale:v1.104.5
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TS_AUTHKEY
+              valueFrom:
+                secretKeyRef:
+                  name: voice-tailnet-auth
+                  key: authkey
+                  optional: true
+            - name: TS_AUTH_ONCE
+              value: "true"
+            - name: TS_HOSTNAME
+              value: awp-v2-voice
+            - name: TS_USERSPACE
+              value: "false"
+            - name: TS_ACCEPT_DNS
+              value: "false"
+            - name: TS_KUBE_SECRET
+              value: ""
+            - name: TS_STATE_DIR
+              value: /var/lib/tailscale
+            - name: TS_SERVE_CONFIG
+              value: /etc/tailscale/serve-config.json
+          volumeMounts:
+            - name: tailscale-state
+              mountPath: /var/lib/tailscale
+            - name: tailscale-serve-config
+              mountPath: /etc/tailscale
+              readOnly: true
+            - name: tailscale-tun
+              mountPath: /dev/net/tun
+          securityContext:
+            privileged: true
+            runAsUser: 0
+            runAsGroup: 0
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
       volumes:
         - name: tmp
           emptyDir:
@@ -143,3 +186,16 @@ spec:
           secret:
             secretName: voxlock-owner-sample
             defaultMode: 0440
+        - name: tailscale-state
+          persistentVolumeClaim:
+            claimName: voice-tailnet-state
+        - name: tailscale-serve-config
+          configMap:
+            name: voice-tailnet-serve
+            items:
+              - key: serve-config.json
+                path: serve-config.json
+        - name: tailscale-tun
+          hostPath:
+            path: /dev/net/tun
+            type: CharDevice

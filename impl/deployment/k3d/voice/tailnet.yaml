@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: voice-tailnet-state
+  namespace: awp-v2
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 128Mi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: voice-tailnet-serve
+  namespace: awp-v2
+data:
+  serve-config.json: |
+    {
+      "TCP": {"443": {"HTTPS": true}},
+      "Web": {
+        "${TS_CERT_DOMAIN}:443": {
+          "Handlers": {
+            "/": {"Proxy": "http://127.0.0.1:7860"}
+          }
+        }
+      }
+    }

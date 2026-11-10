@@ -37,3 +37,4 @@ Cites [the pinned v1 source inventory](../../raw/v1/manifest.md).
 
 The wiki records source-backed current behavior separately from agreed behavior
 and explicit v2 decisions. It does not describe the implementation.
+- [Tailnet owner voice access](tailnet-owner-voice.md) defines verified owner entry, secure browser origin, full live-media completion, and visible failure for [slice 51](../plan/51-tailnet-owner-voice/plan.md).

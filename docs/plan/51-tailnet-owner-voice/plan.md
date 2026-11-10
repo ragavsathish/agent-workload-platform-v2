@@ -31,14 +31,16 @@ See [Gherkin scenarios](spec.feature). Completion requires a private URL, author
 
 ## Implementation status
 
-The deployment slice contains a pinned Tailscale sidecar and Traefik ingress
-sharing the Edge Pod network namespace. Tailscale Serve proxies private HTTPS
-to Traefik; the direct tailnet interface carries WebRTC media. The helper
-transfers the existing v1 node state only when no running container owns it,
-otherwise it opens Tailscale's browser-based device approval flow. The live
-k3d cluster has the host-backed voice inputs, but this revised ingress path
-has not been rolled out or qualified. The URL and full spoken-turn acceptance
-remain pending until enrollment and the media and host-turn scenarios pass.
+The deployment is live from public revision `main@sha1:29ad0b798df2fc6bfd94975044cce1744cb17c7c`.
+The helper reused the stopped v1 Tailscale state, so no auth key or new device
+approval was needed. The Edge, Traefik, and Tailscale containers are 3/3 Ready;
+Tailscale Serve reports the private `pipecat-edge.tailf6d713.ts.net` route to
+Traefik, and the configured Edge owner matches the authenticated node login.
+An in-pod request through the Traefik owner route returned HTTP 200, and the
+Edge can reach the host Pi broker. Opening the MagicDNS URL from this Mac's
+browser failed DNS resolution because this Mac is not connected as a Tailscale
+client. Browser microphone, bidirectional WebRTC media, and a complete host
+turn still require verification from an authorized tailnet client.
 
 ## Exit evidence
 

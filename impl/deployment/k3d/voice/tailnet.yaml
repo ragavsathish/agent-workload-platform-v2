@@ -44,6 +44,16 @@ data:
         address: "127.0.0.1:8080"
         forwardedHeaders:
           trustedIPs: ["127.0.0.1/32"]
+        http:
+          aliasHeadersStrategy: reject
+          encodedCharacters:
+            allowEncodedSlash: false
+            allowEncodedBackSlash: false
+            allowEncodedNullCharacter: false
+            allowEncodedSemicolon: false
+            allowEncodedPercent: false
+            allowEncodedQuestionMark: false
+            allowEncodedHash: false
     providers:
       file:
         filename: /etc/traefik/routes.yaml
@@ -67,6 +77,7 @@ data:
           forwardAuth:
             address: http://127.0.0.1:7860/api/ingress-auth
             trustForwardHeader: false
+            maxResponseBodySize: 65536
       routers:
         live:
           entryPoints: [tailnet]

@@ -60,7 +60,8 @@ impl/deployment/k3d/voice/tailnet-up.sh
 
 The command asks for the Tailscale owner login and a preauthorized,
 non-ephemeral auth key. It reads the key without echo, stores it only in the
-`awp-v2/voice-tailnet-auth` Kubernetes Secret, resumes the voice Flux
+temporary `awp-v2/voice-tailnet-auth` Kubernetes Secret, removes that Secret
+after the node authenticates, resumes the voice Flux
 Kustomization, enrolls a persistent `awp-v2-voice` tailnet node, sets the exact
 HTTPS origin and owner allowlist in `voice-edge-settings`, and prints the
 resulting MagicDNS URL. The Tailscale node state is persisted in a local-path

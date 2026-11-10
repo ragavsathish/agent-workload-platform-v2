@@ -21,14 +21,27 @@ for required_secret in broker-client gateway-access grafana-mcp-caller voice-edg
 done
 
 k() { docker exec -i "$SERVER" kubectl "$@"; }
+k -n flux-system patch kustomization awp-v2-voice --type=merge -p '{"spec":{"suspend":false}}' >/dev/null
+flux_ready=''
+for attempt in $(seq 1 480); do
+  source_revision="$(k -n flux-system get gitrepository awp-v2 -o jsonpath='{.status.artifact.revision}')"
+  voice_revision="$(k -n flux-system get kustomization awp-v2-voice -o jsonpath='{.status.lastAppliedRevision}')"
+  flux_ready="$(k -n flux-system get kustomization awp-v2-voice -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')"
+  if [[ "$flux_ready" == True && -n "$source_revision" && "$voice_revision" == "$source_revision" ]]; then
+    break
+  fi
+  sleep 1
+done
+[[ "$flux_ready" == True && "$voice_revision" == "$source_revision" ]] ||
+  die 'Flux did not apply the current public voice deployment revision'
+
 pod="$(k -n awp-v2 get pod -l app.kubernetes.io/name=voice-edge -o jsonpath='{.items[0].metadata.name}')"
 [[ -n "$pod" ]] || die 'voice Edge pod was not found'
 k -n awp-v2 wait --for=condition=Ready "pod/$pod" --timeout=2m >/dev/null
 
-target_state="$(k -n awp-v2 exec "$pod" -c tailscale -- sh -c 'test -s /var/lib/tailscale/tailscaled.state && echo present || echo absent')"
 enrollment_marker="$(k -n awp-v2 exec "$pod" -c tailscale -- sh -c 'test -f /var/lib/tailscale/.enrolled && echo yes || echo no')"
 
-if [[ "$enrollment_marker" != yes && "$target_state" == absent ]] && docker volume inspect "$OLD_STATE_VOLUME" >/dev/null 2>&1; then
+if [[ "$enrollment_marker" != yes ]] && docker volume inspect "$OLD_STATE_VOLUME" >/dev/null 2>&1; then
   old_state="$(docker run --rm --entrypoint /bin/sh --volume "$OLD_STATE_VOLUME:/source:ro" "$TAILSCALE_IMAGE" -ec 'test -s /source/tailscaled.state && echo present || echo absent')"
   if [[ "$old_state" == present ]]; then
     printf 'tailnet_state=transferring-existing-v1-identity\n'
@@ -48,7 +61,6 @@ if [[ "$enrollment_marker" != yes ]]; then
   k -n awp-v2 exec "$pod" -c tailscale -- sh -ec 'touch /var/lib/tailscale/.interactive'
 fi
 
-k -n flux-system patch kustomization awp-v2-voice --type=merge -p '{"spec":{"suspend":false}}' >/dev/null
 k -n awp-v2 rollout restart deployment/voice-edge >/dev/null
 k -n awp-v2 rollout status deployment/voice-edge --timeout=8m
 pod="$(k -n awp-v2 get pod -l app.kubernetes.io/name=voice-edge -o jsonpath='{.items[0].metadata.name}')"

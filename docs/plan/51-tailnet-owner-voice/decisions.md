@@ -2,21 +2,21 @@
 
 Cites the [Slice 51 plan](plan.md), [Gherkin scenarios](spec.feature), [Tailscale Kubernetes sidecar guide](https://tailscale.com/docs/solutions/connect-kubernetes-pods-to-tailnet-using-sidecar), [Tailscale Serve identity-header documentation](https://tailscale.com/docs/features/tailscale-serve), and [Pipecat Small WebRTC documentation](https://github.com/pipecat-ai/docs/blob/main/api-reference/server/services/transport/small-webrtc.mdx).
 
-## D01 — Give the voice Edge a private tailnet identity
+## D01 — Use Tailscale device login with Traefik as the HTTP ingress
 
-Run one Tailscale kernel-networking sidecar in the voice Edge Pod. Its tailnet interface shares the Edge network namespace, so Tailscale Serve can provide private HTTPS for signaling and the Edge can advertise a direct tailnet ICE candidate for WebRTC media. Keep Semaphore's loopback operator Ingress separate. Do not make the Edge a public Ingress or enable Funnel. The host-backed k3d node exposes `/dev/net/tun` to pods, which the sidecar needs for kernel networking.
+Run Tailscale, Traefik, and the voice Edge in the same Pod network namespace. Tailscale Serve terminates private HTTPS on 443 and proxies to Traefik's loopback HTTP entry point on 8080. Traefik checks the verified `Tailscale-User-Login` through the Edge's `/api/ingress-auth` endpoint, then proxies to the Edge's loopback HTTP listener on 7860. Remove the Kubernetes Service and bind Edge HTTP to loopback so callers cannot bypass ingress with a Pod or Service IP. The shared Tailscale interface also gives SmallWebRTC a direct tailnet media path. The Deployment uses one replica and `Recreate` so two Tailscale daemons never mount the single-identity PVC concurrently; voice has brief downtime during rollout. Do not enable Funnel or a public route.
 
-## D02 — Trust identity only from Tailscale Serve
+## D02 — Authenticate at the trusted ingress
 
-The Edge expects `Tailscale-User-Login` and validates that identity against its configured owner allowlist. Tailscale Serve strips caller-supplied Tailscale identity headers and adds verified identity headers for tailnet requests. Serve proxies only to `127.0.0.1:7860`; the Kubernetes service remains ClusterIP and is not the owner entry. The exact MagicDNS HTTPS origin must be allowed by the Edge browser-origin policy before the route is enabled.
+The Traefik route accepts requests only when Tailscale Serve supplied `Tailscale-User-Login`, removes any `X-Voice-Local-Ingress` marker, and calls the Edge owner-auth endpoint before proxying. The Edge still validates the exact configured owner. Tailscale Serve strips caller-supplied Tailscale identity headers and supplies the verified identity. Edge's HTTP listener binds only to pod loopback and has no Kubernetes Service, closing the direct-HTTP spoof path. The exact MagicDNS HTTPS origin is applied to the Edge browser-origin policy after node identity is confirmed.
 
 ## D03 — Qualify the direct WebRTC media path
 
 A successful HTTPS page and signaling route is not sufficient for SmallWebRTC. The browser and Edge must establish bidirectional UDP media over their Tailscale peer path across the Docker/k3d boundary. The current deployment has no configured ICE server list or TURN service. Do not claim the path works from page health; qualify real ICE selection and bidirectional audio from a separate authorized tailnet device. If the direct tailnet candidate cannot be selected, keep voice unavailable and design a separately reviewed private relay; do not expose a public TURN relay or arbitrary UDP range as a shortcut.
 
-## D04 — Enroll the Edge without putting a credential in source
+## D04 — Reuse the prior node state or approve device login in a browser
 
-The host has no Tailscale client identity and the cluster has no Tailscale auth material. The local setup helper will prompt for an owner-provisioned, preauthorized Tailscale auth key and send it directly to Kubernetes Secret creation; the value is never accepted as a CLI argument, echoed, logged, or written into Git. Persist the resulting node state in a separate Kubernetes Secret so pod restarts retain the same private hostname. The owner must ensure tailnet policy permits their client device to reach the node for HTTPS and direct ICE traffic; this slice does not edit tailnet admin policy.
+Prefer the stopped v1 Docker volume `pipecat-mlx-voice_tailscale-state` when it contains the prior node state. The helper verifies no running container is using that volume, copies state into the k3d PVC without displaying it, then starts the Tailscale sidecar with that identity. If no state is present or usable, Tailscale provides its normal device approval URL; the helper opens it in the user's browser and waits for approval. No auth key or OAuth secret is required or stored. The helper reads the final node DNS name and authenticated login from Tailscale status and sets the Edge owner and origin values. The owner still needs tailnet policy that allows HTTPS and direct media traffic; this slice does not edit tailnet admin policy.
 
 ## D05 — Keep Grain as owner-state authority
 

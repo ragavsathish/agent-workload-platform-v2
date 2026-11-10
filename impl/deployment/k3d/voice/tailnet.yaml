@@ -23,8 +23,59 @@ data:
       "Web": {
         "${TS_CERT_DOMAIN}:443": {
           "Handlers": {
-            "/": {"Proxy": "http://127.0.0.1:7860"}
+            "/": {"Proxy": "http://127.0.0.1:8080"}
           }
         }
       }
     }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: voice-tailnet-ingress
+  namespace: awp-v2
+data:
+  traefik.yaml: |
+    global:
+      checkNewVersion: false
+      sendAnonymousUsage: false
+    entryPoints:
+      tailnet:
+        address: "127.0.0.1:8080"
+        forwardedHeaders:
+          trustedIPs: ["127.0.0.1/32"]
+    providers:
+      file:
+        filename: /etc/traefik/routes.yaml
+        watch: false
+    api:
+      dashboard: false
+    log:
+      level: INFO
+  routes.yaml: |
+    http:
+      middlewares:
+        tailnet-loopback-only:
+          ipAllowList:
+            sourceRange: ["127.0.0.1/32"]
+            rejectStatusCode: 404
+        strip-local-ingress-marker:
+          headers:
+            customRequestHeaders:
+              X-Voice-Local-Ingress: ""
+        owner-only:
+          forwardAuth:
+            address: http://127.0.0.1:7860/api/ingress-auth
+            trustForwardHeader: false
+      routers:
+        live:
+          entryPoints: [tailnet]
+          rule: "HeaderRegexp(`Tailscale-User-Login`, `.+`) && PathPrefix(`/`)"
+          priority: 1
+          middlewares: [tailnet-loopback-only, strip-local-ingress-marker, owner-only]
+          service: voice-edge
+      services:
+        voice-edge:
+          loadBalancer:
+            servers:
+              - url: http://127.0.0.1:7860

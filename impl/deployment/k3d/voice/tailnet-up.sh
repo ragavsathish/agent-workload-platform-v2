@@ -1,76 +1,97 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Enroll the k3d voice Edge into the owner's tailnet and open its private URL.
-# The Tailscale key is read without echo and sent only through kubectl stdin.
+# Reuse the old v1 tailnet node state when available; otherwise authenticate
+# this node with Tailscale's browser-based device approval flow.
 CLUSTER="awp-v2-ops"
 SERVER="k3d-${CLUSTER}-server-0"
+OLD_STATE_VOLUME="pipecat-mlx-voice_tailscale-state"
+TAILSCALE_IMAGE="ghcr.io/tailscale/tailscale:v1.104.4"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 command -v docker >/dev/null 2>&1 || die 'Docker is required'
 docker exec "$SERVER" kubectl get nodes >/dev/null 2>&1 || die 'k3d cluster awp-v2-ops is not running; run impl/deployment/k3d/bootstrap.sh up first'
+old_state_users="$(docker ps --filter "volume=${OLD_STATE_VOLUME}" --format '{{.Names}}')"
+if [[ -n "$old_state_users" ]]; then
+  die "a running container still uses $OLD_STATE_VOLUME; stop it before transferring the device state"
+fi
 for required_secret in broker-client gateway-access grafana-mcp-caller voice-edge-settings voxlock-owner-sample; do
   docker exec "$SERVER" kubectl -n awp-v2 get secret "$required_secret" >/dev/null 2>&1 ||
     die "required voice input $required_secret is missing; bootstrap the host-backed voice prerequisites first"
 done
 
-printf 'Tailnet owner login (email): '
-IFS= read -r owner_login
-[[ "$owner_login" == *@* ]] || die 'enter the email shown as your Tailscale user login'
-printf 'Paste a preauthorized, non-ephemeral Tailscale auth key: '
-IFS= read -r -s auth_key
-printf '\n'
-[[ -n "$auth_key" ]] || die 'Tailscale auth key was empty'
+k() { docker exec -i "$SERVER" kubectl "$@"; }
+pod="$(k -n awp-v2 get pod -l app.kubernetes.io/name=voice-edge -o jsonpath='{.items[0].metadata.name}')"
+[[ -n "$pod" ]] || die 'voice Edge pod was not found'
+k -n awp-v2 wait --for=condition=Ready "pod/$pod" --timeout=2m >/dev/null
 
-encoded_key="$(printf '%s' "$auth_key" | base64 | tr -d '\n')"
-unset auth_key
-{
-  cat <<EOF
-apiVersion: v1
-kind: Secret
-metadata:
-  name: voice-tailnet-auth
-  namespace: awp-v2
-type: Opaque
-data:
-  authkey: ${encoded_key}
-EOF
-} | docker exec -i "$SERVER" kubectl apply -f - >/dev/null
-unset encoded_key
-printf 'tailnet_auth=stored-in-kubernetes-secret\n'
+target_state="$(k -n awp-v2 exec "$pod" -c tailscale -- sh -c 'test -s /var/lib/tailscale/tailscaled.state && echo present || echo absent')"
+enrollment_marker="$(k -n awp-v2 exec "$pod" -c tailscale -- sh -c 'test -f /var/lib/tailscale/.enrolled && echo yes || echo no')"
 
-docker exec "$SERVER" kubectl -n flux-system patch kustomization awp-v2-voice \
-  --type=merge -p '{"spec":{"suspend":false}}' >/dev/null
-printf 'voice_flux=resume-requested\n'
-docker exec "$SERVER" kubectl -n awp-v2 rollout restart deployment/voice-edge >/dev/null
-docker exec "$SERVER" kubectl -n awp-v2 rollout status deployment/voice-edge --timeout=8m
-
-pod="$(docker exec "$SERVER" kubectl -n awp-v2 get pod \
-  -l app.kubernetes.io/name=voice-edge -o jsonpath='{.items[0].metadata.name}')"
-[[ -n "$pod" ]] || die 'voice Edge pod was not found after rollout'
-tailnet_dns=''
-for attempt in $(seq 1 60); do
-  status_json="$(docker exec "$SERVER" kubectl -n awp-v2 exec "$pod" -c tailscale -- tailscale status --json 2>/dev/null || true)"
-  if [[ -n "$status_json" ]]; then
-    tailnet_dns="$(printf '%s' "$status_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("Self",{}).get("DNSName", ""))' 2>/dev/null || true)"
+if [[ "$enrollment_marker" != yes && "$target_state" == absent ]] && docker volume inspect "$OLD_STATE_VOLUME" >/dev/null 2>&1; then
+  old_state="$(docker run --rm --entrypoint /bin/sh --volume "$OLD_STATE_VOLUME:/source:ro" "$TAILSCALE_IMAGE" -ec 'test -s /source/tailscaled.state && echo present || echo absent')"
+  if [[ "$old_state" == present ]]; then
+    printf 'tailnet_state=transferring-existing-v1-identity\n'
+    docker run --rm --entrypoint /bin/sh \
+      --volume "$OLD_STATE_VOLUME:/source:ro" "$TAILSCALE_IMAGE" \
+      -ec 'tar -C /source -cf - tailscaled.state certs' |
+      docker exec -i "$SERVER" kubectl -n awp-v2 exec -i "$pod" \
+        -c tailscale -- tar -C /var/lib/tailscale -xf -
+    k -n awp-v2 exec "$pod" -c tailscale -- sh -ec \
+      'rm -f /var/lib/tailscale/.interactive; touch /var/lib/tailscale/.enrolled'
   fi
-  unset status_json
-  [[ -n "$tailnet_dns" ]] && break
-  sleep 2
+fi
+
+enrollment_marker="$(k -n awp-v2 exec "$pod" -c tailscale -- sh -c 'test -f /var/lib/tailscale/.enrolled && echo yes || echo no')"
+if [[ "$enrollment_marker" != yes ]]; then
+  printf 'tailnet_state=interactive-device-login-required\n'
+  k -n awp-v2 exec "$pod" -c tailscale -- sh -ec 'touch /var/lib/tailscale/.interactive'
+fi
+
+k -n flux-system patch kustomization awp-v2-voice --type=merge -p '{"spec":{"suspend":false}}' >/dev/null
+k -n awp-v2 rollout restart deployment/voice-edge >/dev/null
+k -n awp-v2 rollout status deployment/voice-edge --timeout=8m
+pod="$(k -n awp-v2 get pod -l app.kubernetes.io/name=voice-edge -o jsonpath='{.items[0].metadata.name}')"
+[[ -n "$pod" ]] || die 'voice Edge pod was not found after rollout'
+
+last_auth_url=''
+tailnet_dns=''
+owner_login=''
+for attempt in $(seq 1 600); do
+  status_json="$(k -n awp-v2 exec "$pod" -c tailscale -- tailscale status --json 2>/dev/null || true)"
+  if [[ -n "$status_json" ]]; then
+    backend_state="$(printf '%s' "$status_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("BackendState", ""))' 2>/dev/null || true)"
+    auth_url="$(printf '%s' "$status_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("AuthURL", ""))' 2>/dev/null || true)"
+    if [[ "$backend_state" == Running ]]; then
+      identity="$(printf '%s' "$status_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get("Self",{}); u=d.get("User",{}).get(str(s.get("UserID")),{}); print(s.get("DNSName", "").rstrip(".") + "\t" + u.get("LoginName", "").lower())')"
+      tailnet_dns="${identity%%$'\t'*}"
+      owner_login="${identity#*$'\t'}"
+      unset identity
+      if [[ -n "$tailnet_dns" && "$tailnet_dns" == *.ts.net && "$owner_login" == *@* ]]; then
+        break
+      fi
+    elif [[ -n "$auth_url" && "$auth_url" != "$last_auth_url" ]]; then
+      last_auth_url="$auth_url"
+      if command -v open >/dev/null 2>&1 && open "$auth_url" >/dev/null 2>&1; then
+        printf 'tailnet_login=opened-device-approval-in-browser\n'
+      else
+        printf 'Authenticate the voice node at: %s\n' "$auth_url"
+      fi
+    fi
+  fi
+  sleep 1
 done
-tailnet_dns="${tailnet_dns%.}"
-[[ "$tailnet_dns" == *.ts.net ]] || die 'Tailscale is enrolled but did not report a MagicDNS .ts.net name'
-docker exec "$SERVER" kubectl -n awp-v2 exec "$pod" -c tailscale -- \
-  sh -c 'touch /var/lib/tailscale/.enrolled'
-docker exec "$SERVER" kubectl -n awp-v2 delete secret voice-tailnet-auth --ignore-not-found=true >/dev/null
+unset status_json auth_url last_auth_url backend_state
+[[ "$tailnet_dns" == *.ts.net && "$owner_login" == *@* ]] || die 'Tailscale did not reach Running state within 10 minutes'
+
+k -n awp-v2 exec "$pod" -c tailscale -- sh -ec 'rm -f /var/lib/tailscale/.interactive; touch /var/lib/tailscale/.enrolled'
 origin="https://${tailnet_dns}"
 patch="$(python3 -c 'import json,sys; print(json.dumps({"stringData":{"EDGE_ALLOWED_USERS":sys.argv[1],"PIPECAT_ALLOWED_ORIGINS":sys.argv[2]}}))' "$owner_login" "$origin")"
 unset owner_login
-docker exec "$SERVER" kubectl -n awp-v2 patch secret voice-edge-settings \
-  --type=merge -p "$patch" >/dev/null
+k -n awp-v2 patch secret voice-edge-settings --type=merge -p "$patch" >/dev/null
 unset patch
-docker exec "$SERVER" kubectl -n awp-v2 rollout restart deployment/voice-edge >/dev/null
-docker exec "$SERVER" kubectl -n awp-v2 rollout status deployment/voice-edge --timeout=8m
+k -n awp-v2 rollout restart deployment/voice-edge >/dev/null
+k -n awp-v2 rollout status deployment/voice-edge --timeout=8m
 
 printf '\nAWP voice URL: %s/\n' "$origin"
-printf 'Access it from a device signed into the same tailnet. Allow microphone access when the app asks.\n'
+printf 'Open it from a device signed into this tailnet. Allow microphone access when prompted.\n'

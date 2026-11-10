@@ -58,23 +58,29 @@ After the host broker, owner settings, and voice assets are present, run:
 impl/deployment/k3d/voice/tailnet-up.sh
 ```
 
-The command asks for the Tailscale owner login and a preauthorized,
-non-ephemeral auth key. It reads the key without echo, stores it only in the
-temporary `awp-v2/voice-tailnet-auth` Kubernetes Secret, removes that Secret
-after the node authenticates, resumes the voice Flux
-Kustomization, enrolls a persistent `awp-v2-voice` tailnet node, sets the exact
-HTTPS origin and owner allowlist in `voice-edge-settings`, and prints the
-resulting MagicDNS URL. The Tailscale node state is persisted in a local-path
-PVC. The helper does not alter tailnet ACLs or expose Funnel/public ingress.
+The helper first checks the stopped v1 Docker volume
+`pipecat-mlx-voice_tailscale-state`. If it contains the prior node state, the
+helper transfers it into the k3d local-path PVC after confirming no running
+container is using that volume. Otherwise it starts Tailscale's interactive
+device approval flow and opens the approval URL in your browser. No Tailscale
+auth key is needed. It resumes the voice Flux Kustomization, reads the
+authenticated node's MagicDNS name and user login, applies the exact HTTPS
+origin and owner allowlist to `voice-edge-settings`, and prints the voice URL.
+Traefik is the HTTP ingress behind Tailscale Serve; Traefik and the Edge share
+the Tailscale pod network namespace for direct WebRTC media. Edge HTTP binds
+to pod loopback and has no Kubernetes Service, so the identity check cannot
+be bypassed with a Pod IP or ClusterIP. The helper does not alter tailnet ACLs
+or expose Funnel/public ingress. The single-replica Edge deployment uses
+`Recreate` because one Tailscale identity PVC must never be mounted by two
+daemons at once; a rollout causes brief voice downtime.
 
 Open the URL from a device signed into the same tailnet. HTTPS and signaling
-are provided by Tailscale Serve; live voice also needs direct bidirectional
-WebRTC media over the tailnet interface. The URL is only considered ready for
-use after connection and actual audio both work. Tailscale auth and access
-policy must allow this device to reach the voice node. If the owner email does
-not match the login Tailscale supplies, rerun the helper with the exact
-Tailscale user login. Re-enrollment after deleting the state PVC requires a
-new auth key.
+go through Tailscale Serve and Traefik; live voice also needs direct
+bidirectional WebRTC media over the shared tailnet interface. The URL is only
+considered ready for use after connection and actual audio both work. The
+authenticated Tailscale login is configured as the owner, so no email entry is
+needed. If the state PVC is deleted, the helper falls back to browser-based
+device approval.
 
 The older `semaphore.sh` and `grain.sh` scripts remain for focused operations;
 they still use host `kubectl`/Helm as documented below. Use `bootstrap.sh` for

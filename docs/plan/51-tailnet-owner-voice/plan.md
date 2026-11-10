@@ -31,14 +31,14 @@ See [Gherkin scenarios](spec.feature). Completion requires a private URL, author
 
 ## Implementation status
 
-The deployment slice now contains a pinned Tailscale sidecar, persistent local
-node state, HTTPS Serve proxy to the Edge loopback listener, and a local
-credential bootstrap helper. The helper keeps the auth key out of source,
-shell history, command arguments, and printed output. The live k3d cluster has
-the host-backed voice inputs, but the tailnet auth secret has not been created
-and no separate tailnet device has qualified WebRTC media. Therefore the URL
-and full spoken-turn acceptance remain pending until the owner runs the helper
-and completes the media and host-turn scenarios.
+The deployment slice contains a pinned Tailscale sidecar and Traefik ingress
+sharing the Edge Pod network namespace. Tailscale Serve proxies private HTTPS
+to Traefik; the direct tailnet interface carries WebRTC media. The helper
+transfers the existing v1 node state only when no running container owns it,
+otherwise it opens Tailscale's browser-based device approval flow. The live
+k3d cluster has the host-backed voice inputs, but this revised ingress path
+has not been rolled out or qualified. The URL and full spoken-turn acceptance
+remain pending until enrollment and the media and host-turn scenarios pass.
 
 ## Exit evidence
 

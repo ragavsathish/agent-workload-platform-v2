@@ -135,6 +135,14 @@ spec:
         - name: tailscale
           image: ghcr.io/tailscale/tailscale:v1.104.4
           imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              if [ -n "${TS_AUTHKEY:-}" ] || [ -f "${TS_STATE_DIR}/.enrolled" ]; then
+                exec /usr/local/bin/containerboot
+              fi
+              echo "Tailscale enrollment pending; waiting for the local bootstrap helper"
+              exec /bin/sleep infinity
           env:
             - name: TS_AUTHKEY
               valueFrom:

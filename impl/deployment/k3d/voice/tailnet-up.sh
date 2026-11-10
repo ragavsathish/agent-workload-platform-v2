@@ -60,6 +60,8 @@ for attempt in $(seq 1 60); do
 done
 tailnet_dns="${tailnet_dns%.}"
 [[ "$tailnet_dns" == *.ts.net ]] || die 'Tailscale is enrolled but did not report a MagicDNS .ts.net name'
+docker exec "$SERVER" kubectl -n awp-v2 exec "$pod" -c tailscale -- \
+  sh -c 'touch /var/lib/tailscale/.enrolled'
 docker exec "$SERVER" kubectl -n awp-v2 delete secret voice-tailnet-auth --ignore-not-found=true >/dev/null
 origin="https://${tailnet_dns}"
 patch="$(python3 -c 'import json,sys; print(json.dumps({"stringData":{"EDGE_ALLOWED_USERS":sys.argv[1],"PIPECAT_ALLOWED_ORIGINS":sys.argv[2]}}))' "$owner_login" "$origin")"

@@ -29,7 +29,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: voice-edge
-          image: awp-v2-voice-edge:slice52
+          image: awp-v2-voice-edge:slice53
           imagePullPolicy: Never
           command: ["/app/.venv/bin/python", "bot.py"]
           args: ["-t", "webrtc", "--host", "127.0.0.1", "--port", "7860"]
@@ -46,6 +46,11 @@ spec:
                   key: token
             - name: AGENT_GATEWAY_BASE_URL
               value: http://agent-gateway.awp-v2.svc.cluster.local:9444/v1
+            - name: AWP_OWNER_IDENTITY
+              valueFrom:
+                secretKeyRef:
+                  name: grain-session
+                  key: owner
             - name: AGENT_GATEWAY_TOKEN
               valueFrom:
                 secretKeyRef:

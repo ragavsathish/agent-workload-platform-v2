@@ -160,6 +160,24 @@ def validate_identity(identity: str) -> str:
     return identity
 
 
+def gateway_owner_identity() -> str:
+    """Return Grain's canonical owner key after the caller was authenticated.
+
+    Tailnet login is an authentication principal. Grain's owner key is persisted
+    in its event store and can legitimately differ; never rewrite that key to
+    match a Tailnet enrollment. Callers must first validate the Tailnet user.
+    """
+    if len(allowed_identities()) != 1:
+        raise HTTPException(status_code=503, detail="owner task gateway is not configured")
+    try:
+        identity = required_env("AWP_OWNER_IDENTITY")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail="owner task gateway is not configured") from exc
+    if not identity.strip():
+        raise HTTPException(status_code=503, detail="owner task gateway is not configured")
+    return identity
+
+
 def local_ingress_identity(request: Request) -> str | None:
     """Resolve the single configured owner for loopback-only local ingress.
 
@@ -510,7 +528,8 @@ async def owner_gateway_request(
     query: dict[str, str | int] | None = None,
 ) -> object:
     """Proxy one owner-scoped task operation through the narrow gateway."""
-    identity = validate_http_identity(request)
+    validate_http_identity(request)
+    owner_identity = gateway_owner_identity()
     headers = {"Authorization": f"Bearer {required_env('AGENT_GATEWAY_TOKEN')}"}
     if request.headers.get("idempotency-key"):
         headers["Idempotency-Key"] = request.headers["idempotency-key"]
@@ -523,11 +542,11 @@ async def owner_gateway_request(
                     method,
                     url,
                     headers=headers,
-                    params={"identity": identity, **(query or {})},
+                    params={**(query or {}), "identity": owner_identity},
                 )
             else:
                 response = await client.request(
-                    method, url, headers=headers, json={"identity": identity, **(body or {})}
+                    method, url, headers=headers, json={**(body or {}), "identity": owner_identity}
                 )
     if response.is_error:
         try:
@@ -545,7 +564,8 @@ async def owner_gateway_audio(request: Request, generation_id: str) -> bytes:
         generation_id,
     ) is None:
         raise HTTPException(status_code=400, detail="invalid song generation ID")
-    identity = validate_http_identity(request)
+    validate_http_identity(request)
+    owner_identity = gateway_owner_identity()
     headers = {"Authorization": f"Bearer {required_env('AGENT_GATEWAY_TOKEN')}"}
     if request.headers.get("idempotency-key"):
         headers["Idempotency-Key"] = request.headers["idempotency-key"]
@@ -556,7 +576,7 @@ async def owner_gateway_audio(request: Request, generation_id: str) -> bytes:
     with telemetry.observe("song.audio.proxy"):
         inject(headers)
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=5.0)) as client:
-            response = await client.get(url, headers=headers, params={"identity": identity})
+            response = await client.get(url, headers=headers, params={"identity": owner_identity})
     if response.is_error:
         raise HTTPException(status_code=response.status_code, detail="song audio is unavailable")
     if response.headers.get("content-type", "").split(";", 1)[0] != "audio/mp4":
@@ -574,7 +594,8 @@ async def owner_gateway_artifact(
         r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", task_id
     ) is None:
         raise HTTPException(status_code=404, detail="task artifact is unavailable")
-    identity = validate_http_identity(request)
+    validate_http_identity(request)
+    owner_identity = gateway_owner_identity()
     headers = {"Authorization": f"Bearer {required_env('AGENT_GATEWAY_TOKEN')}"}
     if request.headers.get("idempotency-key"):
         headers["Idempotency-Key"] = request.headers["idempotency-key"]
@@ -585,7 +606,7 @@ async def owner_gateway_artifact(
     with telemetry.observe("task.artifact.proxy"):
         inject(headers)
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=5.0)) as client:
-            response = await client.get(url, headers=headers, params={"identity": identity})
+            response = await client.get(url, headers=headers, params={"identity": owner_identity})
     if response.is_error:
         raise HTTPException(status_code=response.status_code, detail="task artifact is unavailable")
     if len(response.content) > 16_777_216:
@@ -709,6 +730,7 @@ async def run_bot(
     broker_token = required_env("INFERENCE_BROKER_TOKEN")
     gateway_url = required_env("AGENT_GATEWAY_BASE_URL").rstrip("/")
     gateway_token = required_env("AGENT_GATEWAY_TOKEN")
+    gateway_owner = gateway_owner_identity()
     llm_backend = os.getenv("VOICE_LLM_BACKEND", "pi").strip().lower()
     if llm_backend != "pi":
         raise RuntimeError("VOICE_LLM_BACKEND must be 'pi' for recorded sessions")
@@ -794,7 +816,7 @@ async def require_attachable_owner_task(request: Request, task_id: str) -> dict[
         try:
             task_id = str(params.arguments["task_id"])
             result = await gateway_request(
-                "GET", f"/tasks/{task_id}", params={"identity": identity}
+                "GET", f"/tasks/{task_id}", params={"identity": gateway_owner}
             )
             await params.result_callback(result)
         except Exception as exc:
@@ -806,7 +828,7 @@ async def require_attachable_owner_task(request: Request, task_id: str) -> dict[
             session_name = str(params.arguments["session_name"]).strip()
             matches = await gateway_list_request(
                 "/tasks",
-                params={"identity": identity, "session_name": session_name, "limit": 2},
+                params={"identity": gateway_owner, "session_name": session_name, "limit": 2},
             )
             if not matches:
                 raise RuntimeError(f"No task named {session_name!r}")
@@ -823,7 +845,7 @@ async def require_attachable_owner_task(request: Request, task_id: str) -> dict[
                 "POST",
                 "/tasks",
                 json={
-                    "identity": identity,
+                    "identity": gateway_owner,
                     "instruction": str(params.arguments["instruction"]),
                     "workspace": str(params.arguments["workspace"]),
                 },
@@ -839,7 +861,7 @@ async def require_attachable_owner_task(request: Request, task_id: str) -> dict[
             result = await gateway_request(
                 "POST",
                 f"/tasks/{task_id}/cancel",
-                json={"identity": identity},
+                json={"identity": gateway_owner},
             )
             await params.result_callback(result)
         except Exception as exc:

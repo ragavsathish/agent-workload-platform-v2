@@ -166,8 +166,10 @@ def service_environment(env_file: Path, state: Path) -> dict[str, str]:
     if level != "voice":
         environment["WORKER_PI_EXECUTION_MODE"] = execution_mode_for_level(level)
     telemetry = RUNTIME / "products/voice-agent/packages/telemetry/src"
-    environment["PYTHONPATH"] = os.pathsep.join([str(BROKER / "src"), str(telemetry),
-        environment.get("PYTHONPATH", "")])
+    python_paths = [str(BROKER / "src"), str(telemetry)]
+    if environment.get("AWP_NATIVE_PROFILE") != "voice-sidecar" and environment.get("PYTHONPATH"):
+        python_paths.append(environment["PYTHONPATH"])
+    environment["PYTHONPATH"] = os.pathsep.join(python_paths)
     if environment.get("AWP_NATIVE_PROFILE") == "voice-sidecar":
         endpoints = {
             "AWP_GRAIN_SESSION_URL": ("AWP_GRAIN_FORWARD_PORT", "19447"),

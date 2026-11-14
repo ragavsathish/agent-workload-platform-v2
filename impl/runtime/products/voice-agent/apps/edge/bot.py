@@ -726,6 +726,7 @@ async def summarize_owned_task_progress(
 async def run_bot(
     transport: BaseTransport, identity: str, input_filter: SelectedReplayAudioFilter
 ):
+    telemetry.record("voice.run_bot.entered")
     broker_url = required_env("INFERENCE_BROKER_BASE_URL")
     broker_token = required_env("INFERENCE_BROKER_TOKEN")
     gateway_url = required_env("AGENT_GATEWAY_BASE_URL").rstrip("/")
@@ -757,6 +758,7 @@ async def run_bot(
         base_url=broker_url,
         settings=OpenAITTSService.Settings(model="kokoro", voice="alloy", speed=1.0),
     )
+    telemetry.record("voice.services.created")
 
     http_client = httpx.AsyncClient(
         base_url=gateway_url,
@@ -940,6 +942,7 @@ async def require_attachable_owner_task(request: Request, task_id: str) -> dict[
             user_idle_timeout=90.0,
         ),
     )
+    telemetry.record("voice.aggregator.created")
 
     @user_aggregator.event_handler("on_user_turn_started")
     async def on_user_turn_started(_aggregator, _strategy):
@@ -993,9 +996,11 @@ async def require_attachable_owner_task(request: Request, task_id: str) -> dict[
         ),
         observers=list(configure_pipecat_observers(telemetry, input_filter.record_event)),
     )
+    telemetry.record("voice.worker.created")
 
     @worker.rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):
+        telemetry.record("voice.client.ready")
         context.add_message(
             {
                 "role": "developer",
@@ -1010,12 +1015,26 @@ async def require_attachable_owner_task(request: Request, task_id: str) -> dict[
 
     @worker.event_handler("on_pipeline_error")
     async def on_pipeline_error(_worker, _frame):
+        telemetry.record("voice.pipeline.error", outcome="error")
         # An error may contain provider diagnostics or user content. Publish only
         # a bounded, generic state over the authenticated media channel.
         await worker.rtvi.send_server_message({"type": "voice-error", "status": "unavailable"})
 
+    @worker.event_handler("on_pipeline_started")
+    async def on_pipeline_started(_worker, _frame):
+        telemetry.record("voice.pipeline.started")
+
+    @worker.event_handler("on_setup_timeout")
+    async def on_setup_timeout(_worker):
+        telemetry.record("voice.pipeline.setup_timeout", outcome="timeout")
+
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(_transport, _client):
+        telemetry.record("voice.transport.connected")
+
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
+        telemetry.record("voice.transport.disconnected")
         try:
             await broker_abort_pi_turn()
         except Exception:
@@ -1029,7 +1048,9 @@ async def require_attachable_owner_task(request: Request, task_id: str) -> dict[
 
     runner = WorkerRunner(handle_sigint=False)
     await runner.add_workers(worker)
+    telemetry.record("voice.worker.registered")
     await runner.run()
+    telemetry.record("voice.worker.finished")
 
 
 _voice_session_active = False
@@ -1040,17 +1061,21 @@ async def bot(runner_args: RunnerArguments):
     with telemetry.observe("voice.session"):
         match runner_args:
             case SmallWebRTCRunnerArguments():
+                telemetry.record("voice.session.webrtc")
                 try:
                     identity = resolve_webrtc_identity()
                 except PermissionError as exc:
+                    telemetry.record("voice.session.rejected_identity", outcome="error")
                     logger.warning("Rejected WebRTC edge connection: {}", exc)
                     await runner_args.webrtc_connection.disconnect()
                     return
                 if _voice_session_active:
+                    telemetry.record("voice.session.rejected_busy", outcome="error")
                     logger.warning("Rejected concurrent WebRTC voice session")
                     await runner_args.webrtc_connection.disconnect()
                     return
                 input_filter = create_audio_filter(telemetry)
+                telemetry.record("voice.filter.created")
                 transport = SmallWebRTCTransport(
                     webrtc_connection=runner_args.webrtc_connection,
                     params=TransportParams(
@@ -1064,7 +1089,9 @@ async def bot(runner_args: RunnerArguments):
                 # guard only after construction succeeds to avoid wedging the
                 # service in a permanently-busy state on constructor failure.
                 _voice_session_active = True
+                telemetry.record("voice.session.accepted")
             case _:
+                telemetry.record("voice.session.unsupported", outcome="error")
                 logger.error("Unsupported runner arguments: {}", type(runner_args))
                 return
         try:

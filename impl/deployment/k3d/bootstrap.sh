@@ -222,12 +222,12 @@ build_images() {
       '
     docker build --platform "$PLATFORM" \
       --file "${voice_root}/apps/edge/Containerfile" \
-      --tag awp-v2-voice-edge:slice55 "$voice_root"
+      --tag awp-v2-voice-edge:slice56 "$voice_root"
     docker build --platform "$PLATFORM" \
       --file "${voice_root}/apps/trace-render-worker/Dockerfile" \
       --tag awp-v2-trace-render-worker:slice47 "$voice_root"
     k3d image import --cluster "$CLUSTER" \
-      awp-v2-voice-edge:slice55 awp-v2-trace-render-worker:slice47
+      awp-v2-voice-edge:slice56 awp-v2-trace-render-worker:slice47
   else
     printf 'voice_images=skipped; voice prerequisites are absent\n'
   fi

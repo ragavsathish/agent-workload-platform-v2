@@ -723,6 +723,19 @@ async def summarize_owned_task_progress(
     return await broker_task_narration(task_id, instruction, events)
 
 
+async def require_attachable_owner_task(request: Request, task_id: str) -> dict[str, object]:
+    try:
+        task = await owner_gateway_request(request, "GET", f"/tasks/{task_id}")
+    except HTTPException as exc:
+        if exc.status_code in {403, 404}:
+            # Do not disclose whether a task exists for another owner.
+            raise HTTPException(status_code=404, detail="task is not available") from exc
+        raise
+    if task.get("status") not in {"pending", "running", "sleeping"}:
+        raise HTTPException(status_code=409, detail="task is not eligible for attachment")
+    return task
+
+
 async def run_bot(
     transport: BaseTransport, identity: str, input_filter: SelectedReplayAudioFilter
 ):
@@ -785,18 +798,6 @@ async def run_bot(
                 raise RuntimeError("agent gateway returned an invalid response")
             return payload
 
-
-async def require_attachable_owner_task(request: Request, task_id: str) -> dict[str, object]:
-    try:
-        task = await owner_gateway_request(request, "GET", f"/tasks/{task_id}")
-    except HTTPException as exc:
-        if exc.status_code in {403, 404}:
-            # Do not disclose whether a task exists for another owner.
-            raise HTTPException(status_code=404, detail="task is not available") from exc
-        raise
-    if task.get("status") not in {"pending", "running", "sleeping"}:
-        raise HTTPException(status_code=409, detail="task is not eligible for attachment")
-    return task
 
     async def gateway_list_request(path: str, **kwargs) -> list[dict[str, object]]:
         with telemetry.observe("gateway.get"):

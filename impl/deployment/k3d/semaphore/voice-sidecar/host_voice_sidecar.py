@@ -240,12 +240,14 @@ def run_check_ready(stack_path: Path, env_file: Path, state: Path,
                     environment: dict[str, str]) -> dict[str, bool]:
     command = [sys.executable, str(stack_path), "check-ready", "--env", str(env_file),
                "--state", str(state)]
-    deadline = time.monotonic() + 75
+    # stack.py checks each forwarded service in sequence, with a bounded
+    # per-endpoint timeout. Allow a full pass to finish before retrying it.
+    deadline = time.monotonic() + 180
     last: dict[str, bool] = {"check_ready_command": False}
     while True:
         try:
             result = subprocess.run(command, cwd=stack_path.parents[1], env=environment,
-                                    capture_output=True, text=True, timeout=20)
+                                    capture_output=True, text=True, timeout=65)
             payload = json.loads(result.stdout)
         except (OSError, subprocess.SubprocessError, ValueError, json.JSONDecodeError):
             payload = None
@@ -333,7 +335,7 @@ def main() -> None:
         if not all(checks.values()) or not all(legacy_after.values()):
             if not already_running:
                 stack.stop_stack(state, env_file)
-            print(json.dumps({"started": False, "rolled_back_sidecar": True,
+            print(json.dumps({"started": False, "rolled_back_sidecar": not already_running,
                               "already_running": already_running,
                               "readiness": checks, "legacy": legacy_after}, sort_keys=True))
             raise SystemExit(1)

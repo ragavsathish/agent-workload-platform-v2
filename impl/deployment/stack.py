@@ -6,6 +6,7 @@ Public edge deployment is separate: compose.yml plus Tailscale Serve.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import plistlib
@@ -431,14 +432,16 @@ def main() -> None:
                                        {"Authorization": f"Bearer {token}",
                                         "X-AWP-Owner": owner}),
             }
-            result = {}
-            for name, (url, headers) in checks.items():
+            def check_endpoint(item: tuple[str, tuple[str, dict[str, str]]]) -> tuple[str, bool]:
+                name, (url, headers) = item
                 try:
                     request = urllib.request.Request(url, headers=headers)
                     with urllib.request.urlopen(request, timeout=5) as response:
-                        result[name] = response.status == 200
+                        return name, response.status == 200
                 except Exception:
-                    result[name] = False
+                    return name, False
+            with ThreadPoolExecutor(max_workers=len(checks)) as pool:
+                result = dict(pool.map(check_endpoint, checks.items()))
             result["services_running"] = all(
                 item["running"] for item in service_status(state).values()
             ) and bool(service_status(state))

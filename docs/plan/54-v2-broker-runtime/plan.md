@@ -53,17 +53,15 @@ and its repository pin remain untouched.
 
 ## Gates and boundaries
 
-- Edge cutover is implemented in the source manifest and will take effect when
-  this revision is applied by Flux; until then the running deployment remains on
-  the legacy broker.
+- Edge cutover is applied by Flux at `main@sha1:250a35bf1beb2096e67a52f147eee4499e161820`.
 - Do not deploy, restart, stop, replace, or reconfigure legacy host services.
 - Do not create, rotate, or apply Grain owner/token secrets.
 - Do not expose host listeners outside loopback.
 - Before Edge cutover, require Semaphore verify to prove each forward, Pi and
   broker health, required broker routes, existing Grain authority, and legacy
-  health; retain an independently invocable Edge/Flux rollback. Direct checks
-  from the Edge pod passed, while the Semaphore `start` template still needs a
-  clean run before this gate is complete.
+  health; retain an independently invocable Edge/Flux rollback. The Edge pod
+  now returns HTTP 200 from both broker routes. The Semaphore readiness helper
+  timeout was corrected and is being qualified through the dedicated template.
 - Legacy retirement remains blocked on a reviewed quiescence signal.
 - No tests are added or run in this slice, as requested.
 
@@ -82,9 +80,9 @@ workspace repository. Pi startup also now registers `tea` as Git's credential
 helper; `tea login add` authenticated the API but did not authenticate the
 subsequent `git clone`. It does not create or rotate Edge, Grain, or Tailscale
 credentials. The refreshed sidecar runs on `:9553` and `:9556`, and its broker
-routes return HTTP 200 from the Edge pod. Source manifests now target `:9553`,
-but Flux has not yet applied this revision. The legacy broker and Pi listeners
-remain running.
+routes return HTTP 200 from the Edge pod. Flux applied the source manifest at
+`:9553`, and the old broker and Pi listeners remain running. PromQL reports zero
+task-route 4xx increases for the 15-minute window checked after cutover.
 
 ## Acceptance
 

@@ -59,9 +59,9 @@ and its repository pin remain untouched.
 - Do not expose host listeners outside loopback.
 - Before Edge cutover, require Semaphore verify to prove each forward, Pi and
   broker health, required broker routes, existing Grain authority, and legacy
-  health; retain an independently invocable Edge/Flux rollback. The Edge pod
-  now returns HTTP 200 from both broker routes. The Semaphore readiness helper
-  timeout was corrected and is being qualified through the dedicated template.
+  health; retain an independently invocable Edge/Flux rollback. Semaphore
+  check-ready and idempotent start both passed, with all ten readiness checks
+  true. The Edge pod returns HTTP 200 from both broker routes.
 - Legacy retirement remains blocked on a reviewed quiescence signal.
 - No tests are added or run in this slice, as requested.
 
@@ -81,8 +81,18 @@ helper; `tea login add` authenticated the API but did not authenticate the
 subsequent `git clone`. It does not create or rotate Edge, Grain, or Tailscale
 credentials. The refreshed sidecar runs on `:9553` and `:9556`, and its broker
 routes return HTTP 200 from the Edge pod. Flux applied the source manifest at
-`:9553`, and the old broker and Pi listeners remain running. PromQL reports zero
-task-route 4xx increases for the 15-minute window checked after cutover.
+`:9553` in revision `250a35b`; the Edge rollout completed with a new ready pod.
+PromQL reports zero task-route 4xx increases for the 15-minute window checked
+after cutover. The exact HTTP 404 query returned no samples, and the relevant
+HTTP 401 series showed zero increase. Semaphore task 2147483557 confirmed all
+ten readiness checks; task 2147483556 completed the idempotent start and
+confirmed the same checks.
+The sidecar was already running, so Semaphore reported `started: false` while
+leaving it running and ready. A later Semaphore-only readiness issue came from
+an inherited `PYTHONPATH` containing several staged source trees and a child
+timeout shorter than sequential probe time. The sidecar now uses a bounded
+profile-specific `PYTHONPATH`, parallel readiness probes, and a full-pass
+timeout.
 
 ## Acceptance
 

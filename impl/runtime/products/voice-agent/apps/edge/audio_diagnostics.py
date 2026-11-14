@@ -236,7 +236,10 @@ class AudioDiagnosticStore:
         self._active: dict[str, SessionAudioRecorder] = {}
         self._active_lock = threading.Lock()
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        root.chmod(0o700)
+        if root.stat().st_uid == os.geteuid():
+            root.chmod(0o700)
+        elif not os.access(root, os.W_OK | os.X_OK):
+            raise PermissionError(f"audio diagnostic directory is not writable: {root}")
         for stale in root.glob(".active-*"):
             shutil.rmtree(stale, ignore_errors=True)
 

@@ -28,6 +28,13 @@ spec:
           env:
             - { name: ENABLE_LOGS_ALL, value: "false" }
             - { name: GF_AUTH_ANONYMOUS_ENABLED, value: "false" }
+            - { name: GF_AUTH_PROXY_ENABLED, value: "true" }
+            - { name: GF_AUTH_PROXY_AUTO_SIGN_UP, value: "true" }
+            - { name: GF_AUTH_PROXY_HEADER_NAME, value: Tailscale-User-Login }
+            - { name: GF_AUTH_PROXY_HEADER_PROPERTY, value: username }
+            - { name: GF_AUTH_PROXY_SYNC_TTL, value: "0" }
+            # Grafana sees the ingress Pod IP; the NetworkPolicy restricts port 3000 to that Pod and Grafana MCP.
+            - { name: GF_AUTH_PROXY_WHITELIST, value: 10.42.0.0/16 }
             - { name: GF_ANALYTICS_REPORTING_ENABLED, value: "false" }
             - { name: GF_SECURITY_ADMIN_USER, value: admin }
             - { name: GF_SECURITY_ADMIN_PASSWORD, valueFrom: { secretKeyRef: { name: grafana-admin, key: password } } }

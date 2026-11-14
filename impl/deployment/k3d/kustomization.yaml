@@ -4,6 +4,7 @@ resources:
   - grain.yaml
   - app-plane.yaml
   - telemetry.yaml
+  - grafana-network-policy.yaml
   - grafana-mcp.yaml
   - mlflow.yaml
   - node-metrics.yaml

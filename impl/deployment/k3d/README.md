@@ -82,6 +82,20 @@ authenticated Tailscale login is configured as the owner, so no email entry is
 needed. If the state PVC is deleted, the helper falls back to browser-based
 device approval.
 
+Grafana is available at `/metrics/` on that same private URL. Traefik checks
+the owner login, then Grafana's auth proxy accepts the Tailscale identity, so
+the owner does not need a second Grafana login. The Grafana HTTP port is limited
+to the voice ingress and Grafana MCP Pods by a NetworkPolicy; direct maintenance
+access still uses the generated Grafana admin password.
+
+If the page opens but voice remains connecting, check the tailnet policy for
+the owner device and voice node. A grant limited to `tcp:443` allows the page
+and signaling but blocks the direct WebRTC media path. The same scoped grant
+also needs `udp:*` for the Edge's dynamic ICE port. See the
+[Tailscale grants syntax](https://tailscale.com/docs/reference/syntax/grants).
+The older pinned v1 policy example grants only `tcp:443` and is insufficient
+for this direct media deployment.
+
 The older `semaphore.sh` and `grain.sh` scripts remain for focused operations;
 they still use host `kubectl`/Helm as documented below. Use `bootstrap.sh` for
 the Docker+k3d-only entry path.

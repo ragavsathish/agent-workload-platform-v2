@@ -1,0 +1,96 @@
+---
+- name: Manage the isolated v2 host voice sidecar
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  any_errors_fatal: true
+  vars:
+    awp_sidecar_action: "{{ awp_voice_sidecar_action | default('status') }}"
+    awp_sidecar_root: "{{ ansible_facts.user_dir }}/Library/Application Support/AWPv2/k3d/voice-sidecar"
+    awp_sidecar_env: "{{ awp_sidecar_root }}/voice-sidecar.env"
+    awp_sidecar_state: "{{ awp_sidecar_root }}/state"
+    awp_sidecar_python: /opt/homebrew/bin/python3.14
+  tasks:
+    - name: Validate the isolated Semaphore sidecar inputs
+      ansible.builtin.assert:
+        that:
+          - awp_sidecar_action in ['preflight', 'start', 'check-ready', 'stop', 'status']
+          - awp_runtime_root is match('^.*/Library/Application Support/AWPv2/k3d/semaphore/source-[a-f0-9]{64}-full$')
+          - awp_stack_sha256 is match('^[a-f0-9]{64}$')
+          - awp_sidecar_state.endswith('/voice-sidecar/state')
+          - awp_sidecar_env.endswith('/voice-sidecar/voice-sidecar.env')
+        quiet: true
+
+    - name: Ensure the sidecar configuration directory is private for a fresh start
+      ansible.builtin.file:
+        path: "{{ awp_sidecar_root }}"
+        state: directory
+        mode: '0700'
+      when: awp_sidecar_action == 'start'
+
+    - name: Install only the non-secret sidecar environment overlay
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/voice-sidecar.env.example"
+        dest: "{{ awp_sidecar_env }}"
+        mode: '0600'
+      when: awp_sidecar_action == 'start'
+
+    - name: Inspect the existing sidecar overlay for read-only actions
+      ansible.builtin.stat:
+        path: "{{ awp_sidecar_env }}"
+      register: awp_sidecar_overlay_stat
+      when: awp_sidecar_action != 'start'
+
+    - name: Require an existing private sidecar overlay for read-only or stop actions
+      ansible.builtin.assert:
+        that:
+          - awp_sidecar_overlay_stat.stat.exists
+          - awp_sidecar_overlay_stat.stat.mode == '0600'
+        quiet: true
+      when: awp_sidecar_action != 'start'
+
+    - name: Preflight authenticated legacy health before starting the sidecar
+      ansible.builtin.command:
+        argv:
+          - "{{ awp_sidecar_python }}"
+          - "{{ playbook_dir }}/host_voice_sidecar.py"
+          - preflight
+          - --runtime-root
+          - "{{ awp_runtime_root }}"
+          - --stack-sha256
+          - "{{ awp_stack_sha256 }}"
+          - --env
+          - "{{ awp_sidecar_env }}"
+          - --state
+          - "{{ awp_sidecar_state }}"
+      register: awp_sidecar_preflight
+      changed_when: false
+      when: awp_sidecar_action == 'start'
+
+    - name: Run the requested isolated sidecar operation
+      ansible.builtin.command:
+        argv:
+          - "{{ awp_sidecar_python }}"
+          - "{{ playbook_dir }}/host_voice_sidecar.py"
+          - "{{ awp_sidecar_action }}"
+          - --runtime-root
+          - "{{ awp_runtime_root }}"
+          - --stack-sha256
+          - "{{ awp_stack_sha256 }}"
+          - --env
+          - "{{ awp_sidecar_env }}"
+          - --state
+          - "{{ awp_sidecar_state }}"
+      register: awp_sidecar_result
+      changed_when: awp_sidecar_action in ['start', 'stop']
+      when: awp_sidecar_action != 'preflight'
+
+    - name: Publish the helper's allowlisted status record
+      ansible.builtin.debug:
+        msg: "{{ awp_sidecar_result.stdout | from_json }}"
+      when: awp_sidecar_action != 'preflight'
+
+    - name: Publish preflight status without environment values
+      ansible.builtin.debug:
+        msg: "{{ awp_sidecar_preflight.stdout | from_json }}"
+      when: awp_sidecar_action == 'start'

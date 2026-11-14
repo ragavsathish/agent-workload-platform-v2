@@ -173,6 +173,7 @@ class ServiceSpec:
     ready_url: str | None = None
     ready_headers: dict[str, str] | None = None
     ready_method: str = "GET"
+    ready_statuses: tuple[int, ...] = (200,)
 
 
 class ServiceSupervisor:
@@ -192,6 +193,7 @@ class ServiceSupervisor:
                 self.wait_ready(spec)
 
     def wait_ready(self, spec: ServiceSpec, timeout: float = 180.0) -> None:
+        import urllib.error
         import urllib.request
         end = time.monotonic() + timeout
         while time.monotonic() < end:
@@ -203,8 +205,12 @@ class ServiceSupervisor:
                 headers=spec.ready_headers or {}, method=spec.ready_method)
             try:
                 with urllib.request.urlopen(request, timeout=3) as response:
-                    if response.status == 200:
+                    if response.status in spec.ready_statuses:
                         return
+            except urllib.error.HTTPError as exc:
+                if exc.code in spec.ready_statuses:
+                    return
+                time.sleep(0.5)
             except Exception:
                 time.sleep(0.5)
         raise RuntimeError(f"{spec.name} did not become ready")

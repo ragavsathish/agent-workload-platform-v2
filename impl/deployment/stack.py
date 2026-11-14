@@ -58,6 +58,60 @@ def execution_mode_for_level(level: str) -> str:
 
 
 def native_specs(env: dict[str, str]) -> tuple[ServiceSpec, ...]:
+    if env.get("AWP_NATIVE_PROFILE") == "voice-sidecar":
+        require(env, "AWP_GRAIN_SESSION_TOKEN", "AWP_OWNER_IDENTITY",
+                "INFERENCE_BROKER_TOKEN", "GITEA_OWNER", "GITEA_TOKEN",
+                "GRAFANA_MCP_SERVER_TOKEN", "GONDOLIN_BROWSER_ASSETS",
+                "ARTIFACT_ENDPOINT_URL", "ARTIFACT_BUCKET", "ARTIFACT_ACCESS_KEY",
+                "ARTIFACT_SECRET_KEY", "WASSETTE_BIN", "WASSETTE_COMPONENT_DIR",
+                "WASSETTE_ENV_FILE")
+        kubectl = env.get("AWP_KUBECTL_BIN", "kubectl")
+        context = "k3d-awp-v2-ops"
+        namespace = "awp-v2"
+
+        def forward(name: str, target: str, local: str, remote: int,
+                    ready: str | None, ready_statuses: tuple[int, ...] = (200,)) -> ServiceSpec:
+            return ServiceSpec(
+                name,
+                (kubectl, "--context", context, "-n", namespace, "port-forward",
+                 "--address", "127.0.0.1", target, f"{local}:{remote}"),
+                IMPL,
+                ready,
+                ready_statuses=ready_statuses,
+            )
+
+        port = lambda key, default: env.get(key, default)
+        forwards = (
+            forward("grain-forward", "service/grain", port("AWP_GRAIN_FORWARD_PORT", "19447"),
+                    9447, f"http://127.0.0.1:{port('AWP_GRAIN_FORWARD_PORT', '19447')}/health"),
+            forward("gitea-forward", "service/gitea", port("AWP_GITEA_FORWARD_PORT", "13001"),
+                    3000, f"http://127.0.0.1:{port('AWP_GITEA_FORWARD_PORT', '13001')}/api/healthz"),
+            forward("s3mock-forward", "service/s3mock", port("AWP_S3MOCK_FORWARD_PORT", "19090"),
+                    9090, f"http://127.0.0.1:{port('AWP_S3MOCK_FORWARD_PORT', '19090')}/"),
+            forward("oxigraph-forward", "service/oxigraph", port("AWP_OXIGRAPH_FORWARD_PORT", "17878"),
+                    7878, f"http://127.0.0.1:{port('AWP_OXIGRAPH_FORWARD_PORT', '17878')}/"),
+            forward("prometheus-forward", "service/otel-lgtm", port("AWP_PROMETHEUS_FORWARD_PORT", "19091"),
+                    9090, f"http://127.0.0.1:{port('AWP_PROMETHEUS_FORWARD_PORT', '19091')}/-/ready"),
+            forward("otel-forward", "service/otel-lgtm", port("AWP_OTEL_FORWARD_PORT", "14318"),
+                    4318, f"http://127.0.0.1:{port('AWP_PROMETHEUS_FORWARD_PORT', '19091')}/-/ready"),
+            forward("grafana-mcp-forward", "service/grafana-mcp", port("AWP_GRAFANA_MCP_FORWARD_PORT", "18000"),
+                    8000, None),
+            forward("grafana-mcp-health-forward", "deployment/grafana-mcp",
+                    port("AWP_GRAFANA_MCP_HEALTH_FORWARD_PORT", "18080"), 8080,
+                    f"http://127.0.0.1:{port('AWP_GRAFANA_MCP_HEALTH_FORWARD_PORT', '18080')}/healthz"),
+        )
+        pi_port = port("PI_VOICE_SERVICE_PORT", "9546")
+        broker_port = port("INFERENCE_BROKER_PORT", "9543")
+        pi = ServiceSpec("pi", ("node", str(PI / "dist/voice-agent-service.js")), RUNTIME,
+                         f"http://127.0.0.1:{pi_port}/health",
+                         {"Authorization": f"Bearer {env['INFERENCE_BROKER_TOKEN']}",
+                          "X-AWP-Owner": env["AWP_OWNER_IDENTITY"]})
+        broker = ServiceSpec("broker", (str(BROKER / ".venv/bin/python"), "-m",
+                                         "voice_agent.speech.presentation.http"), BROKER,
+                             f"http://127.0.0.1:{broker_port}/health",
+                             {"Authorization": f"Bearer {env['INFERENCE_BROKER_TOKEN']}"})
+        return forwards + (pi, broker)
+
     level = env.get("AWP_DEPLOYMENT_LEVEL", "full")
     if level not in {"voice", "durable", "full"}:
         raise ValueError("AWP_DEPLOYMENT_LEVEL must be voice, durable, or full")
@@ -113,6 +167,22 @@ def service_environment(env_file: Path, state: Path) -> dict[str, str]:
     telemetry = RUNTIME / "products/voice-agent/packages/telemetry/src"
     environment["PYTHONPATH"] = os.pathsep.join([str(BROKER / "src"), str(telemetry),
         environment.get("PYTHONPATH", "")])
+    if environment.get("AWP_NATIVE_PROFILE") == "voice-sidecar":
+        endpoints = {
+            "AWP_GRAIN_SESSION_URL": ("AWP_GRAIN_FORWARD_PORT", "19447"),
+            "GITEA_ENDPOINT_URL": ("AWP_GITEA_FORWARD_PORT", "13001"),
+            "ARTIFACT_ENDPOINT_URL": ("AWP_S3MOCK_FORWARD_PORT", "19090"),
+            "OXIGRAPH_URL": ("AWP_OXIGRAPH_FORWARD_PORT", "17878"),
+            "PROMETHEUS_ENDPOINT_URL": ("AWP_PROMETHEUS_FORWARD_PORT", "19091"),
+            "GRAFANA_MCP_URL": ("AWP_GRAFANA_MCP_FORWARD_PORT", "18000"),
+            "OTEL_EXPORTER_OTLP_ENDPOINT": ("AWP_OTEL_FORWARD_PORT", "14318"),
+        }
+        for name, (port_name, default_port) in endpoints.items():
+            environment[name] = f"http://127.0.0.1:{environment.get(port_name, default_port)}"
+        environment["PI_VOICE_SERVICE_HOST"] = "127.0.0.1"
+        environment["PI_VOICE_SERVICE_PORT"] = environment.get("PI_VOICE_SERVICE_PORT", "9546")
+        environment["PI_VOICE_SERVICE_URL"] = f"http://127.0.0.1:{environment['PI_VOICE_SERVICE_PORT']}"
+        environment["INFERENCE_BROKER_PORT"] = environment.get("INFERENCE_BROKER_PORT", "9543")
     return environment
 
 
@@ -253,14 +323,15 @@ def start_stack(state: Path, env_file: Path, timeout: float = 180.0) -> dict[str
     log_path = state / "supervisor.log"
     command = [sys.executable, "-u", str(Path(__file__).resolve()), "run",
                "--env", str(env_file), "--state", str(state)]
+    runtime_env = service_environment(env_file, state)
+    expected_names = {spec.name for spec in native_specs(runtime_env)}
     with log_path.open("ab", buffering=0) as log:
-        process = subprocess.Popen(command, cwd=IMPL, stdin=subprocess.DEVNULL,
+        process = subprocess.Popen(command, cwd=IMPL, env=runtime_env, stdin=subprocess.DEVNULL,
                                    stdout=log, stderr=subprocess.STDOUT,
                                    start_new_session=True, close_fds=True)
     (state / "supervisor.json").write_text(json.dumps({"pid": process.pid,
                                                        "command": command}) + "\n")
     (state / "supervisor.json").chmod(0o600)
-    expected_names = {spec.name for spec in native_specs(service_environment(env_file, state))}
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         code = process.poll()
@@ -317,10 +388,11 @@ def main() -> None:
         import urllib.request
         values = load_env(args.env.resolve()) if args.env else {}
         services = service_status(state)
-        result = {"requested_level": values.get("AWP_DEPLOYMENT_LEVEL", "full"),
+        result = {"requested_level": values.get("AWP_NATIVE_PROFILE",
+                                                   values.get("AWP_DEPLOYMENT_LEVEL", "full")),
                   "active_services": services,
                   "readiness": "ready" if services and all(item["running"] for item in services.values()) else "not_ready"}
-        if args.env:
+        if args.env and values.get("AWP_NATIVE_PROFILE") != "voice-sidecar":
             request = urllib.request.Request(
                 f"http://127.0.0.1:{values.get('AWP_GRAIN_SESSION_PORT', '9447')}/internal/deployment/status",
                 data=b"{}", method="POST",
@@ -337,6 +409,43 @@ def main() -> None:
     if args.command == "check-ready":
         import urllib.request
         values = load_env(args.env.resolve()) if args.env else {}
+        if values.get("AWP_NATIVE_PROFILE") == "voice-sidecar":
+            environment = service_environment(args.env.resolve(), state)
+            token = environment.get("INFERENCE_BROKER_TOKEN", "")
+            owner = environment.get("AWP_OWNER_IDENTITY", "")
+            checks = {
+                "grain-forward": (environment["AWP_GRAIN_SESSION_URL"].rstrip("/") + "/health", {}),
+                "gitea-forward": (environment["GITEA_ENDPOINT_URL"].rstrip("/") + "/api/healthz", {}),
+                "s3mock-forward": (environment["ARTIFACT_ENDPOINT_URL"].rstrip("/") + "/", {}),
+                "oxigraph-forward": (environment["OXIGRAPH_URL"].rstrip("/") + "/", {}),
+                "prometheus-forward": (environment["PROMETHEUS_ENDPOINT_URL"].rstrip("/") + "/-/ready", {}),
+                "grafana-mcp-health": (f"http://127.0.0.1:{environment.get('AWP_GRAFANA_MCP_HEALTH_FORWARD_PORT', '18080')}/healthz", {}),
+                "pi": (f"http://127.0.0.1:{environment['PI_VOICE_SERVICE_PORT']}/health",
+                       {"Authorization": f"Bearer {token}", "X-AWP-Owner": owner}),
+                "broker": (f"http://127.0.0.1:{environment['INFERENCE_BROKER_PORT']}/health",
+                           {"Authorization": f"Bearer {token}"}),
+                "broker-task-routing": (f"http://127.0.0.1:{environment['INFERENCE_BROKER_PORT']}/v1/pi/tasks/routing",
+                                        {"Authorization": f"Bearer {token}",
+                                         "X-AWP-Owner": owner}),
+                "broker-latest-turn": (f"http://127.0.0.1:{environment['INFERENCE_BROKER_PORT']}/v1/pi/turn/latest",
+                                       {"Authorization": f"Bearer {token}",
+                                        "X-AWP-Owner": owner}),
+            }
+            result = {}
+            for name, (url, headers) in checks.items():
+                try:
+                    request = urllib.request.Request(url, headers=headers)
+                    with urllib.request.urlopen(request, timeout=5) as response:
+                        result[name] = response.status == 200
+                except Exception:
+                    result[name] = False
+            result["services_running"] = all(
+                item["running"] for item in service_status(state).values()
+            ) and bool(service_status(state))
+            print(json.dumps(result, indent=2))
+            if not all(result.values()):
+                raise SystemExit(1)
+            return
         level = values.get("AWP_DEPLOYMENT_LEVEL", "full")
         if level not in {"voice", "durable", "full"}:
             raise ValueError("AWP_DEPLOYMENT_LEVEL must be voice, durable, or full")

@@ -47,7 +47,7 @@ spec:
             - { name: ARTIFACT_BUCKET, value: agent-artifacts }
             - { name: ARTIFACT_ACCESS_KEY, value: local-test }
             - { name: ARTIFACT_SECRET_KEY, value: local-test }
-            - { name: INFERENCE_BROKER_BASE_URL, value: http://host.docker.internal:9443/v1 }
+            - { name: INFERENCE_BROKER_BASE_URL, value: http://host.docker.internal:9553/v1 }
             - { name: INFERENCE_BROKER_TOKEN_FILE, value: /run/secrets/broker-token }
             - { name: TRACE_RENDER_WORKER_PORT, value: "9460" }
             - { name: TRACE_RENDER_TIMEOUT_MS, value: "600000" }

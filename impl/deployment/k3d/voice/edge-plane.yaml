@@ -38,7 +38,7 @@ spec:
               containerPort: 7860
           env:
             - name: INFERENCE_BROKER_BASE_URL
-              value: http://host.docker.internal:9443/v1
+              value: http://host.docker.internal:9553/v1
             - name: INFERENCE_BROKER_TOKEN
               valueFrom:
                 secretKeyRef:

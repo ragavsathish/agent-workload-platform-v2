@@ -1,0 +1,4 @@
+---
+- import_playbook: host_voice_sidecar.yml
+  vars:
+    awp_voice_sidecar_action: check-ready

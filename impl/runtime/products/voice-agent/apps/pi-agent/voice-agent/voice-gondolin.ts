@@ -104,6 +104,7 @@ export function createVoiceGondolinConfig(options: VoiceGondolinOptions): Gondol
       [
         "/usr/local/bin/tea", "login", "add", "--name", "local", "--url",
         routes[1].guest.origin, "--token", options.giteaToken, "--no-version-check",
+        "--git-credentials",
       ],
       [
         "/usr/bin/git", "clone", "--depth", "1", "--single-branch", "--branch", "main",

@@ -1,5 +1,6 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+namespace: awp-v2
 resources:
   - grain.yaml
   - app-plane.yaml
@@ -8,3 +9,11 @@ resources:
   - grafana-mcp.yaml
   - mlflow.yaml
   - node-metrics.yaml
+configMapGenerator:
+  - name: grafana-dashboard-provider
+    files:
+      - dashboards.yml=dashboards/dashboards.yml
+  - name: grafana-product-dashboards
+    files:
+      - pipecat-overview.json=dashboards/pipecat-overview.json
+      - k3d-overview.json=dashboards/k3d-overview.json

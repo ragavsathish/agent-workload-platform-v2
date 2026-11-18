@@ -57,6 +57,13 @@ spec:
               mountPath: /otel-lgtm/prometheus.yaml
               subPath: prometheus.yaml
               readOnly: true
+            - name: grafana-dashboard-provider
+              mountPath: /otel-lgtm/grafana/conf/provisioning/dashboards/awp-v2.yml
+              subPath: dashboards.yml
+              readOnly: true
+            - name: grafana-product-dashboards
+              mountPath: /otel-lgtm/grafana/conf/provisioning/dashboards/awp-v2
+              readOnly: true
           startupProbe: { httpGet: { path: /api/health, port: grafana }, periodSeconds: 10, timeoutSeconds: 10, failureThreshold: 60 }
           readinessProbe: { httpGet: { path: /api/health, port: grafana }, periodSeconds: 10, timeoutSeconds: 10, failureThreshold: 5 }
           livenessProbe: { httpGet: { path: /api/health, port: grafana }, periodSeconds: 20, timeoutSeconds: 10, failureThreshold: 5 }
@@ -67,6 +74,12 @@ spec:
         - name: prometheus-scrape-config
           configMap:
             name: otel-lgtm-prometheus-scrape
+        - name: grafana-dashboard-provider
+          configMap:
+            name: grafana-dashboard-provider
+        - name: grafana-product-dashboards
+          configMap:
+            name: grafana-product-dashboards
   volumeClaimTemplates:
     - metadata: { name: data }
       spec: { accessModes: [ReadWriteOnce], storageClassName: local-path, resources: { requests: { storage: 10Gi } } }

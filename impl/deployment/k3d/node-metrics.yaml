@@ -86,6 +86,9 @@ data:
             labels:
               system: k3d-node
               layer: node
+      - job_name: awp-v2-storage
+        static_configs:
+          - targets: ["storage-metrics.awp-v2.svc.cluster.local:9464"]
 ---
 apiVersion: v1
 kind: Service

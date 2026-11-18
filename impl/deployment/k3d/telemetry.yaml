@@ -36,6 +36,7 @@ spec:
             # Grafana sees the ingress Pod IP; the NetworkPolicy restricts port 3000 to that Pod and Grafana MCP.
             - { name: GF_AUTH_PROXY_WHITELIST, value: 10.42.0.0/16 }
             - { name: GF_ANALYTICS_REPORTING_ENABLED, value: "false" }
+            - { name: GF_PLUGINS_PREINSTALL, value: "neildengg-grafmaid-panel@1.0.6" }
             - { name: GF_SECURITY_ADMIN_USER, value: admin }
             - { name: GF_SECURITY_ADMIN_PASSWORD, valueFrom: { secretKeyRef: { name: grafana-admin, key: password } } }
             - { name: GF_SERVER_HTTP_ADDR, value: 0.0.0.0 }

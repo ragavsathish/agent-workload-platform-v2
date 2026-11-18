@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: Service
+metadata: { name: storage-metrics, namespace: awp-v2 }
+spec:
+  type: ClusterIP
+  selector: { app: storage-metrics }
+  ports:
+    - { name: prometheus, port: 9464, targetPort: 9464 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: storage-metrics, namespace: awp-v2 }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: storage-metrics } }
+  template:
+    metadata: { labels: { app: storage-metrics } }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: storage-metrics
+          image: awp-v2-gateway:slice46
+          imagePullPolicy: Never
+          command: [python, /app/storage_exporter.py]
+          ports:
+            - { name: prometheus, containerPort: 9464 }
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 256Mi }
+          securityContext:
+            runAsUser: 0
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL], add: [DAC_READ_SEARCH] }
+          volumeMounts:
+            - { name: script, mountPath: /app/storage_exporter.py, subPath: storage_exporter.py, readOnly: true }
+            - { name: storage, mountPath: /storage, readOnly: true }
+      volumes:
+        - name: script
+          configMap: { name: storage-metrics-script }
+        - name: storage
+          hostPath: { path: /var/lib/rancher/k3s/storage, type: Directory }

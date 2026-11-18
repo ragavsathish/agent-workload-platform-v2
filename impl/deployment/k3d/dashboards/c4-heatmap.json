@@ -1,0 +1,159 @@
+{
+  "uid": "voice-c4-heatmap",
+  "title": "C4 Operational Heat Map",
+  "description": "V2 C4 context, container, and deployment views with live telemetry scrape status.",
+  "tags": [
+    "awp-v2",
+    "c4",
+    "architecture",
+    "observability"
+  ],
+  "schemaVersion": 41,
+  "version": 1,
+  "editable": false,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Scope and evidence",
+      "type": "text",
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "AWP v2 architecture in k3d. The live colors below indicate only Prometheus scrape availability (0 = down, 1 = up); the C4 views are structural and do not claim service readiness. Voice and host services may be gated or absent. Source: v2 deployment manifests and architecture views."
+      }
+    },
+    {
+      "id": 2,
+      "title": "Live telemetry sources",
+      "type": "neildengg-grafmaid-panel",
+      "pluginVersion": "1.0.6",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#ff778a",
+                "value": null
+              },
+              {
+                "color": "#56e39f",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "content": "flowchart LR\n    NODE[\"K3d node metrics<br/>up: ${__data.A:display}\"]\n    STORAGE[\"Storage metrics<br/>up: ${__data.B:display}\"]\n    PROM[\"Prometheus<br/>up: ${__data.C:display}\"]\n    NODE -->|scraped by| PROM\n    STORAGE -->|scraped by| PROM\n    style NODE fill:${__data.A:color},color:#07130d\n    style STORAGE fill:${__data.B:color},color:#07130d\n    style PROM fill:${__data.C:color},color:#07130d\n",
+        "escapeSpecialChars": true,
+        "maxDataRows": 100
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "up{job=\"fluent-bit-k3d-node\"}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "up{job=\"awp-v2-storage\"}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "up{job=\"prometheus\"}",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "C1 \u00b7 System context",
+      "type": "neildengg-grafmaid-panel",
+      "pluginVersion": "1.0.6",
+      "gridPos": {
+        "h": 13,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "options": {
+        "content": "flowchart TB\n    OWNER([\"Person<br/><b>Owner</b><br/>talks, reviews, delegates work\"])\n    OPERATOR([\"Person<br/><b>Operator</b><br/>deploys and inspects local services\"])\n    AWP[\"Software system<br/><b>Agent Workload Platform v2</b><br/>private voice, durable tasks, owner knowledge\"]\n    TAILSCALE[\"External system<br/><b>Tailscale control plane</b><br/>device and private network identity\"]\n    MODELS[\"External system<br/><b>Remote model providers</b><br/>Pi completions\"]\n    INTEGRATIONS[\"External systems<br/><b>Optional integrations</b><br/>permission-scoped APIs\"]\n\n    OWNER -->|\"uses private HTTPS, WebRTC, and owner APIs\"| AWP\n    OPERATOR -->|\"deploys and checks local workloads\"| AWP\n    AWP -->|\"obtains tailnet identity and network configuration\"| TAILSCALE\n    AWP -->|\"requests Pi model completions\"| MODELS\n    AWP -->|\"invokes configured capabilities\"| INTEGRATIONS\n\n    classDef person fill:#084c8d,color:#fff,stroke:#05345f,stroke-width:2px;\n    classDef system fill:#e0f2fe,color:#0c4a6e,stroke:#0284c7,stroke-width:2px;\n    classDef external fill:#6b7280,color:#fff,stroke:#374151,stroke-width:2px;\n    class OWNER,OPERATOR person;\n    class AWP system;\n    class TAILSCALE,MODELS,INTEGRATIONS external;\n",
+        "escapeSpecialChars": true,
+        "maxDataRows": 100
+      },
+      "targets": []
+    },
+    {
+      "id": 4,
+      "title": "C2 \u00b7 Containers",
+      "type": "neildengg-grafmaid-panel",
+      "pluginVersion": "1.0.6",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 27
+      },
+      "options": {
+        "content": "flowchart LR\n    OWNER([\"Person<br/>Owner\"])\n    PROVIDER[\"External system<br/>Model providers\"]\n    subgraph AWP[\"AWP v2 \u00b7 software system\"]\n        CLIENT[\"Container<br/>Owner client\"]\n        INGRESS[\"Container<br/>Private ingress\"]\n        EDGE[\"Container<br/>Voice Edge\"]\n        GATEWAY[\"Container<br/>Agent Gateway\"]\n        GRAIN[\"Container<br/>Grain application\"]\n        STATE[(\"Data store<br/>Grain durable state\")]\n        OTEL[\"Container<br/>OTEL LGTM\"]\n        GMCP[\"Container<br/>Grafana MCP\"]\n        BROKER[\"Container<br/>Inference Broker\"]\n        PI[\"Container<br/>Pi voice service\"]\n    end\n    OWNER -->|uses| CLIENT\n    CLIENT -->|private HTTPS| INGRESS\n    INGRESS -->|owner HTTP| EDGE\n    EDGE -->|task and knowledge HTTP| GATEWAY\n    GATEWAY -->|commands and queries| GRAIN\n    GRAIN -->|persists| STATE\n    EDGE -->|STT and turns| BROKER\n    BROKER -->|turns| PI\n    PI -->|completions| PROVIDER\n    EDGE -.->|telemetry| OTEL\n    EDGE -->|read-only tools| GMCP\n    GMCP -->|queries| OTEL\n",
+        "escapeSpecialChars": true,
+        "maxDataRows": 100
+      },
+      "targets": []
+    },
+    {
+      "id": 5,
+      "title": "Deployment \u00b7 Security boundaries",
+      "type": "neildengg-grafmaid-panel",
+      "pluginVersion": "1.0.6",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "options": {
+        "content": "flowchart LR\n    OWNER([\"Person<br/>Owner on tailnet\"])\n    OPERATOR([\"Person<br/>Local operator\"])\n    GITHUB[\"External system<br/>GitHub main\"]\n    subgraph MAC[\"Apple Silicon Mac\"]\n        subgraph K3D[\"k3d cluster\"]\n            INGRESS[\"Private ingress<br/>Tailscale + Traefik\"]\n            EDGE[\"Voice Edge pod<br/>Pipecat + FastAPI\"]\n            GATEWAY[\"Agent Gateway<br/>owner API\"]\n            GRAIN[\"Grain + PVC<br/>durable state\"]\n            OTEL[\"OTEL LGTM<br/>metrics + Grafana\"]\n            FLUX[\"Flux<br/>reconciles manifests\"]\n        end\n        subgraph HOST[\"macOS native services\"]\n            BROKER[\"Inference Broker<br/>MLX STT/TTS\"]\n            PI[\"Pi voice service<br/>conversation branch\"]\n        end\n    end\n    OWNER -->|private HTTPS| INGRESS\n    INGRESS -->|verified owner HTTP| EDGE\n    EDGE -->|owner API| GATEWAY\n    GATEWAY -->|commands and queries| GRAIN\n    EDGE -->|authenticated host bridge| BROKER\n    BROKER -->|turns| PI\n    EDGE -.->|OTLP| OTEL\n    OPERATOR -->|operates| FLUX\n    GITHUB -->|source| FLUX\n",
+        "escapeSpecialChars": true,
+        "maxDataRows": 100
+      },
+      "targets": []
+    }
+  ]
+}

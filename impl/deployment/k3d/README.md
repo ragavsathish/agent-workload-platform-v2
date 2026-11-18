@@ -88,12 +88,14 @@ the owner does not need a second Grafana login. The Grafana HTTP port is limited
 to the voice ingress and Grafana MCP Pods by a NetworkPolicy; direct maintenance
 access still uses the generated Grafana admin password.
 
-The `AWP v2` folder contains **Voice Product Health** and **K3d Platform
-Overview**. The voice dashboard uses the v1 panel definitions; its charts fill
-when the v2 voice services emit `pipecat_operation_*` metrics. The k3d dashboard
-uses node metrics scraped by `fluent-bit-node-metrics`. The v1 host storage and
-C4 heat-map dashboards are not provisioned because they depend on v1-only host
-metrics and architecture content.
+The `AWP v2` folder contains **Voice Product Health**, **K3d Platform
+Overview**, **Storage Capacity**, and **C4 Operational Heat Map**. The voice
+dashboard uses the v1 panel definitions; its charts fill when the v2 voice
+services emit `pipecat_operation_*` metrics. The k3d dashboard uses node metrics
+scraped by `fluent-bit-node-metrics`. Storage Capacity measures actual bytes in
+the k3d local-path directories; it omits host free capacity because the macOS
+bind mount reports an invalid filesystem size inside k3d. The C4 dashboard
+shows the v2 architecture and colors only live telemetry scrape status.
 
 If the page opens but voice remains connecting, check the tailnet policy for
 the owner device and voice node. A grant limited to `tcp:443` allows the page

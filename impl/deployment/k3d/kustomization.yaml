@@ -9,6 +9,7 @@ resources:
   - grafana-mcp.yaml
   - mlflow.yaml
   - node-metrics.yaml
+  - storage-metrics.yaml
 configMapGenerator:
   - name: grafana-dashboard-provider
     files:
@@ -17,3 +18,8 @@ configMapGenerator:
     files:
       - pipecat-overview.json=dashboards/pipecat-overview.json
       - k3d-overview.json=dashboards/k3d-overview.json
+      - storage-capacity.json=dashboards/storage-capacity.json
+      - c4-heatmap.json=dashboards/c4-heatmap.json
+  - name: storage-metrics-script
+    files:
+      - storage_exporter.py
